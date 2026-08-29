@@ -1,0 +1,42 @@
+diff --git a/cmake/QskFindMacros.cmake b/cmake/QskFindMacros.cmake
+index 4b5e2149..7e8d71c7 100644
+--- a/cmake/QskFindMacros.cmake
++++ b/cmake/QskFindMacros.cmake
+@@ -10,6 +10,9 @@ macro(qsk_setup_Qt)
+     # relying on cmake heuristics to select a specific Qt version is no good idea.
+     # using -DCMAKE_PREFIX_PATH="..." is highly recommended
+     find_package(QT "5.15" NAMES Qt6 Qt5 REQUIRED COMPONENTS Quick)
++
++    # find_package(QT NAMES ...) may not create imported targets in cross-compilation.
++    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Quick)
+ 
+     if(QT_VERSION_MAJOR VERSION_GREATER_EQUAL 6)
+ 
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index d8a03ed4..a7fd0fa6 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -528,11 +528,18 @@ target_include_directories(${target}
+     INTERFACE
+         $<INSTALL_INTERFACE:${QSK_INSTALL_HEADERS}>)
+ 
+-target_link_libraries(${target}
+-    PUBLIC Qt::Core Qt::CorePrivate Qt::Quick Qt::QuickPrivate)
+-
+-if (QT_VERSION_MAJOR VERSION_GREATER 5)
+-    target_link_libraries(${target} PUBLIC Qt::OpenGL Qt::OpenGLPrivate)
++if(QT_VERSION_MAJOR EQUAL 6)
++    target_link_libraries(${target}
++        PUBLIC Qt6::Core Qt6::CorePrivate Qt6::Quick Qt6::QuickPrivate)
++    if (QT_VERSION_MAJOR VERSION_GREATER 5)
++        target_link_libraries(${target} PUBLIC Qt6::OpenGL Qt6::OpenGLPrivate)
++    endif()
++else()
++    target_link_libraries(${target}
++        PUBLIC Qt::Core Qt::CorePrivate Qt::Quick Qt::QuickPrivate)
++    if (QT_VERSION_MAJOR VERSION_GREATER 5)
++        target_link_libraries(${target} PUBLIC Qt::OpenGL Qt::OpenGLPrivate)
++    endif()
+ endif()
+ 
+ if(ENABLE_HUNSPELL)
