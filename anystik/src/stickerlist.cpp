@@ -7,6 +7,8 @@
 #include <QtMath>
 #include <QskEvent.h>
 #include <private/qquicktaphandler_p.h>
+#include <private/qquicksinglepointhandler_p.h>
+#include <functional>
 
 static constexpr qreal TILE_SIZE = 76;
 static constexpr qreal TILE_GAP  = 10;
@@ -122,6 +124,33 @@ QSGNode* StickerTileItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// RightClickHandler — 桌面右键上下文菜单专用（Android 无右键事件，天然不触发）
+// ═══════════════════════════════════════════════════════════════════
+
+class RightClickHandler final : public QQuickSinglePointHandler
+{
+public:
+    explicit RightClickHandler(QQuickItem* target)
+        : QQuickSinglePointHandler(target)
+    {
+        setAcceptedButtons(Qt::RightButton);   // 只接收右键，与左键 tap/长按路径互斥
+    }
+
+    std::function<void(const QPointF&)> onRightPress;  // 免 Q_OBJECT/moc，回调到网格
+
+protected:
+    void handleEventPoint(QPointerEvent* event, QEventPoint& point) override
+    {
+        const auto* single = dynamic_cast<const QSinglePointEvent*>(event);
+        if (event->type() == QEvent::MouseButtonPress
+                && single && single->button() == Qt::RightButton
+                && onRightPress) {
+            onRightPress(point.scenePosition());
+        }
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════
 // StickerGridWidget — 虚拟网格
 // ═══════════════════════════════════════════════════════════════════
 
@@ -155,6 +184,17 @@ StickerGridWidget::StickerGridWidget(QQuickItem* parent)
                 Q_EMIT stickerLongPressed(m_items[idx], scenePos);
             }
         });
+
+    // ── 右键：菜单（桌面；复用长按菜单信号，Android 不触发）──
+    m_contentView->setAcceptedMouseButtons(m_contentView->acceptedMouseButtons()
+                                               | Qt::RightButton);
+    auto* rightHandler = new RightClickHandler(m_contentView);
+    rightHandler->onRightPress = [this](const QPointF& scenePos) {
+        int idx = indexAt(m_contentView->mapFromScene(scenePos));
+        if (idx >= 0 && idx < m_items.size()) {
+            Q_EMIT stickerLongPressed(m_items[idx], scenePos);
+        }
+    };
 
     // ── 双击：预览 ──
     connect(this, &MyScrollArea::doubleTapped, this,

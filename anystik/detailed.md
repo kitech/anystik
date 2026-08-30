@@ -460,7 +460,8 @@ stickerhome (StickerHomePage, CachePolicy::Permanent, LaunchMode::SingleInstance
 
 - `ensureInit()`：首次使用时调用 `Storage::init(AppLocalDataLocation)`（创建 message.db + cache.db + sticker_packs/stickers 表，多线程互斥单次执行）；init 成功后再调 `dropLegacyChatTables()` 清理聊天域 8 表
 - stickers 表含 `description`（描述 ≤140 字，`StickerStore::MaxDescriptionLength` 截断上限，参与搜索）与 `deleted`（软删除标记，全部读写 SQL 过滤 `deleted=0`，删除为 `UPDATE deleted=1`；老库由 `init_sticker_db` 内 PRAGMA table_info 幂等 `ALTER` 补列）
-- 查询：`packs()` / `stickers(packId)` / `recent(limit)` / `search(query)` / `countStickers()`
+- 查询：`packs(installed=1, orderby="created_at DESC", limit=0, offset=0)` / `stickers(packId, orderby="rowid DESC", limit=0, offset=0, deleted=0, emoji=nullptr)` / `recent(limit)` / `search(query)` / `countStickers()`
+- 排序/分页：默认**时间倒序**（新添加在上面）；`orderby` 走白名单（packs：created_at/position/title；stickers：rowid/position/last_used × ASC/DESC，未知回落默认序），`limit>0` 才分页、`offset` 随 limit 生效，杜绝 SQL 注入。贴纸无 created_at 用 `rowid DESC`（rowid 严格递增≈最近导入）——贴纸时间序表现为「最近导入在前」，同 id 重导会置顶；包的 created_at 用 COALESCE 保留原值，包序稳定。- `position` 列保留写路径（新增即队尾）供将来手动排序功能复用
 - 写操作：`importDirectory()`（子目录=分组，递归扫描 png/jpg/gif/webp/bmp/svg，事务+幂等ID）、`pasteFromClipboard()`（读系统剪贴板位图→PNG 落盘 `dataDir/pastes/`→归入「粘贴板」分组）、`renamePack()`（SQL 直改标题）、`deletePack()`（外键级联删贴纸）、`deleteSticker()`、`touchSticker()`
 - 剪贴板：桌面 `QClipboard::setImage`；Android JNI `ClipboardManager.setPrimaryClip` + Toast
 - `dataChanged()` 信号 → 首页刷新 Tab 与网格
@@ -527,7 +528,7 @@ StickerStore::ensureInit()
 ### 搜索
 ```
 文本防抖 350ms → StickerStore::search(keyword)
-  → search_stickers("LIKE %keyword%") 匹配 emoji 或分组标题，按最近使用排序
+  → search_stickers("LIKE %keyword%") 匹配 emoji、分组标题或描述，按最近使用排序
 ```
 
 ## 平台差异

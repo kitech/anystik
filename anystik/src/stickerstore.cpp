@@ -83,13 +83,14 @@ StickerDbSyncInterface& stickerDb()
     return *Storage::instance().stickerDb();
 }
 
-QVector<StickerPackBrief> StickerStore::packs()
+QVector<StickerPackBrief> StickerStore::packs(int installed, const char* orderby,
+                                                 int limit, int offset)
 {
     QVector<StickerPackBrief> result;
     if (!ensureInit()) {
         return result;
     }
-    auto rows = stickerDb().list_packs(1);
+    auto rows = stickerDb().list_packs(installed, orderby, limit, offset);
     for (const auto& row : rows) {
         StickerPackBrief b;
         b.id = QString::fromStdString(row.id);
@@ -102,13 +103,17 @@ QVector<StickerPackBrief> StickerStore::packs()
     return result;
 }
 
-QVector<StickerBrief> StickerStore::stickers(const QString& packId)
+QVector<StickerBrief> StickerStore::stickers(const QString& packId,
+                                               const char* orderby,
+                                               int limit, int offset,
+                                               int deleted, const char* emoji)
 {
     QVector<StickerBrief> result;
     if (!ensureInit()) {
         return result;
     }
-    auto rows = stickerDb().list_stickers(packId.toUtf8().constData());
+    auto rows = stickerDb().list_stickers(packId.toUtf8().constData(),
+                                          orderby, limit, offset, deleted, emoji);
     for (const auto& row : rows) {
         StickerBrief b;
         b.id = QString::fromStdString(row.id);

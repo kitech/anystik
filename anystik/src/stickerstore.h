@@ -36,8 +36,13 @@ public:
     bool ensureInit();
 
     // ── 查询（全部走 StickerDbSyncInterface，GUI 线程直接调用）──
-    QVector<StickerPackBrief> packs();
-    QVector<StickerBrief> stickers(const QString& packId);
+    QVector<StickerPackBrief> packs(int installed = 1,
+                                    const char* orderby = "created_at DESC",
+                                    int limit = 0, int offset = 0);
+    QVector<StickerBrief> stickers(const QString& packId,
+                                   const char* orderby = "rowid DESC",
+                                   int limit = 0, int offset = 0,
+                                   int deleted = 0, const char* emoji = nullptr);
     QVector<StickerBrief> recent(int limit = 60);
     QVector<StickerBrief> search(const QString& query);
     int countStickers(const QString& packId);
