@@ -58,7 +58,7 @@ public:
     bool deleteSticker(const QString& stickerId);
     void touchSticker(const QString& stickerId);
 
-    // 复制图片到剪贴板（Desktop: QClipboard 位图；Android: 剪贴板写文件路径 + toast）
+    // 复制图片到剪贴板（Desktop: QClipboard 位图；Android: FileProvider content URI(image/*) + toast）
     bool copyStickerToClipboard(const QString& filePath);
     // 出向分享：Android 经 ShareActivity 拉起系统分享面板（ACTION_SEND + FileProvider）；
     // 非 Android 返回 false（调用方 toast 提示）

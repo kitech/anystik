@@ -157,6 +157,31 @@ public class ShareActivity extends QtActivity {
         }
     }
 
+    // 拷贝到剪贴板：复制贴纸为 image/* content URI（经 FileProvider），
+    // 使支持图片粘贴的应用及本应用 readClipboardImageBytes 均可按 Uri 读字节
+    public static boolean copyImageToClipboard(Context ctx, String path) {
+        if (ctx == null || path == null || path.isEmpty()) return false;
+        try {
+            File file = new File(path);
+            if (!file.isFile()) return false;
+            Uri uri = FileProvider.getUriForFile(ctx,
+                ctx.getPackageName() + ".qtprovider", file);
+            Intent intent = new Intent();
+            intent.setClipData(ClipData.newUri(ctx.getContentResolver(), "sticker", uri));
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            ClipData clip = intent.getClipData();
+            if (clip == null) return false;
+            ClipboardManager cm =
+                (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm == null) return false;
+            cm.setPrimaryClip(clip);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private static String mimeFor(File f) {
         String n = f.getName().toLowerCase();
         if (n.endsWith(".png"))  return "image/png";

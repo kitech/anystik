@@ -21,6 +21,7 @@
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
 #include <QJniEnvironment>
+#include <QFuture>
 #endif
 
 StickerStore* StickerStore::s_instance = nullptr;
@@ -526,26 +527,22 @@ bool StickerStore::copyStickerToClipboard(const QString& filePath)
         return false;
     }
 #ifdef Q_OS_ANDROID
-    showAndroidToast(QStringLiteral("已复制贴纸: %1").arg(filePath));
-    QNativeInterface::QAndroidApplication::runOnAndroidMainThread([filePath]() {
-        QJniObject context = QNativeInterface::QAndroidApplication::context();
-        if (!context.isValid()) return;
-        QJniObject jmsg = QJniObject::fromString(filePath);
-        QJniObject clip = QJniObject::callStaticObjectMethod(
-            "android/content/ClipData", "newPlainText",
-            "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Landroid/content/ClipData;",
-            QJniObject::fromString("sticker").object(), jmsg.object());
-        if (clip.isValid()) {
-            QJniObject manager = context.callObjectMethod(
-                "getSystemService",
-                "(Ljava/lang/String;)Ljava/lang/Object;",
-                QJniObject::fromString("clipboard").object());
-            if (manager.isValid()) {
-                manager.callMethod<void>("setPrimaryClip",
-                    "(Landroid/content/ClipData;)V", clip.object());
-            }
-        }
-    });
+    showAndroidToast(QStringLiteral("已复制到剪贴板"));
+    bool copied = false;
+    auto future = QNativeInterface::QAndroidApplication::runOnAndroidMainThread(
+        [&copied, filePath]() {
+            QJniObject context = QNativeInterface::QAndroidApplication::context();
+            if (!context.isValid()) return;
+            QJniObject jpath = QJniObject::fromString(filePath);
+            copied = QJniObject::callStaticMethod<jboolean>(
+                "io/fedlet/mobutil/ShareActivity", "copyImageToClipboard",
+                "(Landroid/content/Context;Ljava/lang/String;)Z",
+                context.object(), jpath.object());
+        });
+    future.waitForFinished();
+    if (!copied) {
+        qWarning() << "[StickerStore] android copy to clipboard failed:" << filePath;
+    }
 #else
     QImage img(filePath);
     if (img.isNull()) {

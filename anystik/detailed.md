@@ -463,7 +463,7 @@ stickerhome (StickerHomePage, CachePolicy::Permanent, LaunchMode::SingleInstance
 - 查询：`packs(installed=1, orderby="created_at DESC", limit=0, offset=0)` / `stickers(packId, orderby="rowid DESC", limit=0, offset=0, deleted=0, emoji=nullptr)` / `recent(limit)` / `search(query)` / `countStickers()`
 - 排序/分页：默认**时间倒序**（新添加在上面）；`orderby` 走白名单（packs：created_at/position/title；stickers：rowid/position/last_used × ASC/DESC，未知回落默认序），`limit>0` 才分页、`offset` 随 limit 生效，杜绝 SQL 注入。贴纸无 created_at 用 `rowid DESC`（rowid 严格递增≈最近导入）——贴纸时间序表现为「最近导入在前」，同 id 重导会置顶；包的 created_at 用 COALESCE 保留原值，包序稳定。- `position` 列保留写路径（新增即队尾）供将来手动排序功能复用
 - 写操作：`importDirectory()`（子目录=分组，递归扫描 png/jpg/gif/webp/bmp/svg，事务+幂等ID）、`pasteFromClipboard()`（读系统剪贴板位图→PNG 落盘 `dataDir/pastes/`→归入「粘贴板」分组）、`renamePack()`（SQL 直改标题）、`deletePack()`（外键级联删贴纸）、`deleteSticker()`、`touchSticker()`
-- 剪贴板：桌面 `QClipboard::setImage`；Android JNI `ClipboardManager.setPrimaryClip` + Toast
+- 剪贴板：桌面 `QClipboard::setImage`；Android JNI `ShareActivity.copyImageToClipboard`（FileProvider content URI）+ Toast
 - `dataChanged()` 信号 → 首页刷新 Tab 与网格
 
 ## 数据入口：Storage::init 惰性初始化链
@@ -503,7 +503,9 @@ StickerStore::ensureInit()
 单击瓦片 → touchSticker(id)（更新 last_used）
   → copyStickerToClipboard(filePath)
     → Desktop: clipboard->setImage(QImage(path))
-    → Android: JNI setPrimaryClip + showAndroidToast
+    → Android: JNI ShareActivity.copyImageToClipboard（FileProvider content URI(image/*) + Toast）
+      → 粘贴方（含本应用 readClipboardImageBytes）经 ContentResolver 按 Uri 读字节；
+        外部支持 URI 解析的应用可贴出图，不支持的贴文本（平台语义）
 ```
 
 ### 分享（Android 出向）
@@ -536,7 +538,7 @@ StickerStore::ensureInit()
 | 能力 | Desktop | Android |
 |------|---------|---------|
 | 目录选择 | QskSimpleListBox 目录浏览器（纯 QSK） | 走 ShareActivity 分享意图导入（TODO: SAF ACTION_OPEN_DOCUMENT_TREE） |
-| 剪贴板复制 | `QClipboard::setImage` | JNI `ClipboardManager` + 路径文本 + Toast |
+| 剪贴板复制 | `QClipboard::setImage` | JNI `copyImageToClipboard`（FileProvider URI） + Toast |
 | GIF 动图 | 网格=首帧；预览=QMovie 全帧 | 同左 |
 | WebP 动图 | Qt6 图像插件 | 缺 libwebp 时降级静态首帧 |
 
@@ -584,4 +586,4 @@ pageManager->registerPage("stickerhome", []() -> Page* {
 - `.stik` 自研格式的导入/导出尚未实现（仅本地文件夹扫描）
 - Android WebP 动图若无 libwebp 插件则降级首帧
 - 网格内 GIF 不逐帧播放（预览层才动图），后续可按需加瓦片 QMovie
-- Android `copyStickerToClipboard` 复制的是路径文本 + Toast（贴纸位图经 JNI 复制后续优化）
+- Android `copyStickerToClipboard` 写 FileProvider content URI（image/*），自拷自贴闭环与外部图片粘贴可用；不支持 URI 解析的第三方应用会贴出 URI/PATH 文本（平台语义，非本应用可解）
