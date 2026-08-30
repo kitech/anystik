@@ -9,6 +9,7 @@
 #include <private/qquicktaphandler_p.h>
 #include <private/qquicksinglepointhandler_p.h>
 #include <functional>
+#include <QHash>
 
 static constexpr qreal TILE_SIZE = 76;
 static constexpr qreal TILE_GAP  = 10;
@@ -86,6 +87,26 @@ QskHashValue StickerTileNode::hash(const void*) const
 // StickerTileItem — QQuickItem 承载一个贴纸
 // ═══════════════════════════════════════════════════════════════════
 
+namespace {
+QHash<QString, QImage> s_tileImageCache;
+
+QImage decodedTileImage(const QString& filePath)
+{
+    auto it = s_tileImageCache.constFind(filePath);
+    if (it != s_tileImageCache.constEnd())
+        return *it;
+    QImageReader reader(filePath);
+    reader.setAutoTransform(true);
+    reader.setScaledSize(QSize(TILE_SIZE * 2, TILE_SIZE * 2));
+    QImage img = reader.read();
+    if (!img.isNull())
+        s_tileImageCache.insert(filePath, img);
+    if (s_tileImageCache.size() > 400)
+        s_tileImageCache.clear();
+    return img;
+}
+} // namespace
+
 StickerTileItem::StickerTileItem(QQuickItem* parent)
     : QQuickItem(parent)
 {
@@ -96,13 +117,7 @@ StickerTileItem::StickerTileItem(QQuickItem* parent)
 void StickerTileItem::setStickerData(const StickerBrief& brief)
 {
     m_brief = brief;
-
-    // 首次展示时加载首帧（GIF/WebP 动图取首帧，预览层负责动图播放）
-    QImageReader reader(brief.filePath);
-    reader.setAutoTransform(true);
-    reader.setScaledSize(QSize(TILE_SIZE * 2, TILE_SIZE * 2));
-    m_image = reader.read();
-
+    m_image = decodedTileImage(brief.filePath);
     m_dirty = true;
     update();
 }
@@ -212,10 +227,7 @@ StickerGridWidget::StickerGridWidget(QQuickItem* parent)
 
 StickerGridWidget::~StickerGridWidget()
 {
-    for (auto* tile : std::as_const(m_visibleTiles)) {
-        delete tile;
-    }
-    m_visibleTiles.clear();
+    clearTiles();
 }
 
 void StickerGridWidget::setStickers(const QVector<StickerBrief>& stickers)
@@ -235,6 +247,9 @@ StickerBrief StickerGridWidget::stickerAt(int index) const
 
 void StickerGridWidget::relayoutContent()
 {
+    // 布局/列数变化会使瓦片索引映射失效，先整体清空再按新映射重建
+    clearTiles();
+
     if (m_cols <= 0) m_cols = 4;
 
     m_rows = (m_items.size() + m_cols - 1) / m_cols;
@@ -251,29 +266,45 @@ void StickerGridWidget::updateVisibleRows()
         return;
     }
 
-    for (auto* tile : std::as_const(m_visibleTiles)) {
-        delete tile;
-    }
-    m_visibleTiles.clear();
-
     const qreal scrollY = scrollPos().y();
     const qreal viewH = viewContentsRect().height();
 
     const int rowMin = qMax(0, int(qFloor(scrollY / STEP)));
     const int rowMax = qMin(m_rows - 1, int(qCeil((scrollY + viewH) / STEP)));
+    const int idxMin = rowMin * m_cols;
+    const int idxMax = qMin(m_items.size() - 1, rowMax * m_cols + (m_cols - 1));
 
-    for (int row = rowMin; row <= rowMax; ++row) {
-        for (int col = 0; col < m_cols; ++col) {
-            const int idx = row * m_cols + col;
-            if (idx >= m_items.size()) break;
-
-            auto* tile = new StickerTileItem(m_contentView);
-            tile->setX(col * STEP);
-            tile->setY(row * STEP);
-            tile->setStickerData(m_items[idx]);
-            m_visibleTiles[idx] = tile;
+    // 原位复用：只删移出可视区的瓦片
+    auto it = m_visibleTiles.begin();
+    while (it != m_visibleTiles.end()) {
+        if (it.key() < idxMin || it.key() > idxMax) {
+            delete it.value();
+            it = m_visibleTiles.erase(it);
+        } else {
+            ++it;
         }
     }
+
+    // 补建新进入可视区的瓦片（图片走缓存，不再逐帧磁盘解码）
+    for (int idx = idxMin; idx <= idxMax; ++idx) {
+        if (m_visibleTiles.contains(idx))
+            continue;
+        const int row = idx / m_cols;
+        const int col = idx % m_cols;
+        auto* tile = new StickerTileItem(m_contentView);
+        tile->setX(col * STEP);
+        tile->setY(row * STEP);
+        tile->setStickerData(m_items[idx]);
+        m_visibleTiles.insert(idx, tile);
+    }
+}
+
+void StickerGridWidget::clearTiles()
+{
+    for (auto* tile : std::as_const(m_visibleTiles)) {
+        delete tile;
+    }
+    m_visibleTiles.clear();
 }
 
 int StickerGridWidget::indexAt(const QPointF& contentPos) const

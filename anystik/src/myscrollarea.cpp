@@ -1,12 +1,24 @@
 #include "myscrollarea.h"
 #include <QskEvent.h>
+#include <QskScrollView.h>
+#include <QskAspect.h>
+#include <QskAnimationHint.h>
+#include <QEasingCurve>
 #include <QEvent>
 #include <QTouchEvent>
+#include <QWheelEvent>
+#include <QQuickItem>
+#include <QQuickWindow>
+#include <QSizeF>
 #include <QtMath>
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QDateTime>
 #include <QTimer>
+#include <QtDebug>
+
+// 滚轮齿动画缓动（Qt 原生：OutExpo）
+static constexpr QEasingCurve::Type kWheelEasing = QEasingCurve::OutExpo;
 
 MyScrollArea::MyScrollArea(QQuickItem* parent)
     : QskScrollArea(parent)
@@ -15,9 +27,133 @@ MyScrollArea::MyScrollArea(QQuickItem* parent)
     m_doubleTapInterval = hints->mouseDoubleClickInterval();
     m_doubleTapDistance = hints->touchDoubleTapDistance();
 
+    setWheelEnabled(true);
+
+    // 让 scrollTo() 走 QSKinny ScrollAnimator 插值滑行（已核实：setAnimation 内部
+    // 置 animator 位，flickHint() 可解析该 Hint，动画时长/缓动即由此处控制）
+    setAnimationHint(QskScrollView::Viewport | QskAspect::Metric,
+                     QskAnimationHint(WHEEL_ANIM_MS, kWheelEasing));
+
     m_eventDebugTimer = new QTimer(this);
     connect(m_eventDebugTimer, &QTimer::timeout, this, &MyScrollArea::dumpEventCounts);
     m_eventDebugTimer->start(3000);
+
+    // 父项可能已在 scene graph 中、windowChanged 早已触发，先立即安装一次，
+    // 后续 window 变化仍通过信号跟进。
+    storeWindow(window());
+    connect(this, &QQuickItem::windowChanged, this, &MyScrollArea::storeWindow);
+}
+
+// 跟随本项的 scene window，在其上安装/移除事件过滤器。过滤器在
+// QCoreApplication::notify 中先于 QQuickWindow::event 运行，可在滚轮
+// 进入 Qt6 投递链路（被纯 QQuickItem 叶子截断）之前接管。
+void MyScrollArea::storeWindow(QQuickWindow* window)
+{
+    if (m_filterWindow) {
+        m_filterWindow->removeEventFilter(this);
+    }
+
+    m_filterWindow = window;
+
+    if (m_filterWindow) {
+        m_filterWindow->installEventFilter(this);
+    }
+}
+
+#ifndef QT_NO_WHEELEVENT
+void MyScrollArea::wheelEvent(QWheelEvent* event)
+{
+    if (!isWheelEnabled()) {
+        QskScrollArea::wheelEvent(event);
+        return;
+    }
+
+    // 触控板像素滚动：步长小且密集，直接平滑跟随，不叠加动画层
+    const QPointF pixel = event->pixelDelta();
+    if (!pixel.isNull()) {
+        const QSizeF view = viewContentsRect().size();
+        const QSizeF content = scrollableSize();
+        const qreal maxX = qMax<qreal>(0, content.width() - view.width());
+        const qreal maxY = qMax<qreal>(0, content.height() - view.height());
+        const QPointF pos = scrollPos() - pixel;
+        setScrollPos(QPointF(
+            qBound<qreal>(0, pos.x(), maxX),
+            qBound<qreal>(0, pos.y(), maxY)));
+        event->accept();
+        return;
+    }
+
+    // 普通鼠标滚轮：Qt 原生 72px/齿，经 scrollTo 动画滑行
+    const qreal steps = event->angleDelta().y() / qreal(QWheelEvent::DefaultDeltasPerStep);
+    if (qFuzzyIsNull(steps))
+        return;
+
+    const QSizeF view = viewContentsRect().size();
+    const qreal maxY = qMax<qreal>(0, scrollableSize().height() - view.height());
+    const qreal newY = qBound<qreal>(0, scrollPos().y() - steps * WHEEL_PIXELS_PER_NOTCH, maxY);
+
+    scrollTo(QPointF(scrollPos().x(), newY));
+    event->accept();
+}
+#endif
+
+// 窗口级滚轮接管。事件位置此时仍是窗口局部坐标（==场景坐标），经
+// mapFromScene 转为本地坐标后判断是否落在本滚动区域内。仅处理纵向滚轮；
+// 含 isVisible 守卫防止 QskStackBox 隐藏页（几何与显示页重叠）误吞。
+bool MyScrollArea::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched != m_filterWindow || event->type() != QEvent::Wheel)
+        return false;
+
+    auto* we = static_cast<QWheelEvent*>(event);
+    if (!we || !isWheelEnabled() || !isVisible())
+        return false;
+
+    const QPointF localPos = mapFromScene(we->position());
+    if (!contentsRect().contains(localPos))
+        return false;
+
+    // 触控板像素滚动：直接平滑跟随
+    const QPointF pixel = we->pixelDelta();
+    if (!pixel.isNull()) {
+        if (qFuzzyIsNull(pixel.y()))
+            return false;
+
+        const QSizeF view = viewContentsRect().size();
+        const qreal maxY = qMax<qreal>(0, scrollableSize().height() - view.height());
+        const qreal newY = qBound<qreal>(0, scrollPos().y() - pixel.y(), maxY);
+        setScrollPos(QPointF(scrollPos().x(), newY));
+
+        we->accept();
+
+        if (!m_wheelDiagDone) {
+            m_wheelDiagDone = true;
+            qWarning() << "[MyScrollArea] wheel(pixel) consumed by window filter,"
+                       << "local" << localPos << "newY" << newY;
+        }
+
+        return true;
+    }
+
+    // 普通鼠标滚轮：Qt 原生 72px/齿，scrollTo 动画滑行
+    const qreal steps = we->angleDelta().y() / qreal(QWheelEvent::DefaultDeltasPerStep);
+    if (qFuzzyIsNull(steps))
+        return false;
+
+    const QSizeF view = viewContentsRect().size();
+    const qreal maxY = qMax<qreal>(0, scrollableSize().height() - view.height());
+    const qreal newY = qBound<qreal>(0, scrollPos().y() - steps * WHEEL_PIXELS_PER_NOTCH, maxY);
+
+    scrollTo(QPointF(scrollPos().x(), newY));
+    we->accept();
+
+    if (!m_wheelDiagDone) {
+        m_wheelDiagDone = true;
+        qWarning() << "[MyScrollArea] wheel consumed by window filter,"
+                   << "local" << localPos << "newY" << newY;
+    }
+
+    return true;
 }
 
 // 双击 guard：检测到双击后，在 m_doubleTapGuardUntil（now+500ms）之前返回 true。

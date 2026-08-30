@@ -86,6 +86,8 @@ void BundledPacksPage::buildBody()
     // ── 滚动主体 ──
     m_scroll = new MyScrollArea(root);
     m_scroll->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
+    m_scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     m_body = new QskLinearBox(Qt::Vertical, m_scroll);
     m_body->setSpacing(16);

@@ -69,6 +69,7 @@ protected:
 
 private:
     void updateVisibleRows();
+    void clearTiles();
     int indexAt(const QPointF& contentPos) const;
     void relayoutContent();
 
