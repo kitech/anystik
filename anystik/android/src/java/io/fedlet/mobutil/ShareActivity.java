@@ -7,10 +7,15 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import androidx.core.content.FileProvider;
 import org.json.JSONArray;
 import org.qtproject.qt.android.bindings.QtActivity;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 
 public class ShareActivity extends QtActivity {
     private static native void onShareIntentReceived(
@@ -114,5 +119,51 @@ public class ShareActivity extends QtActivity {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    // 出向分享：经 FileProvider 提供 content:// URI 拉起系统分享面板
+    public static void shareLocalImage(Context ctx, String path) {
+        if (ctx == null || path == null || path.isEmpty()) return;
+        try {
+            File src = new File(path);
+            if (!src.isFile()) return;
+
+            File file;
+            String filesDir = ctx.getFilesDir().getAbsolutePath();
+            if (!path.startsWith(filesDir)) {
+                // 外部文件（如目录导入的原路径）：先拷入私有存储再分享
+                File shares = new File(ctx.getFilesDir(), "shares");
+                if (!shares.exists() && !shares.mkdirs()) return;
+                file = new File(shares, src.getName());
+                try (InputStream in = new FileInputStream(src);
+                        OutputStream out = new FileOutputStream(file)) {
+                    byte[] buf = new byte[16384];
+                    int n;
+                    while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+                }
+            } else {
+                file = src;
+            }
+
+            Uri uri = FileProvider.getUriForFile(ctx,
+                ctx.getPackageName() + ".qtprovider", file);
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType(mimeFor(file));
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            ctx.startActivity(Intent.createChooser(send, "分享贴纸"));
+        } catch (Exception e) {
+            // ignore share failures
+        }
+    }
+
+    private static String mimeFor(File f) {
+        String n = f.getName().toLowerCase();
+        if (n.endsWith(".png"))  return "image/png";
+        if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+        if (n.endsWith(".gif"))  return "image/gif";
+        if (n.endsWith(".webp")) return "image/webp";
+        if (n.endsWith(".bmp"))  return "image/bmp";
+        return "image/*";
     }
 }

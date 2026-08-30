@@ -31,6 +31,7 @@ private:
 
     void showStickerMenu(const StickerBrief& brief, const QPointF& scenePos);
     void openPreview(const StickerBrief& brief);
+    void confirmDeleteSticker(const StickerBrief& brief);
     void showOptionsMenu(const QPointF& origin);
     void showPackManageMenu();
 

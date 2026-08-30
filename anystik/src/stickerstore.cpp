@@ -119,6 +119,7 @@ QVector<StickerBrief> StickerStore::stickers(const QString& packId)
         b.height = row.height;
         b.size = row.size;
         b.lastUsed = row.last_used;
+        b.description = QString::fromUtf8(row.description.c_str());
         result.append(b);
     }
     return result;
@@ -141,6 +142,7 @@ QVector<StickerBrief> StickerStore::recent(int limit)
         b.height = row.height;
         b.size = row.size;
         b.lastUsed = row.last_used;
+        b.description = QString::fromUtf8(row.description.c_str());
         result.append(b);
     }
     return result;
@@ -163,6 +165,7 @@ QVector<StickerBrief> StickerStore::search(const QString& query)
         b.height = row.height;
         b.size = row.size;
         b.lastUsed = row.last_used;
+        b.description = QString::fromUtf8(row.description.c_str());
         result.append(b);
     }
     return result;
@@ -489,6 +492,27 @@ void StickerStore::touchSticker(const QString& stickerId)
     }
     stickerDb().touch_sticker(stickerId.toUtf8().constData(),
         QDateTime::currentSecsSinceEpoch());
+}
+
+bool StickerStore::shareStickerFile(const QString& filePath)
+{
+    if (filePath.isEmpty()) {
+        return false;
+    }
+#ifdef Q_OS_ANDROID
+    QNativeInterface::QAndroidApplication::runOnAndroidMainThread([filePath]() {
+        QJniObject context = QNativeInterface::QAndroidApplication::context();
+        if (!context.isValid()) return;
+        QJniObject::callStaticMethod<void>(
+            "io/fedlet/mobutil/ShareActivity", "shareLocalImage",
+            "(Landroid/content/Context;Ljava/lang/String;)V",
+            context.object(), QJniObject::fromString(filePath).object());
+    });
+    return true;
+#else
+    Q_UNUSED(filePath)
+    return false;
+#endif
 }
 
 bool StickerStore::copyStickerToClipboard(const QString& filePath)

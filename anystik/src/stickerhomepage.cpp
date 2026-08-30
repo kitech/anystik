@@ -256,10 +256,12 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
     menu->setModal(true);
     menu->addOption(QskLabelData(QString::fromUtf8("复制")));
     menu->addOption(QskLabelData(QString::fromUtf8("预览")));
-    menu->addOption(QskLabelData(QString::fromUtf8("删除")));
+    const int idxShare = menu->addOption(QskLabelData(QString::fromUtf8("分享")));
+    const int idxDelete = menu->addOption(QskLabelData(QString::fromUtf8("删除")));
     menu->setOrigin(scenePos);
 
-    connect(menu, &QskMenu::triggered, this, [this](int index) {
+    connect(menu, &QskMenu::triggered, this,
+        [this, idxShare, idxDelete](int index) {
         if (index == 0) {
             StickerStore::instance()->touchSticker(m_ctxBrief.id);
             bool ok = StickerStore::instance()->copyStickerToClipboard(m_ctxBrief.filePath);
@@ -267,9 +269,12 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
                          : QString::fromUtf8("复制失败"));
         } else if (index == 1) {
             openPreview(m_ctxBrief);
-        } else if (index == 2) {
-            StickerStore::instance()->deleteSticker(m_ctxBrief.id);
-            onTabChanged(m_tabBar->currentIndex());
+        } else if (index == idxShare) {
+            if (!StickerStore::instance()->shareStickerFile(m_ctxBrief.filePath)) {
+                showToast(QString::fromUtf8("桌面暂不支持分享"));
+            }
+        } else if (index == idxDelete) {
+            confirmDeleteSticker(m_ctxBrief);
         }
         if (auto* m = qobject_cast<QskMenu*>(sender()))
             m->close();
@@ -288,8 +293,31 @@ void StickerHomePage::openPreview(const StickerBrief& brief)
         old->deleteLater();
     auto* overlay = new StickerPreviewOverlay(this);
     overlay->show(brief);
+    connect(overlay, &StickerPreviewOverlay::deleteRequested,
+        this, [this](const StickerBrief& b) { confirmDeleteSticker(b); });
     connect(overlay, &StickerPreviewOverlay::closed,
             overlay, &QObject::deleteLater);
+}
+
+// 通用删除（软删除：DB 置 deleted=1，文件保留）——网格长按菜单与预览页共用
+void StickerHomePage::confirmDeleteSticker(const StickerBrief& brief)
+{
+    auto* dialog = qskDialog;
+    dialog->setTransientParent(window());
+    QskDialog::Action action = dialog->question(
+        QString::fromUtf8("删除贴纸"),
+        QString::fromUtf8("确定删除这张贴纸？"),
+        QskDialog::Actions(QskDialog::Yes | QskDialog::No),
+        QskDialog::No);
+    if (action != QskDialog::Yes) {
+        return;
+    }
+    if (StickerStore::instance()->deleteSticker(brief.id)) {
+        showToast(QString::fromUtf8("已删除"));
+        for (auto* o : findChildren<StickerPreviewOverlay*>())
+            o->deleteLater();
+        onTabChanged(m_tabBar->currentIndex());
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════

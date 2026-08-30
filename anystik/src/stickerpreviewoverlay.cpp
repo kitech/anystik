@@ -69,7 +69,7 @@ void StickerPreviewNode::paint(QPainter* painter, const QSize& size, const void*
     painter->setPen(QColor(230, 230, 230));
     painter->drawText(closeBtn, Qt::AlignCenter, QStringLiteral("✕"));
 
-    // ── 底部动作栏 ──
+    // ── 底部动作栏：复制 | Emoji | 删除 ──
     const qreal barY = h - ACTION_H;
     QRectF barRect(0, barY, w, ACTION_H);
     painter->fillRect(barRect, QColor(20, 20, 28));
@@ -79,14 +79,19 @@ void StickerPreviewNode::paint(QPainter* painter, const QSize& size, const void*
     QFont actionFont;
     actionFont.setPixelSize(15);
     painter->setFont(actionFont);
+
     painter->setPen(QColor(110, 190, 255));
-    painter->drawText(QRectF(0, barY, w * 0.5, ACTION_H),
+    painter->drawText(QRectF(0, barY, w * (1.0 / 3.0), ACTION_H),
         Qt::AlignCenter, QString::fromUtf8("复制"));
 
     if (!m_emoji.isEmpty()) {
-        painter->drawText(QRectF(w * 0.5, barY, w * 0.5, ACTION_H),
+        painter->drawText(QRectF(w * (1.0 / 3.0), barY, w * (1.0 / 3.0), ACTION_H),
             Qt::AlignCenter, QString::fromUtf8("Emoji: ") + m_emoji);
     }
+
+    painter->setPen(QColor(230, 110, 110));
+    painter->drawText(QRectF(w * (2.0 / 3.0), barY, w * (1.0 / 3.0), ACTION_H),
+        Qt::AlignCenter, QString::fromUtf8("删除"));
 }
 
 QskHashValue StickerPreviewNode::hash(const void*) const
@@ -254,12 +259,17 @@ void StickerPreviewOverlay::handlePress(const QPointF& scenePos)
         return;
     }
 
-    // 底部动作栏：复制
+    // 底部动作栏：左 复制 / 右 删除
     if (localPos.y() >= height() - ACTION_H) {
-        StickerStore::instance()->touchSticker(m_brief.id);
-        bool ok = StickerStore::instance()->copyStickerToClipboard(m_brief.filePath);
-        showAndroidToast(ok ? QString::fromUtf8("已复制到剪贴板")
-                            : QString::fromUtf8("复制失败"));
+        const qreal w = width();
+        if (localPos.x() < w * (1.0 / 3.0)) {
+            StickerStore::instance()->touchSticker(m_brief.id);
+            bool ok = StickerStore::instance()->copyStickerToClipboard(m_brief.filePath);
+            showAndroidToast(ok ? QString::fromUtf8("已复制到剪贴板")
+                                : QString::fromUtf8("复制失败"));
+        } else if (localPos.x() > w * (2.0 / 3.0)) {
+            Q_EMIT deleteRequested(m_brief);
+        }
         return;
     }
 

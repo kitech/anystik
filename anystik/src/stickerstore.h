@@ -23,6 +23,7 @@ struct StickerBrief {
     int     height = 0;
     int     size   = 0;
     qint64  lastUsed = 0;
+    QString description;   // 图片描述，不超过 140 字
 };
 
 class StickerStore : public QObject
@@ -54,6 +55,12 @@ public:
 
     // 复制图片到剪贴板（Desktop: QClipboard 位图；Android: 剪贴板写文件路径 + toast）
     bool copyStickerToClipboard(const QString& filePath);
+    // 出向分享：Android 经 ShareActivity 拉起系统分享面板（ACTION_SEND + FileProvider）；
+    // 非 Android 返回 false（调用方 toast 提示）
+    bool shareStickerFile(const QString& filePath);
+
+    // 图片描述长度上限（140 字）；写入/编辑描述时按此截断
+    static constexpr int MaxDescriptionLength = 140;
 
 Q_SIGNALS:
     void dataChanged();

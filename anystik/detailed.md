@@ -459,6 +459,7 @@ stickerhome (StickerHomePage, CachePolicy::Permanent, LaunchMode::SingleInstance
 `StickerStore` 封装 `::Storage` 惰性初始化 + `StickerDbSyncInterface`：
 
 - `ensureInit()`：首次使用时调用 `Storage::init(AppLocalDataLocation)`（创建 message.db + cache.db + sticker_packs/stickers 表，多线程互斥单次执行）；init 成功后再调 `dropLegacyChatTables()` 清理聊天域 8 表
+- stickers 表含 `description`（描述 ≤140 字，`StickerStore::MaxDescriptionLength` 截断上限，参与搜索）与 `deleted`（软删除标记，全部读写 SQL 过滤 `deleted=0`，删除为 `UPDATE deleted=1`；老库由 `init_sticker_db` 内 PRAGMA table_info 幂等 `ALTER` 补列）
 - 查询：`packs()` / `stickers(packId)` / `recent(limit)` / `search(query)` / `countStickers()`
 - 写操作：`importDirectory()`（子目录=分组，递归扫描 png/jpg/gif/webp/bmp/svg，事务+幂等ID）、`pasteFromClipboard()`（读系统剪贴板位图→PNG 落盘 `dataDir/pastes/`→归入「粘贴板」分组）、`renamePack()`（SQL 直改标题）、`deletePack()`（外键级联删贴纸）、`deleteSticker()`、`touchSticker()`
 - 剪贴板：桌面 `QClipboard::setImage`；Android JNI `ClipboardManager.setPrimaryClip` + Toast
@@ -502,6 +503,25 @@ StickerStore::ensureInit()
   → copyStickerToClipboard(filePath)
     → Desktop: clipboard->setImage(QImage(path))
     → Android: JNI setPrimaryClip + showAndroidToast
+```
+
+### 分享（Android 出向）
+```
+长按菜单「分享」/（预览栏「删除」为软删入口）
+  → StickerStore::shareStickerFile(filePath)
+    → Android: ShareActivity.shareLocalImage(ctx, path)
+       外部路径(目录导入)先拷入 <files>/shares/ → FileProvider(qtprovider)
+       → ACTION_SEND + EXTRA_STREAM + image/<ext> + FLAG_GRANT_READ_URI_PERMISSION
+       → createChooser 系统分享面板
+    → 桌面: toast「桌面暂不支持分享」
+```
+
+### 删除（通用软删除）
+```
+网格长按「删除」/ 预览页右段「删除」→ confirmDeleteSticker(brief)
+  → qskDialog 确认（Yes/No）
+  → StickerStore::deleteSticker(id)（DB UPDATE deleted=1，文件保留，可重导恢复）
+  → 关预览 → 刷新 Tab 与网格
 ```
 
 ### 搜索

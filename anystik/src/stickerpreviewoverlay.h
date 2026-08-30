@@ -34,6 +34,7 @@ public:
 
 Q_SIGNALS:
     void closed();
+    void deleteRequested(const StickerBrief& brief);
 
 protected:
     void touchEvent(QTouchEvent* event) override;
