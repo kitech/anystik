@@ -35,6 +35,8 @@
 #include "pagemanager.h"
 #include "shareintentreceiver.h"
 #include "stickerhomepage.h"
+#include "bundledpackspage.h"
+#include "stickerstore.h"
 
 #include <memory>
 #include <thread>
@@ -300,6 +302,10 @@ int main(int argc, char* argv[]) {
         return new StickerHomePage();
     }, {CachePolicy::Permanent, LaunchMode::SingleInstance});
 
+    pageManager->registerPage("bundledpacks", []() -> Page* {
+        return new BundledPacksPage();
+    }, {CachePolicy::Transient, LaunchMode::Standard});
+
     // ── Window ──
     QskWindow window;
     window.setTitle("anystik");
@@ -436,6 +442,31 @@ int main(int argc, char* argv[]) {
     std::thread(gosoMainLoop).detach();
     std::thread(csoMainLoop).detach();
     qDebug() << "[anystik] extras threads started";
+
+    // ── 下载安装链路自检（ANYSTIK_SELFTEST=1，offscreen 冒烟用）──
+    if (qEnvironmentVariableIntValue("ANYSTIK_SELFTEST") > 0) {
+        const QString url = QString::fromUtf8(
+            "https://codeload.github.com/WhatsApp/stickers/zip/refs/heads/main");
+        QTimer::singleShot(500, [url]() {
+            auto* store = StickerStore::instance();
+            if (!store->ensureInit()) {
+                qCritical() << "[selftest] Storage init failed";
+                QCoreApplication::exit(1);
+                return;
+            }
+            QObject::connect(store, &StickerStore::progressChanged,
+                [](const QString& u, qint64 done, qint64 total) {
+                    qInfo() << "[selftest] progress" << u << done << '/' << total;
+                });
+            QObject::connect(store, &StickerStore::downloadFinished,
+                [](const QString& u, bool ok, const QString& msg) {
+                    qInfo() << "[selftest] finished" << u << ok << msg;
+                    QCoreApplication::exit(ok ? 0 : 1);
+                });
+            qInfo() << "[selftest] downloading" << url;
+            store->downloadPack(url);
+        });
+    }
 
     return app.exec();
 }

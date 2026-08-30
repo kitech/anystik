@@ -3,8 +3,17 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QByteArray>
 #include <QVector>
+#include <QHash>
+#include <QVariantMap>
+
+class QFile;
+class QNetworkAccessManager;
+class QNetworkReply;
+class QNetworkRequest;
+class QUrl;
 
 struct StickerPackBrief {
     QString id;
@@ -64,19 +73,79 @@ public:
     // 非 Android 返回 false（调用方 toast 提示）
     bool shareStickerFile(const QString& filePath);
 
+    // ── 下载包（自带地址）──
+    // 成品落 dataDir/packs/<标题>/**；元数据(url/版本commit/MD5)持久化在
+    // QSettings: downloadedPacks(QStringList) + downloadedPackMeta/<packId>(map)；
+    // 下载中磁盘仅留唯一的 <md5(url)16>.part，无临时元文件。
+    bool setPackInstalled(const QString& packId, bool installed);
+    bool uninstallPack(const QString& packId, bool removeFiles);
+    qint64 packDiskSize(const QString& packId);
+    QVariantMap packMeta(const QString& packId) const;
+
+    void probeRemote(const QString& url);
+    void downloadPack(const QString& url);
+    void cancelDownload(const QString& url);
+    bool hasPartialDownload(const QString& url) const;
+    // 清理下载区残留：删除指纹不属于 knownUrls 的 *.part，并清除对应 dlProgress 死条目
+    void cleanupAbandonedDownloads(const QStringList& knownUrls);
+
     // 图片描述长度上限（140 字）；写入/编辑描述时按此截断
     static constexpr int MaxDescriptionLength = 140;
 
 Q_SIGNALS:
     void dataChanged();
+    // size: -1 = 未知(如 codeload zip 无 Content-Length)
+    // version/versionRaw: commit sha / ETag / Last-Modified / 未知
+    void probeDone(const QString& url, qint64 size, const QString& version,
+                   const QString& versionRaw, bool ok, const QString& error);
+    void progressChanged(const QString& url, qint64 done, qint64 total);
+    void downloadFinished(const QString& url, bool ok, const QString& error);
 
 private:
     StickerStore(QObject* parent = nullptr);
 
     void dropLegacyChatTables();
 
+    struct DownloadTask {
+        QString url;
+        QString partPath;
+        QFile* out = nullptr;
+        QNetworkReply* reply = nullptr;
+        qint64 offset = 0;
+        qint64 total = -1;
+        QString name;
+        bool cancelled = false;
+        bool installing = false;   // 安装阶段（工作线程），期间不可取消
+    };
+
+    // install 工作线程的返回结果；GUI 线程收尾时据此写元数据并发信号
+    struct InstallResult {
+        bool ok = false;
+        QString message;           // 成功=标题；失败=错误文案
+        QString packId;
+        QString note;              // 成功附加提示（如「远端内容已变化」）
+        QString dir;               // dataDir/packs/<sanitized 标题>
+        qint64  total = 0;         // zip 字节数
+        QString md5Hex;
+    };
+
+    QNetworkRequest makeRequest(const QUrl& url);
+    QString downloadPartPath(const QString& url) const;
+    void ensureNam();
+    void startDownload(const QString& url, bool noRange);
+    void handleDownloadFinished(DownloadTask* task);
+    void finishIfComplete(DownloadTask* task);
+    // 安装三段式：runInstall(GUI 线程启动) → runInstallWork(工作线程执行)
+    // → finalizeInstall(GUI 线程收尾：QSettings + 信号 + task 清理)
+    void runInstall(DownloadTask* task);
+    InstallResult runInstallWork(DownloadTask* task);
+    void finalizeInstall(DownloadTask* task, const InstallResult& r);
+    void closeOut(DownloadTask* task);
+
     static StickerStore* s_instance;
     bool m_initialized = false;
+    QNetworkAccessManager* m_nam = nullptr;
+    QHash<QString, DownloadTask*> m_tasks;
 };
 
 #endif // STICKER_STORE_H

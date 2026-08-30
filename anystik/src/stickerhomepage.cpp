@@ -334,13 +334,15 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
     auto* menu = new QskMenu(this);
     menu->setModal(true);
 
+    int idxBundled = 1;
     int idxImport = 0;
-    int idxPaste = 1;
+    int idxPaste = 2;
     int idxManage = -1;
     menu->addOption(QskLabelData(QString::fromUtf8("导入表情包文件夹")));
+    menu->addOption(QskLabelData(QString::fromUtf8("表情包目录")));
     menu->addOption(QskLabelData(QString::fromUtf8("粘贴添加")));
     if (!m_packs.isEmpty()) {
-        idxManage = 2;
+        idxManage = 3;
         menu->addOption(QskLabelData(QString::fromUtf8("分组管理")));
     }
     menu->addSeparator();
@@ -353,10 +355,12 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
                        : QString("  Keep Screen On")));
     menu->setOrigin(origin);
 
-    connect(menu, &QskMenu::triggered, this, [this, idxImport, idxPaste, idxManage,
+    connect(menu, &QskMenu::triggered, this, [this, idxBundled, idxImport, idxPaste, idxManage,
         idxLog, idxSettings, idxAbout, idxKeep](int index) {
         if (index == idxImport) {
             requestImportFolder();
+        } else if (index == idxBundled) {
+            pageManager()->open("bundledpacks");
         } else if (index == idxPaste) {
             requestPasteSticker();
         } else if (idxManage >= 0 && index == idxManage) {

@@ -587,3 +587,84 @@ pageManager->registerPage("stickerhome", []() -> Page* {
 - Android WebP 动图若无 libwebp 插件则降级首帧
 - 网格内 GIF 不逐帧播放（预览层才动图），后续可按需加瓦片 QMovie
 - Android `copyStickerToClipboard` 写 FileProvider content URI（image/*），自拷自贴闭环与外部图片粘贴可用；不支持 URI 解析的第三方应用会贴出 URI/PATH 文本（平台语义，非本应用可解）
+
+# 表情包目录（自带地址下载）
+
+## 目标
+
+新增「表情包目录」页（main.cpp `registerPage("bundledpacks")`），从**代码硬编码**的 4 个内置地址下载贴纸包（断点续传 + 大小显示），并管理已下载包（启用/停用、卸载、彻底删除）；版本（commit/ETag/Last-Modified）与 MD5 持久化于 QSettings。改动集中：`bundledpackspage.{h,cpp}` 新增 + `stickerstore.{h,cpp}` 扩展 + `sticker_db.{h,cpp}`（qldox）加 `update_pack_installed` + 两处接线（菜单项/registerPage/CMake）。
+
+## 内置下载源（唯一改源点 = bundledpackspage.cpp 内 kSources）
+
+| 名称 | URL | 说明 |
+|---|---|---|
+| WhatsApp 官方示例贴纸 (SDK) | `https://codeload.github.com/WhatsApp/stickers/zip/refs/heads/main` | **SDK 仓库**，含 67 webp+100 png 官方示例贴纸；codeload 响应为 chunked 无 Content-Length → 行内显示「大小未知（以下载实计）」；版本解析走 GitHub API `commits/<branch>` sha（匿名限流 60/h） |
+| Animals (Telegram) | `https://raw.githubusercontent.com/kanelai/stickerapp/master/Animals.stickerpack` | TG 生态唯一稳定直链整包，206+Range 齐全 → 支持续传 |
+| LINE 贴纸 2938 | `https://stickershop.line-scdn.net/stickershop/v1/product/2938/iphone/stickers@2x.zip` | LINE 静态包（静态域名优先静态 CDN） |
+| LINE 动态 18060 | `https://stickershop.line-scdn.net/stickershop/v1/product/18060/iphone/stickerpack@2x.zip` | LINE 动态包（readsnippet→packageId 已在客户端侧完成） |
+
+LINE CDN 本沙箱环境不可达，仅真机可验证；失败一律错误提示 + 可重试。
+
+## 元数据模型 v3（无临时元文件）
+
+- 磁盘下载区 `dataDir/packs/.download/` **仅一个文件** `<md5(url)前16>.part`（文件名即 URL 指纹）；无 .meta 临时文件。
+- 下载中状态在内存 `DownloadTask{url, partPath, out, reply, offset, total, name, cancelled}`；resume 提示低频落盘 `QSettings["dlProgress/<urlhash>"] = {name, total}`（offset 权威值取 .part 实际大小）。
+- 安装成功后持久化：`QSettings["downloadedPacks"]`（QStringList<packId>，A 区成员）+ `QSettings["downloadedPackMeta/<packId>"] = {url, name, total, version, versionRaw, md5, dir, dl_time}`。
+- 版本 `version`：codeload 源 → 异步 `GET api.github.com/repos/<o>/<r>/commits/<branch>` 取 sha；raw → ETag/Last-Modified；LINE → Last-Modified；无 → 「未知」。A 区显示 commit 前 7 + md5 前 8。
+- MD5：安装时**重读完整 zip 流式计算**（跨续传会话正确，与 `extras/go/md5.c` 无关）。
+- 下载完成（probe 版本一致且已装）→ B 区「已装且未变化」标语；同 commit 重下 MD5 不一 → 报告内容变化。
+
+## 续传状态机（StickerStore::downloadPack/startDownload/handleDownloadFinished）
+
+- `.part` 已存在 → `Range: bytes=N-`；206 续写（Content-Range 解析 total）；200 且 offset>0（服务端忽略 Range）→ 删 .part 以 noRange 全量重下；200 且 offset==0 → 全量（CL 取 total）；416 → 复位重下。
+- 完成条件：`total==-1` 或 `size >= total`；中断/取消保留 .part 供「继续」。
+- 并发门闩：B 区仅允许同时下载一个（`m_busyUrl`），其余行按钮禁用。
+- 网络栈复用 `QNetworkAccessManager`；请求带 `User-Agent: anystik/<ver>` + codeload 源加 `Accept: application/vnd.github+json`。
+
+## 安装流程（installDownload）
+
+part → zip rename → `QZipReader`（`<QtCore/private/qzipreader_p.h>`，需链 `Qt6::CorePrivate`）→ 标题 = zip 顶层唯一目录名，否则 URL 派生名 → `QDir(dataDir/packs/<sanitized 标题>).removeRecursively()` 重建 → `extractAll` → `importDirectory(targetDir)`（标题=目录名，findOrCreatePack 同标题复用/新建）→ 扫 `list_packs(-1)` 按标题取 packId → 写 QSettings → 删 zip → `dataChanged()` + `downloadFinished(url, true, 标题)`。
+
+## A 区管理行（BundledPacksPage）
+
+元数据来自 packMeta(packId)；行内按钮：
+- **启用/停用**：`setPackInstalled(id, bool)` → qldox `update_pack_installed`（`UPDATE sticker_packs SET installed=?2 WHERE id=?1`）。
+- **卸载**：`uninstallPack(id, false)` → `delete_pack`，保留图片文件与 meta（可再导入）。
+- **彻底删除**：`uninstallPack(id, true)` → 删分组 + `dataDir/packs/<dir>` 目录 + `downloadedPackMeta/<id>` 记录。
+- 两操作均先 `qskDialog->question` 确认。
+
+## 接线
+
+- 菜单：stickerhomepage.cpp showOptionsMenu 在「导入表情包文件夹」「表情包目录」「粘贴添加」（idxBundled=1）/「分组管理」（idxManage=3）→ `pageManager()->open("bundledpacks")`。
+- main.cpp：`registerPage("bundledpacks", new BundledPacksPage, {Transient, Standard})`。
+- CMakeLists：新增 `src/bundledpackspage.{h,cpp}`；`target_link_libraries` 加 `Qt6::CorePrivate`（qzipreader）。
+- qldox：`sticker_packs` 表新方法 `update_pack_installed`（toxhttpd/qltox/sticker_db.{h,cpp}）。
+
+## 构建验证（本沙箱）
+
+```bash
+./build-x64.sh     # sed hotfix 去除 -lQt6Qml -lQt6Quick -lQt6OpenGL（防误链系统 Qt）→ Built target anystik
+./build-android.sh # BUILD SUCCESSFUL in 1m35s（StickerStore 扩展 + 新页面全量编译）
+```
+
+实测原始数据：codeload 仓库 git 对象统计 ≈10.2MB；沙箱限速 ~20KB/s 下 900s 截断 13,163,057B（zip 未压缩 tree 合计 18,809,384B，预计整包 ≈15–18MB）；Animals 1,088,205B（206+Range）。
+
+## 加固修复（A/B 轮）
+
+- **A1 安装不阻塞 GUI**：`installDownload` 拆除为三段式——`runInstall`（GUI 线程启动）→ `runInstallWork`（`QtConcurrent::run` 工作线程：rename/fileMd5/解压/importDirectory/安全扫描/A2 对比）→ `finalizeInstall`（`future.then(this,…)` 回 GUI 线程写 QSettings、发信号、清理 task）。`DownloadTask::installing` 期间 `cancelDownload` 静默忽略；UI 在 `done>=total` 时显示「下载完成，正在安装…」。数据库并发由 `SqliteConnectionSafe` 的 `pthread_rwlock` 序列化（storage.h:135-156），无死锁。
+- **A2 内容变化检测**：安装完成后若同源同 `downloadedPackMeta/<packId>` 且新旧 md5 不同，成功文案附「（远端内容已变化，已覆盖安装）」。
+- **A3 卸载语义**：卸载（保留文件）从 `downloadedPacks` 移除但保留 meta；「彻底删除」才连 meta+文件一并清；probe 的「已装且未变化」仅对该包仍启用时显示。
+- **A4 续传偏移校验**：206 分支解析 `Content-Range` 起始字节，与请求 `offset` 不符 → 删 `.part` 自动重下。
+- **B1 zip 安全预扫**：解压前检查 `fileInfoList`，拒绝符号链接、绝对路径、`..` 父目录穿越、盘符冒号条目（源可信，硬拦）。
+- **B2 残留下载清理**：`StickerStore::cleanupAbandonedDownloads(knownUrls)` 删除指纹不属于内置源的 `*.part` 并清 `dlProgress` 死条目；页面进入时调用。
+- **B3 操作反馈**：卸载/彻底删除成功补 toast。
+- 依赖：CMakeLists 追加 `Qt6::Concurrent`；`main.cpp` 增加 `ANYSTIK_SELFTEST=1` 自检入口（offscreen 自动下载安装内置源贴纸 zip 并打印结果退出，用于无头冒烟）。自检实测额外修复一个崩溃：`downloadPack` 原先未调用 `ensureNam()`，直接下载时 `m_nam` 为空指针崩溃（UI 流程先 probe 后下载故未触发）；已在 `startDownload` 开头防御性调用。
+
+## 已知限制 / TODO
+
+- LINE CDN 两条地址沙箱不可达，需真机验证（含断点续传）。
+- codeload 精确全长未知（无 CL、chunked），以下载字节实计。
+- Telegram 生态无稳定第三方整包静态直链（swim233/oracle.swimgit.top:8070 确认宕机），仅 Animals 覆盖；可自建直链后加 kSources 常量。
+- GitHub API commit 解析匿名额 60/h，超限时版本回落「未知」。
+- Android 真机验证待做（下载/续传/安装/卸载全链路）。
+- **偏差记录（D）**：①「version 一致且已装」仅提示「已装且未变化」，不自动跳过；②下载采用**全局单并发门闩**（一次仅一个下载任务，非行内并发）；③运行时冒烟受沙箱限制：LINE 源与 Android 真机链路未验证，仅桌面 offscreen 自检（`ANYSTIK_SELFTEST=1`）+ 编译冒烟；④codeload SDK 包会将仓库全部源码文件解出到 `dataDir/packs/`（仅图片入库），磁盘占用偏大。

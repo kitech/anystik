@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Quick Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Quick Network Concurrent)
 find_package(QSkinny REQUIRED)
 
 if(ANDROID)
@@ -64,6 +64,8 @@ qt_add_executable(anystik
     src/myscrollarea.cpp
     src/stickerstore.h
     src/stickerstore.cpp
+    src/bundledpackspage.h
+    src/bundledpackspage.cpp
     src/stickerlist.h
     src/stickerlist.cpp
     src/stickerhomepage.h
@@ -93,7 +95,7 @@ target_include_directories(anystik PRIVATE
     ${qlcomp_dir}
 )
 
-target_link_libraries(anystik PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate)
+target_link_libraries(anystik PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::CorePrivate Qt6::Concurrent)
 
 # ── extras/go 共享库 (c-shared) ──
 set(GO_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/extras/go)
