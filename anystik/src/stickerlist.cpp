@@ -232,6 +232,8 @@ StickerGridWidget::~StickerGridWidget()
 
 void StickerGridWidget::setStickers(const QVector<StickerBrief>& stickers)
 {
+    // 包更新/重下载后同路径内容可能已变，先废缓存再解码，杜绝 stale 图
+    s_tileImageCache.clear();
     m_items = stickers;
     m_cols = qMax(1, int(viewContentsRect().width()) / int(STEP + 0.5));
     relayoutContent();

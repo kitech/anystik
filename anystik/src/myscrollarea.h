@@ -10,6 +10,7 @@
 
 class QQuickWindow;
 class QTimer;
+class QVariantAnimation;
 class QWheelEvent;
 
 class MyScrollArea : public QskScrollArea
@@ -45,6 +46,12 @@ private slots:
     void storeWindow(QQuickWindow* window);
 
 private:
+    // 滚轮齿动画（自持、可打断）：angleDelta → 300ms OutExpo 插值滑行
+    void myWheelScroll(qreal deltaY);
+    void stopWheelAnim();
+    // 模态弹层/预览覆盖检测：指针下有顶层可见覆盖项则放行原生投递
+    bool isCoveredByOverlay(const QPointF& scenePos) const;
+
     static constexpr qreal DRAG_THRESHOLD = 20.0;  // 拖拽判定阈值（像素），超过此距离开始滚动
 
     // 每 ±120 齿的位移（Qt 原生：wheelScrollLines(3) × 24 = 72px）
@@ -70,6 +77,12 @@ private:
 
     QPointer<QQuickWindow> m_filterWindow;  // 当前安装事件过滤器的窗口
     bool m_wheelDiagDone = false;           // 首次消费滚轮时的诊断打印只输出一次
+
+    QVariantAnimation* m_wheelAnim = nullptr; // 滚轮齿动画（自持，便于打断）
+    qreal m_wheelAnimFrom = 0;               // 动画起始 y
+    qreal m_wheelAnimTo = 0;                 // 动画目标 y（运行中可重设=retarget）
+    qreal m_wheelAnimLast = 0;               // 我上次 setScrollPos 写入的 y
+    bool m_wheelAnimActive = false;          // 动画运行标志
 };
 
 #endif

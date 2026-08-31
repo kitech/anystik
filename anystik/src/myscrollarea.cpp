@@ -15,6 +15,8 @@
 #include <QStyleHints>
 #include <QDateTime>
 #include <QTimer>
+#include <QVariantAnimation>
+#include <QVariant>
 #include <QtDebug>
 
 // 滚轮齿动画缓动（Qt 原生：OutExpo）
@@ -37,6 +39,27 @@ MyScrollArea::MyScrollArea(QQuickItem* parent)
     m_eventDebugTimer = new QTimer(this);
     connect(m_eventDebugTimer, &QTimer::timeout, this, &MyScrollArea::dumpEventCounts);
     m_eventDebugTimer->start(3000);
+
+    // 自持滚轮齿动画：每帧先校验"无外部抢占"再写入，另可随时 stopWheelAnim() 让位。
+    // 必要时：若用户在动画运行中拖滚动条/拖内容，本帧检测到 scrollPos 偏离即主动取消。
+    m_wheelAnim = new QVariantAnimation(this);
+    m_wheelAnim->setDuration(WHEEL_ANIM_MS);
+    m_wheelAnim->setEasingCurve(kWheelEasing);
+    connect(m_wheelAnim, &QVariantAnimation::valueChanged, this,
+        [this](const QVariant& v) {
+            if (!m_wheelAnimActive)
+                return;
+            const qreal y = v.toDouble();
+            // 外部（滚动条拖动/内容拖拽/ensureVisible 等）已改动 scrollPos → 本帧让位
+            if (qAbs(scrollPos().y() - m_wheelAnimLast) > 0.01) {
+                stopWheelAnim();
+                return;
+            }
+            setScrollPos(QPointF(scrollPos().x(), y));
+            m_wheelAnimLast = y;
+        });
+    connect(m_wheelAnim, &QVariantAnimation::finished, this,
+        [this]() { m_wheelAnimActive = false; });
 
     // 父项可能已在 scene graph 中、windowChanged 早已触发，先立即安装一次，
     // 后续 window 变化仍通过信号跟进。
@@ -83,16 +106,12 @@ void MyScrollArea::wheelEvent(QWheelEvent* event)
         return;
     }
 
-    // 普通鼠标滚轮：Qt 原生 72px/齿，经 scrollTo 动画滑行
+    // 普通鼠标滚轮：Qt 原生 72px/齿，动画滑行（自持动画，可被打断）
     const qreal steps = event->angleDelta().y() / qreal(QWheelEvent::DefaultDeltasPerStep);
     if (qFuzzyIsNull(steps))
         return;
 
-    const QSizeF view = viewContentsRect().size();
-    const qreal maxY = qMax<qreal>(0, scrollableSize().height() - view.height());
-    const qreal newY = qBound<qreal>(0, scrollPos().y() - steps * WHEEL_PIXELS_PER_NOTCH, maxY);
-
-    scrollTo(QPointF(scrollPos().x(), newY));
+    myWheelScroll(steps * WHEEL_PIXELS_PER_NOTCH);
     event->accept();
 }
 #endif
@@ -107,6 +126,11 @@ bool MyScrollArea::eventFilter(QObject* watched, QEvent* event)
 
     auto* we = static_cast<QWheelEvent*>(event);
     if (!we || !isWheelEnabled() || !isVisible())
+        return false;
+
+    // 模态弹层/预览覆盖开启中：指针下若有顶层可见覆盖项，则退还原生投递
+    // （被顶层裸 item 吞掉，滚轮不会滚动底层网格；弹层关闭后自动恢复）
+    if (isCoveredByOverlay(we->position()))
         return false;
 
     const QPointF localPos = mapFromScene(we->position());
@@ -135,25 +159,76 @@ bool MyScrollArea::eventFilter(QObject* watched, QEvent* event)
         return true;
     }
 
-    // 普通鼠标滚轮：Qt 原生 72px/齿，scrollTo 动画滑行
+    // 普通鼠标滚轮：Qt 原生 72px/齿，动画滑行（自持动画，可被打断）
     const qreal steps = we->angleDelta().y() / qreal(QWheelEvent::DefaultDeltasPerStep);
     if (qFuzzyIsNull(steps))
         return false;
 
-    const QSizeF view = viewContentsRect().size();
-    const qreal maxY = qMax<qreal>(0, scrollableSize().height() - view.height());
-    const qreal newY = qBound<qreal>(0, scrollPos().y() - steps * WHEEL_PIXELS_PER_NOTCH, maxY);
-
-    scrollTo(QPointF(scrollPos().x(), newY));
+    myWheelScroll(steps * WHEEL_PIXELS_PER_NOTCH);
     we->accept();
 
     if (!m_wheelDiagDone) {
         m_wheelDiagDone = true;
         qWarning() << "[MyScrollArea] wheel consumed by window filter,"
-                   << "local" << localPos << "newY" << newY;
+                   << "local" << localPos << "newY" << scrollPos().y();
     }
 
     return true;
+}
+
+// 滚轮齿动画（自持，便于被打断）。与 QskScrollBox 内部 ScrollAnimator 不同
+// （scrollTo 无公开停止 API），这里用自有 QVariantAnimation，外部任何
+// setScrollPos（滚动条/拖拽/ensureVisible）都可在下帧让其让位。
+void MyScrollArea::myWheelScroll(qreal deltaY)
+{
+    const qreal maxY = qMax<qreal>(0,
+        scrollableSize().height() - viewContentsRect().height());
+
+    if (m_wheelAnimActive) {
+        // 连续滚齿：仅重设目标、接续当前进度（同 ScrollAnimator retarget 语义）
+        m_wheelAnimTo = qBound<qreal>(0, m_wheelAnimTo - deltaY, maxY);
+        m_wheelAnim->setEndValue(m_wheelAnimTo);
+        return;
+    }
+
+    m_wheelAnimFrom = scrollPos().y();
+    m_wheelAnimTo = qBound<qreal>(0, m_wheelAnimFrom - deltaY, maxY);
+    if (m_wheelAnimFrom == m_wheelAnimTo)
+        return;
+
+    m_wheelAnimLast = m_wheelAnimFrom;
+    m_wheelAnimActive = true;
+    m_wheelAnim->setStartValue(m_wheelAnimFrom);
+    m_wheelAnim->setEndValue(m_wheelAnimTo);
+    m_wheelAnim->start();
+}
+
+void MyScrollArea::stopWheelAnim()
+{
+    if (m_wheelAnim)
+        m_wheelAnim->stop();
+    m_wheelAnimActive = false;
+    if (m_wheelAnim)
+        m_wheelAnimLast = scrollPos().y();
+}
+
+// 模态弹层/预览覆盖检测：从本项的父项起逐层向上，扫描每一层里“非自身祖先链”的
+// 可见子项；若指针落在其几何内，判定该点被上层覆盖。可捕获 StickerPreviewOverlay、
+// MenuOverlay（挂在页面层的裸 QQuickItem）与 QskPopup 自动生成的 QskPopupOverlay。
+bool MyScrollArea::isCoveredByOverlay(const QPointF& scenePos) const
+{
+    for (const QQuickItem* anc = parentItem(); anc; anc = anc->parentItem()) {
+        const auto children = anc->childItems();
+        for (const QQuickItem* child : children) {
+            if (!child->isVisible())
+                continue;
+            if (child == this || child->isAncestorOf(this))
+                continue;   // 自身/自身祖先链上的容器 → 跳过
+            if (child->contains(child->mapFromScene(scenePos)))
+                return true;
+        }
+    }
+    return false;
 }
 
 // 双击 guard：检测到双击后，在 m_doubleTapGuardUntil（now+500ms）之前返回 true。
