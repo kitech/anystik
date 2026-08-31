@@ -1,5 +1,37 @@
 # Vendor Libraries
 
+## libobfuscate
+
+- Name: libobfuscate (adamyaxley/Obfuscate)
+- Version: upstream (C++14 compile-time string obfuscation, header-only)
+- Upstream: https://github.com/adamyaxley/Obfuscate
+- License: Unlicense
+- Files:
+  - `include/libobfuscate/obfuscate.h` (271 lines, XOR compile-time encryption via `AY_OBFUSCATE`)
+  - 来源：vcpkg `libobfuscate` port（x64-linux-dynamic triplet 已装同版本）
+- 用途：`src/davobfus.cpp` 用 `AY_OBFUSCATE` 编译期混淆 dav 鉴权 key（占位 `AUTHKEY_PLACEHOLDER`）
+- 注意：单字节 XOR 为缓解非绝对安全；运行时解码后内存仍可被逆向提取。
+
+## libobfuscate（候选替代对比：ADVobfuscator — 未引入）
+
+> 仅调研记录存档，**未引入/未集成**本库。结论：不采用。
+
+- **Name**: ADVobfuscator (andrivet/ADVobfuscator)，v2.1.1
+- **Upstream**: https://github.com/andrivet/ADVobfuscator
+- **License**: BSD-3-Clause-Clear（与 libobfuscate 的 Unlicense 不同）
+- **结构**: header-only，但**多文件**——`include/advobfuscator/` 下 8 个头
+  （`aes.h`, `aes_string.h`, `bytes.h`, `fsm.h`, `obj.h`, `random.h`, `string.h`, `format.h`），**非单文件**
+- **加密**: AES-128-CTR（`aes_string.h`）+ 编译期 FSM 混淆运行期解码调用（`call.h`/`fsm.h` 用
+  `ObfuscatedMethodCall`）；比 libobfuscate 的单字节 XOR 强度高
+- **C++ 标准**: **必须 C++20**。源码大量使用 `consteval`（`string.h`/`call.h` 构造）、
+  C++20 class-NTTP 用户自定义字面量（`template<ObfuscatedString str> operator""_obf`）、
+  constexpr 析构。**本项目当前 `-std=gnu++17` 无法直接编译**，需全项目升级 C++20
+- **Debug 构建限制**: upstream README 明确「Obfuscation works only for Release builds」，
+  Debug 下明文照常进二进制。本项目 x64 构建用 `-DCMAKE_BUILD_TYPE=Debug`，
+  即使升 C++20，x64 Debug 下 ADVobfuscator 也不混淆
+- **结论**: 因「需全项目升 C++20」+「Debug 构建不生效」+「多文件」三点，**决定不引入**。
+  维持现有 libobfuscate（单文件、C++14、全构建生效）方案。本段仅作评估记录。
+
 ## cJSON
 
 - Version: 1.7.19

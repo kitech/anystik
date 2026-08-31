@@ -74,6 +74,8 @@ qt_add_executable(anystik
     src/stickerhomepage.cpp
     src/stickerpreviewoverlay.h
     src/stickerpreviewoverlay.cpp
+    src/davobfus.h
+    src/davobfus.cpp
     ${qlapp_dir}/cJSON.c
     ${qlapp_dir}/message_db.cpp
     ${qlapp_dir}/storage.cpp

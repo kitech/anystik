@@ -39,6 +39,7 @@
 #include "bundledpackspage.h"
 #include "stickerstore.h"
 #include "android_tls_bootstrap.h"
+#include "davobfus.h"
 
 #include <memory>
 #include <thread>
@@ -488,6 +489,9 @@ int main(int argc, char* argv[]) {
             store->downloadPack(url);
         });
     }
+
+    // dav 鉴权 key 演示输出（混淆后运行时解码，event loop 启动前打印）
+    qDebug() << "[davobfus] auth key:" << davObfusKey();
 
     return app.exec();
 }
