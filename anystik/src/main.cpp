@@ -12,6 +12,7 @@
 #include <QElapsedTimer>
 #include <QTimer>
 #include <QShortcut>
+#include <QSslSocket>
 #include <QQuickItem>
 #include <QskDialog.h>
 #include <QskSkinManager.h>
@@ -37,6 +38,7 @@
 #include "stickerhomepage.h"
 #include "bundledpackspage.h"
 #include "stickerstore.h"
+#include "android_tls_bootstrap.h"
 
 #include <memory>
 #include <thread>
@@ -130,6 +132,18 @@ static void toggleStatsTimer(QskWindow* win)
 } // namespace
 
 int main(int argc, char* argv[]) {
+#ifdef Q_OS_ANDROID
+    // 必须在任何 TLS 后端探测之前完成引导与日志开关：
+    android_tls_bootstrap();          // B：绝对路径预加载 libcrypto_3/libssl_3
+    qputenv("QSG_RENDER_LOOP", "basic");
+    // 6.7.3 后端拼接规则是 "ssl" + 后缀（不自动插下划线）：
+    // 填 "3" 会拼成 libssl3.so -> 探测全失败 -> "TLS initialization failed"。
+    // 必须带下划线 "_3" 以匹配打包的 libssl_3.so / libcrypto_3.so（A）。
+    qputenv("ANDROID_OPENSSL_SUFFIX", "_3");
+    qputenv("QT_LOGGING_RULES",        // C：诊断开关（logcat 可看探测路径）
+            "qt.tlsbackend.ossl.debug=true;qt.network.ssl.debug=true");
+#endif
+
     QGuiApplication app(argc, argv);
 
     installLogHandler();
@@ -138,7 +152,11 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setApplicationName("anystik");
 
 #ifdef Q_OS_ANDROID
-    qputenv("QSG_RENDER_LOOP", "basic");
+    // C：启动即打印 TLS 后端实际状态
+    qDebug() << "[anystik] QSslSocket::supportsSsl() ="
+             << QSslSocket::supportsSsl()
+             << "; sslLibraryVersionString ="
+             << QSslSocket::sslLibraryVersionString();
 #else
     QString iconPath = QCoreApplication::applicationDirPath() + "/../app_icon.png";
     app.setWindowIcon(QIcon(iconPath));

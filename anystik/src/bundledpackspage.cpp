@@ -146,7 +146,11 @@ void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, con
     row.cancel->setVisible(false);
 
     row.status = makeInfoLabel(card);
-    row.status->setText("待检测");
+    const qint64 approx =
+        StickerStore::instance()->cachedApproxSize(url);
+    row.status->setText(approx > 0
+        ? ("大小 约 " + formatSize(approx))
+        : "待检测");
 
     row.bar = new QskProgressBar(0.0, 1.0, card);
     row.bar->setVisible(false);
@@ -300,7 +304,14 @@ void BundledPacksPage::onProbeDone(const QString& url, qint64 size, const QStrin
     if (!ok) {
         text = "获取失败：" + error;
     } else {
-        text = (size < 0) ? "大小未知（以下载实计）" : ("大小 " + formatSize(size));
+        const qint64 approx =
+            StickerStore::instance()->cachedApproxSize(url);
+        if (size >= 0)
+            text = "大小 " + formatSize(size);
+        else if (approx > 0)
+            text = "大小 约 " + formatSize(approx) + "（上次实测）";
+        else
+            text = "大小未知（以下载实计）";
         if (!version.isEmpty() && version != "未知")
             text += "  ·  版本 " + version;
         if (!versionRaw.isEmpty()) {

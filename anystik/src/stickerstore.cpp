@@ -742,10 +742,17 @@ void StickerStore::probeRemote(const QString& url)
         auto hint = dlHint(url);
         hint.insert("version", ver);
         hint.insert("versionRaw", raw);
+        if (size >= 0)
+            hint.insert("approxSize", size);      // HEAD 即有长度(LINE)
         setDlHint(url, hint);
         reply->deleteLater();
         emit probeDone(url, size, ver, raw, ok, err);
     });
+}
+
+qint64 StickerStore::cachedApproxSize(const QString& url) const
+{
+    return dlHint(url).value(QStringLiteral("approxSize"), -1).toLongLong();
 }
 
 void StickerStore::downloadPack(const QString& url)

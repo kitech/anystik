@@ -26,6 +26,8 @@ set(qlcomp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp)
 
 qt_add_executable(anystik
     src/main.cpp
+    src/android_tls_bootstrap.h
+    src/android_tls_bootstrap.cpp
     src/androidutils.h
     src/androidutils.cpp
     src/keepalive.h

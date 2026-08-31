@@ -83,6 +83,8 @@ public:
     QVariantMap packMeta(const QString& packId) const;
 
     void probeRemote(const QString& url);
+    // 元数据中的约值大小：探测写入的 approxSize；无则 -1
+    qint64 cachedApproxSize(const QString& url) const;
     void downloadPack(const QString& url);
     void cancelDownload(const QString& url);
     bool hasPartialDownload(const QString& url) const;
