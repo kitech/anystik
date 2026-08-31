@@ -643,6 +643,7 @@ static void setDlHint(const QString& url, const QVariantMap& hint)
 }
 
 // 内置下载源唯一表（唯一改源点）。approxSize 为预告约值，非运行时所得
+// 如暂未获取到approxSize则-1
 const BuiltinSource kBuiltinSources[] = {
     { "WhatsApp 官方示例贴纸 (SDK)",
       "https://codeload.github.com/WhatsApp/stickers/zip/refs/heads/main",
@@ -652,10 +653,10 @@ const BuiltinSource kBuiltinSources[] = {
       1088205L },    // 本会话 Range 206 实测 content-range: bytes 0-0/1088205
     { "LINE 贴纸 2938",
       "https://stickershop.line-scdn.net/stickershop/v1/product/2938/iphone/stickers@2x.zip",
-      -1L },         // 无实测
+      797156L },         // 真机 HEAD 实测 content-length（≈0.76 MB）
     { "LINE 动态 18060",
       "https://stickershop.line-scdn.net/stickershop/v1/product/18060/iphone/stickerpack@2x.zip",
-      -1L },         // 无实测
+      7246424L },         // 真机 HEAD 实测 content-length（≈6.9 MB）
 };
 const unsigned kBuiltinSourceCount =
     sizeof(kBuiltinSources) / sizeof(kBuiltinSources[0]);
@@ -783,8 +784,8 @@ void StickerStore::seedBuiltinApproxSizes()
     for (unsigned i = 0; i < kBuiltinSourceCount; ++i) {
         const QString url = QString::fromUtf8(kBuiltinSources[i].url);
         auto hint = dlHint(url);
-        if (hint.contains(QStringLiteral("approxSize")))
-            continue;                                  // 幂等，预告值一旦填入不改
+        if (hint.value(QStringLiteral("approxSize")).toLongLong() > 0)
+            continue;                                  // 有效正值不动；-1/缺失则升级填入
         hint.insert(QStringLiteral("approxSize"), kBuiltinSources[i].approxSize);
         setDlHint(url, hint);
     }
