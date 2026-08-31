@@ -642,6 +642,24 @@ static void setDlHint(const QString& url, const QVariantMap& hint)
     QSettings().setValue(QStringLiteral("dlProgress/") + urlHex(url), hint);
 }
 
+// 内置下载源唯一表（唯一改源点）。approxSize 为预告约值，非运行时所得
+const BuiltinSource kBuiltinSources[] = {
+    { "WhatsApp 官方示例贴纸 (SDK)",
+      "https://codeload.github.com/WhatsApp/stickers/zip/refs/heads/main",
+      13163057L },   // 8/30 selftest5 整包实测（约值，随 commit 变化）
+    { "Animals (Telegram)",
+      "https://raw.githubusercontent.com/kanelai/stickerapp/master/Animals.stickerpack",
+      1088205L },    // 本会话 Range 206 实测 content-range: bytes 0-0/1088205
+    { "LINE 贴纸 2938",
+      "https://stickershop.line-scdn.net/stickershop/v1/product/2938/iphone/stickers@2x.zip",
+      -1L },         // 无实测
+    { "LINE 动态 18060",
+      "https://stickershop.line-scdn.net/stickershop/v1/product/18060/iphone/stickerpack@2x.zip",
+      -1L },         // 无实测
+};
+const unsigned kBuiltinSourceCount =
+    sizeof(kBuiltinSources) / sizeof(kBuiltinSources[0]);
+
 static QByteArray fileMd5(const QString& path)
 {
     QFile f(path);
@@ -743,16 +761,33 @@ void StickerStore::probeRemote(const QString& url)
         hint.insert("version", ver);
         hint.insert("versionRaw", raw);
         if (size >= 0)
-            hint.insert("approxSize", size);      // HEAD 即有长度(LINE)
+            hint.insert("realSize", size);        // HEAD 带 Content-Length 的精确实测
         setDlHint(url, hint);
         reply->deleteLater();
         emit probeDone(url, size, ver, raw, ok, err);
     });
 }
 
+qint64 StickerStore::cachedRealSize(const QString& url) const
+{
+    return dlHint(url).value(QStringLiteral("realSize"), -1).toLongLong();
+}
+
 qint64 StickerStore::cachedApproxSize(const QString& url) const
 {
     return dlHint(url).value(QStringLiteral("approxSize"), -1).toLongLong();
+}
+
+void StickerStore::seedBuiltinApproxSizes()
+{
+    for (unsigned i = 0; i < kBuiltinSourceCount; ++i) {
+        const QString url = QString::fromUtf8(kBuiltinSources[i].url);
+        auto hint = dlHint(url);
+        if (hint.contains(QStringLiteral("approxSize")))
+            continue;                                  // 幂等，预告值一旦填入不改
+        hint.insert(QStringLiteral("approxSize"), kBuiltinSources[i].approxSize);
+        setDlHint(url, hint);
+    }
 }
 
 void StickerStore::downloadPack(const QString& url)

@@ -17,27 +17,7 @@
 
 namespace {
 
-struct PackSource {
-    const char* name;
-    const char* url;
-};
-
-// 内置下载源（唯一的改源点）：
-// 1) WhatsApp 官方示例贴纸仓库(SDK，含 67 webp+100 png 示例图)；codeload zip 为
-//    chunked 无 Content-Length → 大小未知，以下载实计。
-// 2) Telegram 生态唯一稳定直链整包(Animals.stickerpack，206+Range)。
-// 3/4) LINE CDN 静态/动态贴纸包（本环境不可达，仅真机可验证）。
-const PackSource kSources[] = {
-    { "WhatsApp 官方示例贴纸 (SDK)",
-      "https://codeload.github.com/WhatsApp/stickers/zip/refs/heads/main" },
-    { "Animals (Telegram)",
-      "https://raw.githubusercontent.com/kanelai/stickerapp/master/Animals.stickerpack" },
-    { "LINE 贴纸 2938",
-      "https://stickershop.line-scdn.net/stickershop/v1/product/2938/iphone/stickers@2x.zip" },
-    { "LINE 动态 18060",
-      "https://stickershop.line-scdn.net/stickershop/v1/product/18060/iphone/stickerpack@2x.zip" },
-};
-
+// 内置下载源唯一表在 StickerStore（kBuiltinSources，见 stickerstore.h/cpp）
 void clearBox(QskLinearBox* box)
 {
     const auto items = box->childItems();
@@ -110,13 +90,14 @@ void BundledPacksPage::buildBody()
     connect(store, &StickerStore::downloadFinished, this, &BundledPacksPage::onDownloadFinished);
     connect(store, &StickerStore::dataChanged, this, [this]() { rebuildDownloaded(); });
 
-    for (const auto& src : kSources)
-        addSourceRow(m_body, QString::fromUtf8(src.name), QString::fromUtf8(src.url));
+    for (unsigned i = 0; i < kBuiltinSourceCount; ++i)
+        addSourceRow(m_body, QString::fromUtf8(kBuiltinSources[i].name),
+                              QString::fromUtf8(kBuiltinSources[i].url));
 
     // B2 清理非内置源的残留下载（.part + dlProgress 死条目）
     QStringList sourceUrls;
-    for (const auto& src : kSources)
-        sourceUrls << QString::fromUtf8(src.url);
+    for (unsigned i = 0; i < kBuiltinSourceCount; ++i)
+        sourceUrls << QString::fromUtf8(kBuiltinSources[i].url);
     StickerStore::instance()->cleanupAbandonedDownloads(sourceUrls);
 
     rebuildDownloaded();
@@ -150,7 +131,7 @@ void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, con
         StickerStore::instance()->cachedApproxSize(url);
     row.status->setText(approx > 0
         ? ("大小 约 " + formatSize(approx))
-        : "待检测");
+        : "大小未知");
 
     row.bar = new QskProgressBar(0.0, 1.0, card);
     row.bar->setVisible(false);
@@ -309,7 +290,7 @@ void BundledPacksPage::onProbeDone(const QString& url, qint64 size, const QStrin
         if (size >= 0)
             text = "大小 " + formatSize(size);
         else if (approx > 0)
-            text = "大小 约 " + formatSize(approx) + "（上次实测）";
+            text = "大小 约 " + formatSize(approx);
         else
             text = "大小未知（以下载实计）";
         if (!version.isEmpty() && version != "未知")

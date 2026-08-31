@@ -35,6 +35,15 @@ struct StickerBrief {
     QString description;   // 图片描述，不超过 140 字
 };
 
+// 内置下载源唯一表。approxSize 为预告约值（静态，非运行时所得）；-1 = 无实测
+struct BuiltinSource {
+    const char* name;
+    const char* url;
+    qint64 approxSize;
+};
+extern const BuiltinSource kBuiltinSources[];
+extern const unsigned kBuiltinSourceCount;
+
 class StickerStore : public QObject
 {
     Q_OBJECT
@@ -83,8 +92,12 @@ public:
     QVariantMap packMeta(const QString& packId) const;
 
     void probeRemote(const QString& url);
-    // 元数据中的约值大小：探测写入的 approxSize；无则 -1
+    // 动态精确大小：获取 HEAD 成功且带 Content-Length 时写入的 realSize；无则 -1
+    qint64 cachedRealSize(const QString& url) const;
+    // 预告填入的约值大小：seedBuiltinApproxSizes 预写入的 approxSize；无则 -1
     qint64 cachedApproxSize(const QString& url) const;
+    // 预告填入：首启把内置源 approxSize(含 -1) 缺省写入元数据，零网络、幂等
+    void seedBuiltinApproxSizes();
     void downloadPack(const QString& url);
     void cancelDownload(const QString& url);
     bool hasPartialDownload(const QString& url) const;

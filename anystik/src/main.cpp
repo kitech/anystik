@@ -151,6 +151,9 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setOrganizationName("fedlet");
     QCoreApplication::setApplicationName("anystik");
 
+    // 预告填入：把内置源 approxSize(含 -1) 一次性写入 dlProgress 元数据（零网络）
+    StickerStore::instance()->seedBuiltinApproxSizes();
+
 #ifdef Q_OS_ANDROID
     // C：启动即打印 TLS 后端实际状态
     qDebug() << "[anystik] QSslSocket::supportsSsl() ="
