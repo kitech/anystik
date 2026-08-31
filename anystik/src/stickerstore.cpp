@@ -651,6 +651,12 @@ const BuiltinSource kBuiltinSources[] = {
     { "Animals (Telegram)",
       "https://raw.githubusercontent.com/kanelai/stickerapp/master/Animals.stickerpack",
       1088205L },    // 本会话 Range 206 实测 content-range: bytes 0-0/1088205
+    { "LINE 贴纸包 (GitHub 镜像)",
+      "https://raw.githubusercontent.com/porridgebrother/line-stickers/master/stickers.zip",
+      1490697L },   // 本会话 Range 实测 content-range: bytes 0-0/1490697（raw 偶发超时,重试即可）
+    { "ChineseBQB 梗图包",
+      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/master/001Funny_%E6%BB%91%E7%A8%BD%E5%A4%A7%E4%BD%AC%F0%9F%98%8FBQB.zip",
+      4691509L },   // 本会话 Range 实测 content-range: bytes 0-0/4691509（raw 源偶发超时,重试即可）
     { "LINE 贴纸 2938",
       "https://stickershop.line-scdn.net/stickershop/v1/product/2938/iphone/stickers@2x.zip",
       797156L },         // 真机 HEAD 实测 content-length（≈0.76 MB）
