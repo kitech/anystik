@@ -117,9 +117,8 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
         QskBoxShapeMetrics(10, Qt::AbsoluteSize));
 
     connect(m_searchField, &QskTextField::textChanged, this,
-        [this](const QString& text) {
+        [this]() {            // QSkinny 新/旧版 textChanged() 签名通用（0 参 functor 兼容任意信号元数）
             m_searchDebounce.start(350);
-            Q_UNUSED(text)
         });
 
     m_searchDebounce.setSingleShot(true);
