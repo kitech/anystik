@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.util.Log;
 import androidx.core.content.FileProvider;
 import org.json.JSONArray;
 import org.qtproject.qt.android.bindings.QtActivity;
@@ -88,15 +89,28 @@ public class ShareActivity extends QtActivity {
             if (cd == null || cd.getItemCount() == 0) return null;
 
             ClipDescription desc = cd.getDescription();
-            if (desc == null || !desc.hasMimeType("image/*")) return null;
 
             for (int i = 0; i < cd.getItemCount(); i++) {
                 ClipData.Item it = cd.getItemAt(i);
                 if (it == null) continue;
                 Uri uri = it.getUri();
                 if (uri != null) {
+                    try {
+                        ctx.getContentResolver().takePersistableUriPermission(
+                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    } catch (Exception ignored) { }
                     byte[] b = readUriBytes(ctx, uri);
                     if (b != null && b.length > 0) return b;
+                } else {
+                    CharSequence t = it.getText();
+                    String tag = "AnystikClipboard";
+                    if (t != null) {
+                        String s = t.toString();
+                        Log.w(tag, "text-type clipboard item, prefix="
+                            + (s.length() > 80 ? s.substring(0, 80) : s));
+                    } else {
+                        Log.w(tag, "clipboard item has no uri and no text");
+                    }
                 }
             }
         } catch (Exception e) {

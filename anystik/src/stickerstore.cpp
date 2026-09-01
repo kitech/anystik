@@ -376,6 +376,22 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
         }
     }
     if (bytes.isEmpty()) {
+        // text/uri-list：文件管理器复制文件引用 → 读本地可读图片原始字节（保各格式/动画）
+        const QList<QUrl> urls = mime ? mime->urls() : QList<QUrl>();
+        for (const QUrl& url : urls) {
+            if (!url.isLocalFile()) continue;          // 只取本地文件
+            const QString p = url.toLocalFile();
+            if (p.isEmpty() || !QFileInfo::exists(p)) continue;
+            if (!QFileInfo(p).isFile()) continue;
+            if (QImageReader::imageFormat(p).isEmpty()) continue;  // 非可读图片
+            QFile f(p);
+            if (f.open(QIODevice::ReadOnly)) {
+                bytes = f.readAll();
+                break;
+            }
+        }
+    }
+    if (bytes.isEmpty()) {
         const QImage img = QGuiApplication::clipboard()->image();
         if (img.isNull()) {
             if (errorOut) *errorOut = QStringLiteral("剪贴板中没有图片");
@@ -424,6 +440,16 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut)
     if (fmt == "jpeg" || fmt == "jpg") ext = QStringLiteral(".jpg");
     else if (fmt == "gif")  ext = QStringLiteral(".gif");
     else if (fmt == "webp") ext = QStringLiteral(".webp");
+    else if (fmt == "bmp")  ext = QStringLiteral(".bmp");
+    else if (fmt == "tif" || fmt == "tiff") ext = QStringLiteral(".tif");
+    else if (fmt == "tga")  ext = QStringLiteral(".tga");
+    else if (fmt == "xpm")  ext = QStringLiteral(".xpm");
+    else if (fmt == "xbm")  ext = QStringLiteral(".xbm");
+    else if (fmt == "ppm")  ext = QStringLiteral(".ppm");
+    else if (fmt == "pbm")  ext = QStringLiteral(".pbm");
+    else if (fmt == "pgm")  ext = QStringLiteral(".pgm");
+    else if (fmt == "wbmp") ext = QStringLiteral(".wbmp");
+    else if (fmt == "svg" || fmt == "svgz") ext = QStringLiteral(".svg");
 
     // 幂等 ID + 落盘路径
     const QString idHex = QString(QCryptographicHash::hash(
