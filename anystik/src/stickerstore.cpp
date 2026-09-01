@@ -229,6 +229,68 @@ static QString fileIdFor(const QString& path)
         QCryptographicHash::Sha1).toHex());
 }
 
+// 统一的图片来源有效性/尺寸探测：
+// 拦截级：空 / 不可读 / 尺寸无效 / 格式不在白名单 / read() 解码失败 → 返回 false
+// 观测级：过小 → 仅 qWarning
+static bool probeImageValidity(const QByteArray& bytes,
+                               QByteArray* outFormat, QSize* outSize)
+{
+    if (bytes.isEmpty()) {
+        qWarning("[StickerPaste][probe] empty bytes");
+        return false;
+    }
+    if (bytes.size() < 16) {
+        qWarning("[StickerPaste][probe] suspiciously small size=%d", bytes.size());
+    }
+
+    QBuffer probe;
+    probe.setData(bytes);
+    probe.open(QIODevice::ReadOnly);
+    QImageReader reader(&probe);
+    reader.setAutoTransform(true);
+
+    if (!reader.canRead()) {
+        qWarning("[StickerPaste][probe] cannot read, size=%d", bytes.size());
+        return false;
+    }
+
+    QByteArray fmt = reader.format().trimmed().toLower();
+    if (fmt.isEmpty()) {
+        fmt = QImageReader::imageFormat(&probe).trimmed().toLower();
+    }
+
+    static const QSet<QByteArray> kAllowed = {
+        "png","jpg","jpeg","gif","webp","bmp","tif","tiff","tga",
+        "xpm","xbm","ppm","pbm","pgm","wbmp","svg","svgz"
+    };
+    if (!kAllowed.contains(fmt)) {
+        qWarning("[StickerPaste][probe] format not in whitelist fmt=%s",
+                 fmt.constData());
+        return false;
+    }
+
+    const QSize size = reader.size();
+    if (!size.isValid()) {
+        qWarning("[StickerPaste][probe] size invalid fmt=%s", fmt.constData());
+        return false;
+    }
+
+    // 终验：完整解码首帧（只校验，不用于入库尺寸）
+    if (!probe.seek(0)) {
+        qWarning("[StickerPaste][probe] seek failed fmt=%s", fmt.constData());
+        return false;
+    }
+    QImage first = reader.read();
+    if (first.isNull() || !first.size().isValid()) {
+        qWarning("[StickerPaste][probe] decode read failed fmt=%s", fmt.constData());
+        return false;
+    }
+
+    if (outFormat) *outFormat = fmt;
+    if (outSize)   *outSize = size;
+    return true;
+}
+
 // 按标题复用或新建贴纸包，返回 packId；失败返回空串
 static QString findOrCreatePack(StickerDbSyncInterface& db,
                                 const QString& packTitle,
@@ -365,13 +427,12 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
     for (const char* fmt : {"image/gif", "image/png", "image/jpeg", "image/webp"}) {
         QByteArray raw = mime ? mime->data(QLatin1String(fmt)) : QByteArray();
         if (raw.isEmpty()) continue;
-        QBuffer probe(&raw);
-        probe.open(QIODevice::ReadOnly);
-        QImageReader r(&probe);
-        const bool ok = r.canRead() && r.size().isValid();
-        probe.close();
-        if (ok) {
+        QByteArray f;
+        QSize s;
+        if (probeImageValidity(raw, &f, &s)) {
             bytes = raw;            // 保留原始格式（GIF 动画随之保留）
+            qInfo("[StickerPaste] source=mime fmt=%s size=%dx%d bytes=%d",
+                  f.constData(), s.width(), s.height(), raw.size());
             break;
         }
     }
@@ -383,11 +444,19 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
             const QString p = url.toLocalFile();
             if (p.isEmpty() || !QFileInfo::exists(p)) continue;
             if (!QFileInfo(p).isFile()) continue;
-            if (QImageReader::imageFormat(p).isEmpty()) continue;  // 非可读图片
+            if (QImageReader::imageFormat(p).isEmpty()) continue;  // 前置：非可读图片
             QFile f(p);
             if (f.open(QIODevice::ReadOnly)) {
-                bytes = f.readAll();
-                break;
+                QByteArray fb = f.readAll();
+                QByteArray fmt2;
+                QSize s2;
+                if (probeImageValidity(fb, &fmt2, &s2)) {
+                    bytes = fb;
+                    qInfo("[StickerPaste] source=uri path=%s fmt=%s size=%dx%d bytes=%lld",
+                          qPrintable(p), fmt2.constData(), s2.width(), s2.height(),
+                          (qint64)fb.size());
+                    break;
+                }
             }
         }
     }
@@ -404,6 +473,8 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
             if (errorOut) *errorOut = QStringLiteral("图片编码失败");
             return false;
         }
+        qInfo("[StickerPaste] source=bitmap fmt=png size=%dx%d bytes=%lld",
+              img.width(), img.height(), (qint64)bytes.size());
     }
 #endif
 
@@ -422,19 +493,16 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut)
         return false;
     }
 
-    // 探测真实格式（Android 分享/粘贴可能是 jpeg/gif/webp），按内容定扩展名
-    QBuffer probe;
-    probe.setData(bytes);
-    probe.open(QIODevice::ReadOnly);
-    QImageReader reader(&probe);
-    reader.setAutoTransform(true);
-    const QSize imgSize = reader.size();
-    const QByteArray fmt = reader.format();
-    probe.close();
-    if (!imgSize.isValid()) {
+    // 探测真实格式与尺寸（统一入口：各来源共用，按内容定扩展名）
+    QByteArray fmt;
+    QSize imgSize;
+    if (!probeImageValidity(bytes, &fmt, &imgSize)) {
         if (errorOut) *errorOut = QStringLiteral("图片解码失败");
         return false;
     }
+    qInfo("[StickerPaste] import ok fmt=%s size=%dx%d bytes=%lld",
+          fmt.constData(), imgSize.width(), imgSize.height(),
+          (qint64)bytes.size());
 
     QString ext = QStringLiteral(".png");
     if (fmt == "jpeg" || fmt == "jpg") ext = QStringLiteral(".jpg");
