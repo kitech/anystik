@@ -542,6 +542,56 @@ StickerStore::ensureInit()
 | GIF 动图 | 网格=首帧；预览=QMovie 全帧 | 同左 |
 | WebP 动图 | Qt6 图像插件 | 缺 libwebp 时降级静态首帧 |
 
+## GIF 粘贴处理：跨平台链路与 Qt/macOS 限制
+
+### 平台矩阵
+
+| 平台 | 粘贴链路 | 动画保留 |
+|------|----------|----------|
+| Linux | image/gif 原字节 或 text/uri-list 本地文件引用 | ✅ 源提供动图字节即保留 |
+| macOS | MIME 循环 → NSPasteboard 直读（macpasteboard.mm） → 位图兜底 | ⚠️ 浏览器拷贝本就得静态（见下） |
+| Android | content:// Uri 原字节读取 | ✅ 剪贴板可读前提下 |
+
+存储（贴纸 id = SHA1(全量原字节) 入库）与预览（网格首帧、预览层 QMovie→QImageReader 全帧）三平台共用，动画无损。
+
+### 三层成因（为何 macOS 常读不到完整 GIF 动画）
+
+1. **源 App 不把动画字节放上剪贴板（主因，应用层不可逆）**
+   - NSPasteboard 无标准 GIF 类型（标准类型仅 tiff/png/jpeg/pdf/…；GIF 仅 UTI `com.compuserve.gif`/`public.gif`）
+   - 实测/权威来源：Chrome(mac) "Copy Image" 落**静态 PNG**+URL（Clipboard Inspector、Photocopier README「Chrome copies GIFs as flat images」）；Safari 拷成 **RTFD** 或仅 URL（text/uri-list + text/html）；基于 NSImage 写剪贴板一律单帧 TIFF/PNG（[WebKit bug 190101：GIF 动画只保留首帧](https://bugs.webkit.org/show_bug.cgi?id=190101)）
+   - Linux 浏览器拷贝图片同为静态 PNG，故「浏览器拷贝动图→静态」非本应用缺陷
+2. **Qt 无 GIF UTI↔MIME 映射**：[QUtiMimeConverter](https://doc.qt.io/qt-6/qmacmimedata.html) 预置 UTI 仅 text/html/url/file-url/tiff/pict/vcard，不含 `com.compuserve.gif`/`public.gif`；未注册的 UTI 不保证出现在 `mime->formats()`，即使存在也无转换器把 `mime->data("image/gif")` 喂出字节
+3. **API 单帧限制**：`QClipboard::image()` 只返回单帧 QImage；完整动画必须拿到原始字节再用 QImageReader/QMovie 播放
+
+### 实现对照（本仓库）
+
+| 环节 | 位置 |
+|------|------|
+| 候选 MIME 循环（动画优先 gif/webp/apng/png/…） | `stickerstore.cpp:434-450` |
+| text/uri-list 本地文件引用（两段式校验） | `stickerstore.cpp:451-474` |
+| macOS NSPasteboard 直读抢救（copilot-cli 同款做法） | `stickerstore.cpp:475-494` + `macpasteboard.mm` |
+| 原字节验签入库（probeImageValidity/importImageBytes） | `stickerstore.cpp`（:233 附近起） |
+| 通用动画预览（QMovie→QImageReader 逐帧→静态） | `stickerpreviewoverlay.cpp` |
+| Android 原字节读取 | `ShareActivity.readClipboardImageBytes/readUriBytes` |
+
+### 已知限制
+
+- macOS 浏览器拷贝动图在源端已变静态，剪贴板层不可恢复（Photocopier 只能重新下载 GIF 再写 RTFD 补救）
+- Android 剪贴板 `text/uri-list`（文本型）未解析，仅日志
+- WebP 动图缺 libwebp 插件时降级静态首帧；APNG/AVIF 需对应 Qt 图像插件
+- Android API 33+ 非本应用写入的剪贴板有遮蔽策略；读剪贴板为 UI 线程同步 I/O（既有 TODO）
+
+### [StickerPaste] 日志速查
+
+| 日志 | 含义 |
+|------|------|
+| `mime formats: …` | 剪贴板暴露的 MIME 全集（mac 排查关键：能确认源到底写了什么） |
+| `source=mime type=…` | 命中某 MIME 的原字节 |
+| `source=uri path=…` | text/uri-list 本地文件读取成功 |
+| `source=macpb type=…` | NSPasteboard 直读抢救成功（mac 专有） |
+| `source=bitmap …` | 位图兜底 PNG（动画必然丢失处） |
+| `import ok fmt=…` | 入库成功 |
+
 ## 新增文件对齐 CMakeLists
 
 `qt_add_executable(anystik ...)` 仅追加（不删任何既有条目）：

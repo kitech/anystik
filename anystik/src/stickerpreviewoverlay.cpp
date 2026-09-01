@@ -121,6 +121,20 @@ StickerPreviewOverlay::StickerPreviewOverlay(QQuickItem* parent)
         }
     });
 
+    // 通用动图播放（非 QMovie 能力内的多帧格式，如 Qt 插件支持的动画 WebP）：
+    // 每帧按 nextImageDelay 推进；到底后跳回首帧循环。
+    connect(&m_animTimer, &QTimer::timeout, this, [this]() {
+        if (!m_reader) return;
+        if (!m_reader->jumpToNextImage() && !m_reader->jumpToImage(0)) return;
+        const QImage f = m_reader->read();
+        if (f.isNull()) return;
+        m_image = f;
+        m_dirty = true;
+        update();
+        const int delay = m_reader->nextImageDelay();
+        m_animTimer.start(delay > 0 ? delay : 33);
+    });
+
     if (auto* p = parentItem()) {
         connect(p, &QQuickItem::widthChanged, this, [this]() {
             if (auto* p = parentItem()) {
@@ -139,34 +153,60 @@ StickerPreviewOverlay::StickerPreviewOverlay(QQuickItem* parent)
     }
 }
 
+StickerPreviewOverlay::~StickerPreviewOverlay()
+{
+    delete m_movie;
+    delete m_reader;
+}
+
 void StickerPreviewOverlay::show(const StickerBrief& brief)
 {
     m_brief = brief;
     m_emoji = brief.emoji;
 
-    // 动图：QMovie 播放；静态图：QImage 一次加载
     delete m_movie;
     m_movie = nullptr;
+    delete m_reader;
+    m_reader = nullptr;
     m_redrawTimer.stop();
+    m_animTimer.stop();
 
     const QString filePath = brief.filePath;
-    if (QImageReader::imageFormat(filePath).toLower() == "gif") {
-        m_movie = new QMovie(filePath);
-        connect(m_movie, &QMovie::frameChanged, this, [this]() {
-            m_dirty = true;
-            update();
-        });
-        if (m_movie->isValid()) {
-            m_movie->start();
-            m_image = m_movie->currentImage();
-            m_redrawTimer.start();
+
+    // 动图优先走 QMovie（GIF 最稳；Qt 插件若支持也可播动画 WebP）
+    m_movie = new QMovie(filePath);
+    connect(m_movie, &QMovie::frameChanged, this, [this]() {
+        m_dirty = true;
+        update();
+    });
+    if (m_movie->isValid() && m_movie->frameCount() > 1) {
+        m_movie->start();
+        m_image = m_movie->currentImage();
+        m_redrawTimer.start();
+    } else {
+        delete m_movie;
+        m_movie = nullptr;
+    }
+
+    // QMovie 不支持的动画格式：QImageReader 多帧逐帧播放
+    if (!m_movie) {
+        m_reader = new QImageReader(filePath);
+        m_reader->setAutoTransform(true);
+        if (m_reader->canRead() && m_reader->imageCount() > 1) {
+            m_image = m_reader->read();
+            if (!m_image.isNull())
+                m_animTimer.start(33);
+            else {
+                delete m_reader;
+                m_reader = nullptr;
+            }
         } else {
-            delete m_movie;
-            m_movie = nullptr;
+            delete m_reader;
+            m_reader = nullptr;
         }
     }
 
-    if (!m_movie) {
+    if (!m_movie && !m_reader) {
         QImageReader reader(filePath);
         reader.setAutoTransform(true);
         m_image = reader.read();

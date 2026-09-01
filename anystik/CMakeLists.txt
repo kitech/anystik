@@ -91,6 +91,16 @@ qt_add_executable(anystik
     ${qlcomp_dir}/md5.c
 )
 
+if(APPLE)
+    # macOS：macpasteboard.mm 走 Objective-C++ 直接读 NSPasteboard 原始 GIF
+    enable_language(OBJCXX)
+    target_sources(anystik PRIVATE
+        src/macpasteboard.h
+        src/macpasteboard.mm
+    )
+    target_link_libraries(anystik PRIVATE "-framework AppKit")
+endif()
+
 # ── vendor: cJSON header ──
 target_include_directories(anystik PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor

@@ -2,6 +2,7 @@
 #include "storage.h"
 #include "sticker_db.h"
 #include "androidutils.h"
+#include "macpasteboard.h"
 
 #include <QStandardPaths>
 #include <QDir>
@@ -261,7 +262,7 @@ static bool probeImageValidity(const QByteArray& bytes,
 
     static const QSet<QByteArray> kAllowed = {
         "png","jpg","jpeg","gif","webp","bmp","tif","tiff","tga",
-        "xpm","xbm","ppm","pbm","pgm","wbmp","svg","svgz"
+        "xpm","xbm","ppm","pbm","pgm","wbmp","svg","svgz","avif"
     };
     if (!kAllowed.contains(fmt)) {
         qWarning("[StickerPaste][probe] format not in whitelist fmt=%s",
@@ -424,15 +425,27 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
     // 优先取剪贴板原始图像字节（保留 GIF 动画）；失败回退位图编码 PNG。
     // 浏览器/文件管理器复制 GIF 通常以 image/gif MIME 提供原始字节。
     const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
-    for (const char* fmt : {"image/gif", "image/png", "image/jpeg", "image/webp"}) {
+    if (mime)
+        qInfo("[StickerPaste] mime formats: %s",
+              mime->formats().join('|').toUtf8().constData());
+    // 顺序：动画优先（gif/原始 UTI/webp/apng），静态兜底置后。
+    // mac 上 Qt 通常不把 com.compuserve.gif/public.gif 映射为 image/gif，
+    // 也不保证其原始 UTI 出现在 formats()（未注册的 UTI 不暴露）。
+    // 此处按名 best-effort 取原始字节，权威回退见下面 macPasteboardData 直读。
+    for (const char* fmt : {"image/gif",
+                            "com.compuserve.gif", "public.gif", "image/x-gif",
+                            "image/webp",
+                            "image/apng", "image/png",
+                            "image/jpeg", "image/tiff", "image/bmp",
+                            "image/avif", "image/x-png"}) {
         QByteArray raw = mime ? mime->data(QLatin1String(fmt)) : QByteArray();
         if (raw.isEmpty()) continue;
         QByteArray f;
         QSize s;
         if (probeImageValidity(raw, &f, &s)) {
             bytes = raw;            // 保留原始格式（GIF 动画随之保留）
-            qInfo("[StickerPaste] source=mime fmt=%s size=%dx%d bytes=%d",
-                  f.constData(), s.width(), s.height(), raw.size());
+            qInfo("[StickerPaste] source=mime type=%s fmt=%s size=%dx%d bytes=%d",
+                  fmt, f.constData(), s.width(), s.height(), raw.size());
             break;
         }
     }
@@ -460,6 +473,26 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
             }
         }
     }
+#ifdef Q_OS_MACOS
+    // mac：Qt 未暴露的原始 GIF 类型，直接查系统 NSPasteboard
+    if (bytes.isEmpty()) {
+        static const char* kMacTypes[] = {
+            "com.compuserve.gif", "public.gif"
+        };
+        for (const char* t : kMacTypes) {
+            QByteArray raw = macPasteboardData(t);
+            if (raw.isEmpty()) continue;
+            QByteArray f;
+            QSize s;
+            if (probeImageValidity(raw, &f, &s)) {
+                bytes = raw;
+                qInfo("[StickerPaste] source=macpb type=%s fmt=%s size=%dx%d bytes=%d",
+                      t, f.constData(), s.width(), s.height(), raw.size());
+                break;
+            }
+        }
+    }
+#endif
     if (bytes.isEmpty()) {
         const QImage img = QGuiApplication::clipboard()->image();
         if (img.isNull()) {
@@ -518,6 +551,7 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut)
     else if (fmt == "pgm")  ext = QStringLiteral(".pgm");
     else if (fmt == "wbmp") ext = QStringLiteral(".wbmp");
     else if (fmt == "svg" || fmt == "svgz") ext = QStringLiteral(".svg");
+    else if (fmt == "avif") ext = QStringLiteral(".avif");
 
     // 幂等 ID + 落盘路径
     const QString idHex = QString(QCryptographicHash::hash(

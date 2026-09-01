@@ -8,6 +8,7 @@
 #include <QImage>
 
 class QMovie;
+class QImageReader;
 
 class StickerPreviewNode : public QskPaintedNode
 {
@@ -29,6 +30,7 @@ class StickerPreviewOverlay : public QQuickItem
     Q_OBJECT
 public:
     explicit StickerPreviewOverlay(QQuickItem* parent = nullptr);
+    ~StickerPreviewOverlay() override;
 
     void show(const StickerBrief& brief);
 
@@ -51,7 +53,9 @@ private:
     QImage m_image;
     QString m_emoji;
     QMovie* m_movie = nullptr;
+    QImageReader* m_reader = nullptr;
     QTimer m_redrawTimer;
+    QTimer m_animTimer;
     bool m_dirty = true;
 };
 
