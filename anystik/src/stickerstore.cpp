@@ -441,14 +441,14 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
 #else
     // 优先取剪贴板原始图像字节（保留 GIF 动画）；失败回退位图编码 PNG。
     // 浏览器/文件管理器复制 GIF 通常以 image/gif MIME 提供原始字节。
+#if defined(Q_OS_MACOS)
+    if (!useMmPasteboard())
+        ensureMacGifConverter();   // 先注册，再取 mime/打日志，保证 diagnostics 含 image/gif
+#endif
     const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
     if (mime)
         qInfo("[StickerPaste] mime formats: %s",
               mime->formats().join('|').toUtf8().constData());
-#if defined(Q_OS_MACOS)
-    if (!useMmPasteboard())
-        ensureMacGifConverter();   // QUtiMimeConverter：让下面 image/gif 直接命中原始字节
-#endif
     // 顺序：动画优先（gif/原始 UTI/webp/apng），静态兜底置后。
     // mac 上 Qt 通常不把 com.compuserve.gif/public.gif 映射为 image/gif，
     // 也不保证其原始 UTI 出现在 formats()（未注册的 UTI 不暴露）。
@@ -462,14 +462,35 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
                             "image/avif", "image/x-png"}) {
         QByteArray raw = mime ? mime->data(QLatin1String(fmt)) : QByteArray();
         if (raw.isEmpty()) continue;
+#if defined(Q_OS_MACOS)
+        // GIF 分支：无论有效与否都带上所用后端（Qt 方案 / mac native 方案）
+        const bool gifBranch = qstrcmp(fmt, "image/gif") == 0
+                || qstrcmp(fmt, "com.compuserve.gif") == 0
+                || qstrcmp(fmt, "public.gif") == 0
+                || qstrcmp(fmt, "image/x-gif") == 0;
+#endif
         QByteArray f;
         QSize s;
         if (probeImageValidity(raw, &f, &s)) {
             bytes = raw;            // 保留原始格式（GIF 动画随之保留）
-            qInfo("[StickerPaste] source=mime type=%s fmt=%s size=%dx%d bytes=%d",
-                  fmt, f.constData(), s.width(), s.height(), raw.size());
+#if defined(Q_OS_MACOS)
+            if (gifBranch)
+                qInfo("[StickerPaste] source=mime type=%s fmt=%s size=%dx%d bytes=%d backend=%s",
+                      fmt, f.constData(), s.width(), s.height(), raw.size(),
+                      useMmPasteboard() ? "NSPasteboard native (.mm)" : "QUtiMimeConverter (Qt)");
+            else
+#endif
+                qInfo("[StickerPaste] source=mime type=%s fmt=%s size=%dx%d bytes=%d",
+                      fmt, f.constData(), s.width(), s.height(), raw.size());
             break;
         }
+#if defined(Q_OS_MACOS)
+        if (gifBranch)
+            // 无效 GIF 也显示后端与来源（多处候选时逐条出现）
+            qInfo("[StickerPaste] source=mime type=%s bytes=%d backend=%s decode-failed",
+                  fmt, raw.size(),
+                  useMmPasteboard() ? "NSPasteboard native (.mm)" : "QUtiMimeConverter (Qt)");
+#endif
     }
     if (bytes.isEmpty()) {
         // text/uri-list：文件管理器复制文件引用 → 读本地可读图片原始字节（保各格式/动画）
@@ -509,10 +530,12 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
                 QSize s;
                 if (probeImageValidity(raw, &f, &s)) {
                     bytes = raw;
-                    qInfo("[StickerPaste] source=macpb type=%s fmt=%s size=%dx%d bytes=%d",
+                    qInfo("[StickerPaste] source=macpb type=%s fmt=%s size=%dx%d bytes=%d backend=NSPasteboard native (.mm)",
                           t, f.constData(), s.width(), s.height(), raw.size());
                     break;
                 }
+                qInfo("[StickerPaste] source=macpb type=%s bytes=%d backend=NSPasteboard native (.mm) decode-failed",
+                      t, raw.size());
             }
         }
     } else {

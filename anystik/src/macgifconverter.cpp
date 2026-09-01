@@ -21,6 +21,8 @@ QString MacGifUtiConverter::mimeForUti(const QString &uti) const
 
 QString MacGifUtiConverter::utiForMime(const QString &mime) const
 {
+    if (mime == QLatin1String("com.compuserve.gif") || mime == QLatin1String("public.gif"))
+        return mime;                 // 允许 B 循环按原始 UTI 名直读
     if (mime == QLatin1String("image/gif"))
         return QLatin1String("com.compuserve.gif");
     return QString();
@@ -30,7 +32,9 @@ QVariant MacGifUtiConverter::convertToMime(const QString &mime,
                                            const QList<QByteArray> &data,
                                            const QString &uti) const
 {
-    if (mime == QLatin1String("image/gif")) {
+    if (mime == QLatin1String("image/gif")
+        || mime == QLatin1String("com.compuserve.gif")
+        || mime == QLatin1String("public.gif")) {
         QByteArray out;
         for (const QByteArray &chunk : data)
             out += chunk;

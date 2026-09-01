@@ -590,6 +590,7 @@ StickerStore::ensureInit()
 | `source=mime type=…` | 命中某 MIME 的原字节 |
 | `source=uri path=…` | text/uri-list 本地文件读取成功 |
 | `source=macpb type=…` | NSPasteboard 直读抢救成功（mac 专有） |
+| `source=mime type=…(gif) backend=…` / `source=macpb … backend=…` | GIF 分支元信息行始终含后端：`QUtiMimeConverter (Qt)` 或 `NSPasteboard native (.mm)`；无效时该行记 `decode-failed`，仍显示后端 |
 | `source=bitmap …` | 位图兜底 PNG（动画必然丢失处） |
 | `import ok fmt=…` | 入库成功 |
 

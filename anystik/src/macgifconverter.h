@@ -3,7 +3,7 @@
 
 #include <QByteArray>
 #if defined(Q_OS_MACOS)
-#include <QUtiMimeConverter>
+#include <QtGui/qutimimeconverter.h>
 #include <QList>
 #include <QVariant>
 #endif
