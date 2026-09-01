@@ -33,6 +33,7 @@ struct StickerBrief {
     int     size   = 0;
     qint64  lastUsed = 0;
     QString description;   // 图片描述，不超过 140 字
+    int     isPublic = 0;   // 是否公开（默认不公开）
 };
 
 // 内置下载源唯一表。approxSize 为预告约值（静态，非运行时所得）；-1 = 无实测

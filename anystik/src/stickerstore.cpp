@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QClipboard>
+#include <QMimeData>
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -358,17 +359,35 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
         }
     }
 #else
-    const QImage img = QGuiApplication::clipboard()->image();
-    if (img.isNull()) {
-        if (errorOut) *errorOut = QStringLiteral("剪贴板中没有图片");
-        return false;
+    // 优先取剪贴板原始图像字节（保留 GIF 动画）；失败回退位图编码 PNG。
+    // 浏览器/文件管理器复制 GIF 通常以 image/gif MIME 提供原始字节。
+    const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
+    for (const char* fmt : {"image/gif", "image/png", "image/jpeg", "image/webp"}) {
+        QByteArray raw = mime ? mime->data(QLatin1String(fmt)) : QByteArray();
+        if (raw.isEmpty()) continue;
+        QBuffer probe(&raw);
+        probe.open(QIODevice::ReadOnly);
+        QImageReader r(&probe);
+        const bool ok = r.canRead() && r.size().isValid();
+        probe.close();
+        if (ok) {
+            bytes = raw;            // 保留原始格式（GIF 动画随之保留）
+            break;
+        }
     }
+    if (bytes.isEmpty()) {
+        const QImage img = QGuiApplication::clipboard()->image();
+        if (img.isNull()) {
+            if (errorOut) *errorOut = QStringLiteral("剪贴板中没有图片");
+            return false;
+        }
 
-    QBuffer buffer(&bytes);
-    buffer.open(QIODevice::WriteOnly);
-    if (!img.save(&buffer, "PNG")) {
-        if (errorOut) *errorOut = QStringLiteral("图片编码失败");
-        return false;
+        QBuffer buffer(&bytes);
+        buffer.open(QIODevice::WriteOnly);
+        if (!img.save(&buffer, "PNG")) {
+            if (errorOut) *errorOut = QStringLiteral("图片编码失败");
+            return false;
+        }
     }
 #endif
 
@@ -554,6 +573,17 @@ bool StickerStore::copyStickerToClipboard(const QString& filePath)
         qWarning() << "[StickerStore] android copy to clipboard failed:" << filePath;
     }
 #else
+    // GIF：以 MIME 携带原始字节（保动画），附位图供不支持 GIF 的应用回退
+    if (QImageReader::imageFormat(filePath).toLower() == "gif") {
+        QFile f(filePath);
+        if (f.open(QIODevice::ReadOnly)) {
+            QMimeData* mime = new QMimeData;
+            mime->setData("image/gif", f.readAll());
+            mime->setImageData(QImage(filePath));   // PNG 位图回退
+            QGuiApplication::clipboard()->setMimeData(mime);
+            return true;
+        }
+    }
     QImage img(filePath);
     if (img.isNull()) {
         qWarning() << "[StickerStore] failed to load image:" << filePath;
