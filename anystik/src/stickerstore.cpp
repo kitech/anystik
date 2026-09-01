@@ -3,6 +3,7 @@
 #include "sticker_db.h"
 #include "androidutils.h"
 #include "macpasteboard.h"
+#include "macgifconverter.h"
 
 #include <QStandardPaths>
 #include <QDir>
@@ -393,6 +394,22 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
 }
 
 // ── 粘贴添加：读系统剪贴板图片 → 存本地 → 归入「粘贴板」分组 ──
+
+namespace {
+// mac GIF 读取双方案（均编译进 mac 构建）：
+//   ANYS_USE_MM_PASTEBOARD=1 → 旧 .mm(NSPasteboard) 直读;
+//   否则（默认）→ 纯 C++ QUtiMimeConverter。其它平台恒 false。
+bool useMmPasteboard()
+{
+#if defined(Q_OS_MACOS)
+    static bool v = (qEnvironmentVariableIntValue("ANYS_USE_MM_PASTEBOARD") != 0);
+    return v;
+#else
+    return false;
+#endif
+}
+}
+
 bool StickerStore::pasteFromClipboard(QString* errorOut)
 {
     if (!ensureInit()) {
@@ -428,10 +445,15 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
     if (mime)
         qInfo("[StickerPaste] mime formats: %s",
               mime->formats().join('|').toUtf8().constData());
+#if defined(Q_OS_MACOS)
+    if (!useMmPasteboard())
+        ensureMacGifConverter();   // QUtiMimeConverter：让下面 image/gif 直接命中原始字节
+#endif
     // 顺序：动画优先（gif/原始 UTI/webp/apng），静态兜底置后。
     // mac 上 Qt 通常不把 com.compuserve.gif/public.gif 映射为 image/gif，
     // 也不保证其原始 UTI 出现在 formats()（未注册的 UTI 不暴露）。
-    // 此处按名 best-effort 取原始字节，权威回退见下面 macPasteboardData 直读。
+    // 此处按名 best-effort 取原始字节；mac 默认经 ensureMacGifConverter()(QUtiMimeConverter)
+    // 权威读取，旧 macPasteboardData 直读随 ANYS_USE_MM_PASTEBOARD 运行时切换。
     for (const char* fmt : {"image/gif",
                             "com.compuserve.gif", "public.gif", "image/x-gif",
                             "image/webp",
@@ -474,23 +496,28 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
         }
     }
 #ifdef Q_OS_MACOS
-    // mac：Qt 未暴露的原始 GIF 类型，直接查系统 NSPasteboard
-    if (bytes.isEmpty()) {
-        static const char* kMacTypes[] = {
-            "com.compuserve.gif", "public.gif"
-        };
-        for (const char* t : kMacTypes) {
-            QByteArray raw = macPasteboardData(t);
-            if (raw.isEmpty()) continue;
-            QByteArray f;
-            QSize s;
-            if (probeImageValidity(raw, &f, &s)) {
-                bytes = raw;
-                qInfo("[StickerPaste] source=macpb type=%s fmt=%s size=%dx%d bytes=%d",
-                      t, f.constData(), s.width(), s.height(), raw.size());
-                break;
+    if (useMmPasteboard()) {
+        // 旧方案（运行时切回，ANYS_USE_MM_PASTEBOARD=1）：直接查系统 NSPasteboard
+        if (bytes.isEmpty()) {
+            static const char* kMacTypes[] = {
+                "com.compuserve.gif", "public.gif"
+            };
+            for (const char* t : kMacTypes) {
+                QByteArray raw = macPasteboardData(t);
+                if (raw.isEmpty()) continue;
+                QByteArray f;
+                QSize s;
+                if (probeImageValidity(raw, &f, &s)) {
+                    bytes = raw;
+                    qInfo("[StickerPaste] source=macpb type=%s fmt=%s size=%dx%d bytes=%d",
+                          t, f.constData(), s.width(), s.height(), raw.size());
+                    break;
+                }
             }
         }
+    } else {
+        // 默认方案：转换器已在 MIME 循环前 ensureMacGifConverter() 注册，
+        // image/gif 已由循环取出；此处 bytes 仍为空才顺延位图兜底。
     }
 #endif
     if (bytes.isEmpty()) {

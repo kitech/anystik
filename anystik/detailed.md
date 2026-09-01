@@ -549,7 +549,7 @@ StickerStore::ensureInit()
 | 平台 | 粘贴链路 | 动画保留 |
 |------|----------|----------|
 | Linux | image/gif 原字节 或 text/uri-list 本地文件引用 | ✅ 源提供动图字节即保留 |
-| macOS | MIME 循环 → NSPasteboard 直读（macpasteboard.mm） → 位图兜底 | ⚠️ 浏览器拷贝本就得静态（见下） |
+| macOS | MIME 循环 → QUtiMimeConverter（gif UTI→image/gif） → 位图兜底 | ⚠️ 浏览器拷贝本就得静态（见下） |
 | Android | content:// Uri 原字节读取 | ✅ 剪贴板可读前提下 |
 
 存储（贴纸 id = SHA1(全量原字节) 入库）与预览（网格首帧、预览层 QMovie→QImageReader 全帧）三平台共用，动画无损。
@@ -569,7 +569,8 @@ StickerStore::ensureInit()
 |------|------|
 | 候选 MIME 循环（动画优先 gif/webp/apng/png/…） | `stickerstore.cpp:434-450` |
 | text/uri-list 本地文件引用（两段式校验） | `stickerstore.cpp:451-474` |
-| macOS NSPasteboard 直读抢救（copilot-cli 同款做法） | `stickerstore.cpp:475-494` + `macpasteboard.mm` |
+| macOS 原始 GIF UTI 映射（QUtiMimeConverter，默认） | `macgifconverter.h/.cpp` + `stickerstore.cpp`（ensureMacGifConverter，MIME 循环前） |
+| 旧方案 macOS NSPasteboard 直读（同时编译，运行时切换） | `macpasteboard.mm`；环境变量 `ANYS_USE_MM_PASTEBOARD=1` 启用 |
 | 原字节验签入库（probeImageValidity/importImageBytes） | `stickerstore.cpp`（:233 附近起） |
 | 通用动画预览（QMovie→QImageReader 逐帧→静态） | `stickerpreviewoverlay.cpp` |
 | Android 原字节读取 | `ShareActivity.readClipboardImageBytes/readUriBytes` |

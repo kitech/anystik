@@ -93,10 +93,13 @@ qt_add_executable(anystik
 
 if(APPLE)
     # macOS：macpasteboard.mm 走 Objective-C++ 直接读 NSPasteboard 原始 GIF
+    #（旧方案，运行时 ANYS_USE_MM_PASTEBOARD=1 切回）+ 默认纯 C++ QUtiMimeConverter 方案
     enable_language(OBJCXX)
     target_sources(anystik PRIVATE
         src/macpasteboard.h
         src/macpasteboard.mm
+        src/macgifconverter.h
+        src/macgifconverter.cpp
     )
     target_link_libraries(anystik PRIVATE "-framework AppKit")
 endif()
