@@ -18,6 +18,8 @@
 #include <QskBoxShapeMetrics.h>
 #include <QskPopup.h>
 #include <QskSimpleListBox.h>
+#include <QskFunctions.h>
+#include <QFontMetricsF>
 
 #include <QDir>
 #include <QFileInfo>
@@ -254,20 +256,42 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
     auto* menu = new QskMenu(this);
     menu->setModal(true);
     menu->setPopupFlag(QskPopup::DeleteOnClose, false);
-    menu->addOption(QskLabelData(QString::fromUtf8("复制")));
-    menu->addOption(QskLabelData(QString::fromUtf8("预览")));
+    const int idxCopy = menu->addOption(QskLabelData(QString::fromUtf8("复制")));
+    const int idxCopy05 = menu->addOption(QskLabelData(QString::fromUtf8("复制x0.5")));
+    const int idxCopy20 = menu->addOption(QskLabelData(QString::fromUtf8("复制x2.0")));
+    const int idxPreview = menu->addOption(QskLabelData(QString::fromUtf8("预览")));
     const int idxShare = menu->addOption(QskLabelData(QString::fromUtf8("分享")));
     const int idxDelete = menu->addOption(QskLabelData(QString::fromUtf8("删除")));
     menu->setOrigin(scenePos);
 
+    // 菜单宽由 skinlet 按最长文本自动测量；补 strut 下限防被皮肤压缩
+    {
+        const QFontMetricsF fm(menu->effectiveFont(QskMenu::Text));
+        const qreal pad = menu->paddingHint(QskMenu::Segment).left()
+                        + menu->paddingHint(QskMenu::Segment).right();
+        const qreal minW = qskHorizontalAdvance(fm, QString::fromUtf8("复制x2.0"))
+                         + pad + 10;
+        menu->setStrutSizeHint(QskMenu::Panel, QSizeF(minW, 0));
+    }
+
     connect(menu, &QskMenu::triggered, this,
-        [this, menu, idxShare, idxDelete](int index) {
-        if (index == 0) {
+        [this, menu, idxCopy, idxCopy05, idxCopy20, idxPreview, idxShare, idxDelete](int index) {
+        if (index == idxCopy) {
             StickerStore::instance()->touchSticker(m_ctxBrief.id);
             bool ok = StickerStore::instance()->copyStickerToClipboard(m_ctxBrief.filePath);
             showToast(ok ? QString::fromUtf8("已复制")
                          : QString::fromUtf8("复制失败"));
-        } else if (index == 1) {
+        } else if (index == idxCopy05) {
+            StickerStore::instance()->touchSticker(m_ctxBrief.id);
+            bool ok = StickerStore::instance()->copyStickerScaledToClipboard(m_ctxBrief.filePath, 0.5);
+            showToast(ok ? QString::fromUtf8("已复制x0.5")
+                         : QString::fromUtf8("复制失败"));
+        } else if (index == idxCopy20) {
+            StickerStore::instance()->touchSticker(m_ctxBrief.id);
+            bool ok = StickerStore::instance()->copyStickerScaledToClipboard(m_ctxBrief.filePath, 2.0);
+            showToast(ok ? QString::fromUtf8("已复制x2.0")
+                         : QString::fromUtf8("复制失败"));
+        } else if (index == idxPreview) {
             openPreview(m_ctxBrief);
         } else if (index == idxShare) {
             if (!StickerStore::instance()->shareStickerFile(m_ctxBrief.filePath)) {
