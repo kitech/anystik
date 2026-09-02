@@ -1,6 +1,7 @@
 #include "bundledpackspage.h"
 #include "myscrollarea.h"
 #include "androidutils.h"
+#include "dialogpopup.h"
 
 #include <QSettings>
 #include <QSet>
@@ -221,35 +222,41 @@ void BundledPacksPage::addPackRow(QskLinearBox* list, const StickerPackBrief& pa
 
     auto* btns = new QskLinearBox(Qt::Horizontal, card);
     btns->setSpacing(8);
-    auto* uninstall = new QskPushButton("卸载", btns);
-    auto* wipe = new QskPushButton("彻底删除", btns);
+    auto* uninstallBtn = new QskPushButton("卸载", btns);
+    auto* wipeBtn = new QskPushButton("彻底删除", btns);
 
-    auto* dialog = qskDialog;
-    connect(toggle, &QskPushButton::clicked, this, [this, store, id = pack.id, installed]() {
+    connect(toggle, &QskPushButton::clicked, this,
+            [this, store, id = pack.id, installed]() {
         if (store->setPackInstalled(id, !installed))
             showToast(installed ? "已停用" : "已启用");
     });
 
-    connect(uninstall, &QskPushButton::clicked, this,
-            [this, store, dialog, title = pack.title, id = pack.id]() {
-        if (dialog->question("卸载", "卸载分组「" + title
-                + "」？图片文件保留（可再次导入）。",
-                QskDialog::Actions(QskDialog::Yes | QskDialog::No))
-                == QskDialog::Yes) {
-            if (store->uninstallPack(id, false))
-                showToast("已卸载，文件保留");
-        }
+    connect(uninstallBtn, &QskPushButton::clicked, this,
+            [this, store, title = pack.title, id = pack.id]() {
+        ConfirmPopup::show(this, QString::fromUtf8("卸载"),
+            QString::fromUtf8("卸载分组「%1」？图片文件保留（可再次导入）。")
+                .arg(title),
+            QString::fromUtf8("卸载"), QString::fromUtf8("取消"),
+            [this, store, id](bool yes) {
+                if (yes) {
+                    if (store->uninstallPack(id, false))
+                        showToast("已卸载，文件保留");
+                }
+            });
     });
 
-    connect(wipe, &QskPushButton::clicked, this,
-            [this, store, dialog, title = pack.title, id = pack.id]() {
-        if (dialog->question("彻底删除", "删除分组「" + title
-                + "」及其全部图片文件？此操作不可恢复。",
-                QskDialog::Actions(QskDialog::Yes | QskDialog::No))
-                == QskDialog::Yes) {
-            if (store->uninstallPack(id, true))
-                showToast("已彻底删除");
-        }
+    connect(wipeBtn, &QskPushButton::clicked, this,
+            [this, store, title = pack.title, id = pack.id]() {
+        ConfirmPopup::show(this, QString::fromUtf8("彻底删除"),
+            QString::fromUtf8("删除分组「%1」及其全部图片文件？此操作不可恢复。")
+                .arg(title),
+            QString::fromUtf8("删除"), QString::fromUtf8("取消"),
+            [this, store, id](bool yes) {
+                if (yes) {
+                    if (store->uninstallPack(id, true))
+                        showToast("已彻底删除");
+                }
+            });
     });
 }
 

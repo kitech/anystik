@@ -15,6 +15,7 @@
 #include <QSslSocket>
 #include <QQuickItem>
 #include <QskDialog.h>
+#include "dialogpopup.h"
 #include <QskSkinManager.h>
 #include <QskFontRole.h>
 #include <QskWindow.h>
@@ -401,15 +402,19 @@ int main(int argc, char* argv[]) {
             for (const auto& d : distributors) {
                 displayNames.append(d);
             }
-            QskDialog* dialog = qskDialog;
-            dialog->setTransientParent(&window);
-            QString selected = dialog->select("选择推送服务", displayNames);
-            if (!selected.isEmpty()) {
-                int idx = displayNames.indexOf(selected);
-                if (idx >= 0) {
-                    PushHandler::instance()->selectDistributor(distributors[idx]);
-                }
-            }
+            auto* contentItem = window.contentItem();
+            if (!contentItem) return;
+            SelectPopup::show(contentItem, QString::fromUtf8("选择推送服务"),
+                displayNames,
+                [distributors, displayNames](const QString& selected) {
+                    if (!selected.isEmpty()) {
+                        int idx = displayNames.indexOf(selected);
+                        if (idx >= 0) {
+                            PushHandler::instance()
+                                ->selectDistributor(distributors[idx]);
+                        }
+                    }
+                });
         });
 
     // 注册失败

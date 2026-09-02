@@ -2,6 +2,7 @@
 #include "stickerlist.h"
 #include "stickerpreviewoverlay.h"
 #include "menuoverlay.h"
+#include "dialogpopup.h"
 #include "pushstatusbar.h"
 #include "androidutils.h"
 #include "pagemanager.h"
@@ -332,22 +333,20 @@ void StickerHomePage::openPreview(const StickerBrief& brief)
 // 通用删除（软删除：DB 置 deleted=1，文件保留）——网格长按菜单与预览页共用
 void StickerHomePage::confirmDeleteSticker(const StickerBrief& brief)
 {
-    auto* dialog = qskDialog;
-    dialog->setTransientParent(window());
-    QskDialog::Action action = dialog->question(
-        QString::fromUtf8("删除贴纸"),
+    ConfirmPopup::show(this, QString::fromUtf8("删除贴纸"),
         QString::fromUtf8("确定删除这张贴纸？"),
-        QskDialog::Actions(QskDialog::Yes | QskDialog::No),
-        QskDialog::No);
-    if (action != QskDialog::Yes) {
-        return;
-    }
-    if (StickerStore::instance()->deleteSticker(brief.id)) {
-        showToast(QString::fromUtf8("已删除"));
-        for (auto* o : findChildren<StickerPreviewOverlay*>())
-            o->deleteLater();
-        onTabChanged(m_tabBar->currentIndex());
-    }
+        QString::fromUtf8("删除"), QString::fromUtf8("取消"),
+        [this, brief](bool accepted) {
+            if (!accepted) {
+                return;
+            }
+            if (StickerStore::instance()->deleteSticker(brief.id)) {
+                showToast(QString::fromUtf8("已删除"));
+                for (auto* o : findChildren<StickerPreviewOverlay*>())
+                    o->deleteLater();
+                onTabChanged(m_tabBar->currentIndex());
+            }
+        });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -427,42 +426,41 @@ void StickerHomePage::showPackManageMenu()
         names.append(pack.title);
     }
 
-    auto* dialog = qskDialog;
-    dialog->setTransientParent(window());
-    QString selected = dialog->select(QString::fromUtf8("选择分组"), names);
-    if (selected.isEmpty()) {
-        return;
-    }
+    SelectPopup::show(this, QString::fromUtf8("选择分组"), names,
+        [this, names](const QString& selected) {
+            if (selected.isEmpty()) {
+                return;
+            }
+            int idx = names.indexOf(selected);
+            if (idx < 0 || idx >= m_packs.size()) {
+                return;
+            }
+            m_ctxPack = m_packs[idx];
 
-    int idx = names.indexOf(selected);
-    if (idx < 0 || idx >= m_packs.size()) {
-        return;
-    }
-    m_ctxPack = m_packs[idx];
+            auto* menu = new QskMenu(this);
+            menu->setModal(true);
+            menu->setPopupFlag(QskPopup::DeleteOnClose, false);
+            menu->addOption(QskLabelData(QString::fromUtf8("重命名")));
+            menu->addOption(QskLabelData(QString::fromUtf8("删除分组")));
+            const QPointF center(this->width() / 2, this->height() / 2);
+            menu->setOrigin(center);
 
-    auto* menu = new QskMenu(this);
-    menu->setModal(true);
-    menu->setPopupFlag(QskPopup::DeleteOnClose, false);
-    menu->addOption(QskLabelData(QString::fromUtf8("重命名")));
-    menu->addOption(QskLabelData(QString::fromUtf8("删除分组")));
-    const QPointF center(this->width() / 2, this->height() / 2);
-    menu->setOrigin(center);
+            connect(menu, &QskMenu::triggered, this, [this](int index) {
+                if (index == 0) {
+                    showRenameDialog(m_ctxPack);
+                } else if (index == 1) {
+                    removePack(m_ctxPack);
+                }
+                if (auto* m = qobject_cast<QskMenu*>(sender()))
+                    m->close();
+            });
 
-    connect(menu, &QskMenu::triggered, this, [this](int index) {
-        if (index == 0) {
-            showRenameDialog(m_ctxPack);
-        } else if (index == 1) {
-            removePack(m_ctxPack);
-        }
-        if (auto* m = qobject_cast<QskMenu*>(sender()))
-            m->close();
-    });
-
-    {
-        auto* overlay = new MenuOverlay(menu);
-        connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
-    }
-    menu->open();
+            {
+                auto* overlay = new MenuOverlay(menu);
+                connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
+            }
+            menu->open();
+        });
 }
 
 void StickerHomePage::showRenameDialog(const StickerPackBrief& pack)
@@ -514,18 +512,16 @@ void StickerHomePage::showRenameDialog(const StickerPackBrief& pack)
 
 void StickerHomePage::removePack(const StickerPackBrief& pack)
 {
-    auto* dialog = qskDialog;
-    dialog->setTransientParent(window());
-    QskDialog::Action action = dialog->question(
-        QString::fromUtf8("删除分组"),
+    ConfirmPopup::show(this, QString::fromUtf8("删除分组"),
         QString::fromUtf8("确定删除「%1」及其全部贴纸？\n文件不会被删除。").arg(pack.title),
-        QskDialog::Actions(QskDialog::Yes | QskDialog::No),
-        QskDialog::No);
-    if (action == QskDialog::Yes) {
-        if (StickerStore::instance()->deletePack(pack.id)) {
-            showToast(QString::fromUtf8("已删除分组"));
-        }
-    }
+        QString::fromUtf8("删除"), QString::fromUtf8("取消"),
+        [this, pack](bool accepted) {
+            if (accepted) {
+                if (StickerStore::instance()->deletePack(pack.id)) {
+                    showToast(QString::fromUtf8("已删除分组"));
+                }
+            }
+        });
 }
 
 // ═══════════════════════════════════════════════════════════════════
