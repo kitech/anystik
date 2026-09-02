@@ -29,6 +29,8 @@
 #include <QVariantMap>
 #include <QQuickWindow>
 #include <QWindow>
+#include <QGuiApplication>
+#include <QClipboard>
 #include <QSettings>
 
 #ifdef Q_OS_ANDROID
@@ -262,6 +264,7 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
     const int idxCopy05 = menu->addOption(QskLabelData(QString::fromUtf8("复制x0.5")));
     const int idxCopy20 = menu->addOption(QskLabelData(QString::fromUtf8("复制x2.0")));
     const int idxPreview = menu->addOption(QskLabelData(QString::fromUtf8("预览")));
+    const int idxCopyMeta = menu->addOption(QskLabelData(QString::fromUtf8("复制元信息")));
     const int idxShare = menu->addOption(QskLabelData(QString::fromUtf8("分享")));
     const int idxDelete = menu->addOption(QskLabelData(QString::fromUtf8("删除")));
     menu->setOrigin(scenePos);
@@ -271,13 +274,13 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
         const QFontMetricsF fm(menu->effectiveFont(QskMenu::Text));
         const qreal pad = menu->paddingHint(QskMenu::Segment).left()
                         + menu->paddingHint(QskMenu::Segment).right();
-        const qreal minW = qskHorizontalAdvance(fm, QString::fromUtf8("复制x2.0"))
+        const qreal minW = qskHorizontalAdvance(fm, QString::fromUtf8("复制元信息"))
                          + pad + 10;
         menu->setStrutSizeHint(QskMenu::Panel, QSizeF(minW, 0));
     }
 
     connect(menu, &QskMenu::triggered, this,
-        [this, menu, idxCopy, idxCopy05, idxCopy20, idxPreview, idxShare, idxDelete](int index) {
+        [this, menu, idxCopy, idxCopy05, idxCopy20, idxPreview, idxCopyMeta, idxShare, idxDelete](int index) {
         if (index == idxCopy) {
             StickerStore::instance()->touchSticker(m_ctxBrief.id);
             bool ok = StickerStore::instance()->copyStickerToClipboard(m_ctxBrief.filePath);
@@ -295,6 +298,11 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
                          : QString::fromUtf8("复制失败"));
         } else if (index == idxPreview) {
             openPreview(m_ctxBrief);
+        } else if (index == idxCopyMeta) {
+            const StickerMeta meta =
+                StickerStore::instance()->stickerMeta(m_ctxBrief.filePath);
+            QGuiApplication::clipboard()->setText(formatStickerMeta(meta));
+            showToast(QString::fromUtf8("已复制元信息"));
         } else if (index == idxShare) {
             if (!StickerStore::instance()->shareStickerFile(m_ctxBrief.filePath)) {
                 showToast(QString::fromUtf8("桌面暂不支持分享"));

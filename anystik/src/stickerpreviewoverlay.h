@@ -14,7 +14,7 @@ class StickerPreviewNode : public QskPaintedNode
 {
 public:
     void setData(const QString& emoji, const QImage& image,
-                 const QSizeF& size);
+                 const QSizeF& size, const QString& metaText = {});
     void triggerUpdate(QQuickWindow* window, const QRectF& rect, const QSizeF& size);
     void paint(QPainter*, const QSize&, const void*) override;
     QskHashValue hash(const void*) const override;
@@ -23,6 +23,7 @@ private:
     QString m_emoji;
     QImage m_image;
     QSizeF m_size;
+    QString m_metaText;
 };
 
 class StickerPreviewOverlay : public QQuickItem
@@ -48,6 +49,7 @@ protected:
 private:
     void handlePress(const QPointF& scenePos);
     void triggerRepaint();
+    bool metaRegionContains(const QPointF& localPos) const;
 
     StickerBrief m_brief;
     QImage m_image;
@@ -57,6 +59,7 @@ private:
     QTimer m_redrawTimer;
     QTimer m_animTimer;
     bool m_dirty = true;
+    QString m_metaText;
 };
 
 #endif // STICKER_PREVIEW_OVERLAY_H

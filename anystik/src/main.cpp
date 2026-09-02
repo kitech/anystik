@@ -340,7 +340,7 @@ int main(int argc, char* argv[]) {
              << "contentItem size:" << window.contentItem()->size()
              << "isExposed:" << window.isExposed();
 #else
-    window.setPreferredSize({420, 780});
+    window.setPreferredSize({420, 680});
     window.show();
 #endif
 

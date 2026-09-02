@@ -21,6 +21,8 @@
 #include <QByteArrayView>
 #include <QMutex>
 #include <QDebug>
+#include <QMimeDatabase>
+#include <QMimeType>
 #include <QSettings>
 #include <QUrl>
 #include <QNetworkAccessManager>
@@ -1090,6 +1092,119 @@ bool useMmPasteboard()
     return false;
 #endif
 }
+}
+
+QString formatStickerMeta(const StickerMeta& meta)
+{
+    auto fmtSize = [](qint64 bytes) -> QString {
+        if (bytes < 1024)
+            return QString::number(bytes) + QStringLiteral(" B");
+        if (bytes < 1024 * 1024)
+            return QString::number(double(bytes) / 1024.0, 'f', 1)
+                 + QStringLiteral(" KB");
+        return QString::number(double(bytes) / (1024.0 * 1024.0), 'f', 2)
+             + QStringLiteral(" MB");
+    };
+
+    QStringList lines;
+    lines << QString::fromUtf8("类型: ") + meta.typeLabel;
+    lines << QString::fromUtf8("大小: ") + fmtSize(meta.sizeBytes);
+    lines << QString::fromUtf8("尺寸: %1 × %2")
+                .arg(meta.width).arg(meta.height);
+    lines << QString::fromUtf8("帧数: %1").arg(meta.frames);
+    lines << QString::fromUtf8("更新时间: %1")
+                .arg(meta.modified.toString(QStringLiteral("yyyy-MM-dd hh:mm:ss")));
+    return lines.join(QLatin1Char('\n'));
+}
+
+StickerMeta StickerStore::stickerMeta(const QString& filePath) const
+{
+    StickerMeta meta;
+    QFileInfo fi(filePath);
+    if (!fi.exists() || !fi.isFile())
+        return meta;
+    meta.sizeBytes = fi.size();
+    meta.modified = fi.lastModified();
+
+    QFile f(filePath);
+    if (!f.open(QIODevice::ReadOnly))
+        return meta;
+    const QByteArray raw = f.readAll();
+    f.close();
+
+    // 优先用 probeImageValidity（精确格式检测 + 首帧解码校验）
+    QByteArray fmt;
+    QSize size;
+    int frames = 0;
+    bool probed = probeImageValidity(raw, &fmt, &size, &frames);
+
+    if (!probed) {
+        // probe 失败：宽松回退，用 QMimeDatabase + QFileInfo suffix 推断
+        QMimeDatabase mdb;
+        const QMimeType st = mdb.mimeTypeForFile(fi);
+        if (st.isValid() && st.name().startsWith(QLatin1String("image/"))) {
+            meta.mime = st.name();
+            meta.typeLabel = st.comment() + QStringLiteral(" (") + st.name() + QLatin1Char(')');
+        } else {
+            // 按扩展名兜底
+            const QString ext = fi.suffix().toLower();
+            if (!ext.isEmpty()) {
+                meta.mime = QStringLiteral("image/%1").arg(ext);
+                meta.typeLabel = ext.toUpper() + QStringLiteral(" (") + meta.mime + QLatin1Char(')');
+            } else {
+                meta.typeLabel = QStringLiteral("未知 (unknown)");
+            }
+        }
+
+        // 尝试用 QImageReader 直接从磁盘读尺寸和帧数
+        QImageReader reader(filePath);
+        reader.setAutoTransform(true);
+        if (reader.canRead()) {
+            QSize sz = reader.size();
+            if (sz.isValid()) {
+                meta.width = sz.width();
+                meta.height = sz.height();
+            }
+            const int cnt = reader.imageCount();
+            if (cnt > 0)
+                meta.frames = cnt;
+            meta.animated = cnt > 1;
+            // 用 reader 精化格式名（比 suffix 更准确）
+            QByteArray rFmt = reader.format().trimmed().toLower();
+            if (!rFmt.isEmpty() && meta.mime.isEmpty()) {
+                meta.mime = QStringLiteral("image/%1").arg(QString::fromLatin1(rFmt));
+                meta.typeLabel = rFmt.toUpper() + QStringLiteral(" (") + meta.mime + QLatin1Char(')');
+            }
+        }
+        return meta;
+    }
+
+    // probe 成功：正常流程
+    if (frames < 2)
+        frames = imageAnimationFrames(raw, fmt);
+    const QString lower = QString::fromLatin1(fmt).toLower();
+
+    QString human = lower.toUpper();
+    if (lower == QLatin1String("jpg") || lower == QLatin1String("jpeg"))
+        human = QStringLiteral("JPEG");
+    else if (lower == QLatin1String("apng"))
+        human = QStringLiteral("APNG");
+    else if (lower == QLatin1String("svgz"))
+        human = QStringLiteral("SVGZ");
+
+    QString mime = QStringLiteral("image/%1").arg(lower);
+    QMimeDatabase mdb;
+    const QMimeType st = mdb.mimeTypeForFile(fi);
+    if (st.isValid() && st.name().startsWith(QLatin1String("image/")))
+        mime = st.name();
+
+    meta.typeLabel = human + QStringLiteral(" (") + mime + QLatin1Char(')');
+    meta.mime = mime;
+    meta.animated = frames > 1;
+    meta.frames = frames;
+    meta.width = size.width();
+    meta.height = size.height();
+    return meta;
 }
 
 bool StickerStore::pasteFromClipboard(QString* errorOut)

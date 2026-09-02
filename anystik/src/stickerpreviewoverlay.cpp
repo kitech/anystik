@@ -15,17 +15,22 @@
 
 static constexpr qreal CLOSE_BTN_SIZE = 44;
 static constexpr qreal ACTION_H = 52;
+static constexpr qreal META_H = 150;   // 底部元信息文本区高度
+static constexpr qreal META_PAD_LEFT = 16;
+static constexpr qreal META_PAD_TOP = 10;
+static constexpr qreal META_LINE_H = 20;
 
 // ═══════════════════════════════════════════════════════════════════
 // StickerPreviewNode
 // ═══════════════════════════════════════════════════════════════════
 
 void StickerPreviewNode::setData(const QString& emoji, const QImage& image,
-                                 const QSizeF& size)
+                                 const QSizeF& size, const QString& metaText)
 {
     m_emoji = emoji;
     m_image = image;
     m_size = size;
+    m_metaText = metaText;
 }
 
 void StickerPreviewNode::triggerUpdate(QQuickWindow* window, const QRectF& rect,
@@ -41,22 +46,42 @@ void StickerPreviewNode::paint(QPainter* painter, const QSize& size, const void*
 
     painter->fillRect(0, 0, w, h, QColor(0, 0, 0, 200));
 
-    if (m_image.isNull()) {
-        return;
+    // ── 元信息文本区背景（图片区域下方，动作栏上方） ──
+    const qreal metaY = h - ACTION_H - META_H;
+    painter->fillRect(QRectF(0, metaY, w, META_H), QColor(18, 18, 26));
+    painter->setPen(QColor(35, 35, 45));
+    painter->drawLine(0, metaY, w, metaY);
+
+    // ── 绘制元信息文本（左对齐，小号字体） ──
+    if (!m_metaText.isEmpty()) {
+        QFont metaFont;
+        metaFont.setPixelSize(14);
+        painter->setFont(metaFont);
+        painter->setPen(QColor(200, 200, 210));
+        QStringList lines = m_metaText.split(QLatin1Char('\n'));
+        const qreal textW = w - META_PAD_LEFT * 2;
+        qreal ty = metaY + META_PAD_TOP + 14;
+        for (const QString& line : lines) {
+            painter->drawText(QRectF(META_PAD_LEFT, ty - 14, textW, META_LINE_H),
+                Qt::TextWordWrap | Qt::AlignLeft | Qt::AlignTop, line);
+            ty += META_LINE_H;
+        }
     }
 
-    // ── 图片 contain 居中 ──
-    const qreal availW = w - 32;
-    const qreal availH = h - ACTION_H - 64;
-    const QSizeF imgSize = m_image.size();
-    qreal scale = qMin(availW / imgSize.width(), availH / imgSize.height());
-    const qreal dw = imgSize.width()  * scale;
-    const qreal dh = imgSize.height() * scale;
-    const QRectF dst((w - dw) / 2, (h - dh) / 2 - ACTION_H / 2, dw, dh);
+    // ── 图片 contain 居中（区域：顶部留 32px，下方扣 meta 区域和动作栏） ──
+    if (!m_image.isNull()) {
+        const qreal availW = w - 32;
+        const qreal availH = h - ACTION_H - META_H - 64;
+        const QSizeF imgSize = m_image.size();
+        qreal scale = qMin(availW / imgSize.width(), availH / imgSize.height());
+        const qreal dw = imgSize.width()  * scale;
+        const qreal dh = imgSize.height() * scale;
+        const QRectF dst((w - dw) / 2, (h - dh) / 2 - ACTION_H / 2 - META_H / 2, dw, dh);
 
-    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
-    painter->setRenderHint(QPainter::Antialiasing, true);
-    painter->drawImage(dst, m_image);
+        painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        painter->drawImage(dst, m_image);
+    }
 
     // ── 关闭按钮 ──
     const QRectF closeBtn(w - CLOSE_BTN_SIZE - 12, 12,
@@ -220,6 +245,10 @@ void StickerPreviewOverlay::show(const StickerBrief& brief)
         setPosition(QPointF(0, 0));
     }
 
+    // ── 元信息文本（自绘，不用 qskinny 控件） ──
+    const StickerMeta meta = StickerStore::instance()->stickerMeta(filePath);
+    m_metaText = formatStickerMeta(meta);
+
     setVisible(true);
     m_dirty = true;
     update();
@@ -229,6 +258,13 @@ void StickerPreviewOverlay::triggerRepaint()
 {
     m_dirty = true;
     update();
+}
+
+bool StickerPreviewOverlay::metaRegionContains(const QPointF& localPos) const
+{
+    const qreal h = height();
+    return localPos.y() >= h - ACTION_H - META_H
+        && localPos.y() < h - ACTION_H;
 }
 
 QSGNode* StickerPreviewOverlay::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
@@ -241,7 +277,7 @@ QSGNode* StickerPreviewOverlay::updatePaintNode(QSGNode* oldNode, UpdatePaintNod
         m_image = m_movie->currentImage();
     }
     if (m_dirty) {
-        node->setData(m_emoji, m_image, size());
+        node->setData(m_emoji, m_image, size(), m_metaText);
         node->triggerUpdate(window(),
             QRectF(QPointF(0, 0), size()), size());
         m_dirty = false;
@@ -252,6 +288,13 @@ QSGNode* StickerPreviewOverlay::updatePaintNode(QSGNode* oldNode, UpdatePaintNod
 void StickerPreviewOverlay::touchEvent(QTouchEvent* event)
 {
     if (event->type() == QEvent::TouchBegin && !event->points().isEmpty()) {
+        const QPointF lp = mapFromScene(event->points().first().scenePosition());
+        if (metaRegionContains(lp)) {
+            QGuiApplication::clipboard()->setText(m_metaText);
+            ToastPopup::show(this, QString::fromUtf8("已复制元信息"));
+            event->accept();
+            return;
+        }
         handlePress(event->points().first().scenePosition());
         event->accept();
     } else {
@@ -261,6 +304,13 @@ void StickerPreviewOverlay::touchEvent(QTouchEvent* event)
 
 void StickerPreviewOverlay::mousePressEvent(QMouseEvent* event)
 {
+    const QPointF lp = mapFromScene(event->scenePosition());
+    if (metaRegionContains(lp)) {
+        QGuiApplication::clipboard()->setText(m_metaText);
+        ToastPopup::show(this, QString::fromUtf8("已复制元信息"));
+        event->accept();
+        return;
+    }
     handlePress(event->scenePosition());
     event->accept();
 }
@@ -280,7 +330,8 @@ void StickerPreviewOverlay::hoverMoveEvent(QHoverEvent* event)
     const qreal w = width();
     const QRectF closeBtn(w - CLOSE_BTN_SIZE - 12, 12,
         CLOSE_BTN_SIZE, CLOSE_BTN_SIZE);
-    if (closeBtn.contains(event->position()) || event->position().y() >= height() - ACTION_H) {
+    if (closeBtn.contains(event->position()) || event->position().y() >= height() - ACTION_H
+        || metaRegionContains(event->position())) {
         setCursor(QCursor(Qt::PointingHandCursor));
     } else {
         unsetCursor();

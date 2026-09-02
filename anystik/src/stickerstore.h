@@ -8,6 +8,7 @@
 #include <QVector>
 #include <QHash>
 #include <QVariantMap>
+#include <QDateTime>
 
 class QFile;
 class QNetworkAccessManager;
@@ -35,6 +36,20 @@ struct StickerBrief {
     QString description;   // 图片描述，不超过 140 字
     int     isPublic = 0;   // 是否公开（默认不公开）
 };
+
+// 贴纸图片元信息（由文件探测：类型/大小/长宽/帧数/更新时间）
+struct StickerMeta {
+    QString typeLabel;     // 人类可读类型，如 "GIF (image/gif)"
+    QString mime;          // 原始 MIME，如 "image/gif"
+    bool    animated = false;
+    int     frames = 0;    // >1 即动画
+    int     width = 0;
+    int     height = 0;
+    qint64  sizeBytes = 0; // 文件字节数
+    QDateTime modified;    // 文件修改时间
+};
+// 拼成多行展示/拷贝文本（类型/大小/尺寸/帧数/更新时间），预览与菜单共用
+QString formatStickerMeta(const StickerMeta& meta);
 
 // 内置下载源唯一表。approxSize 为预告约值（静态，非运行时所得）；-1 = 无实测
 struct BuiltinSource {
@@ -79,6 +94,8 @@ public:
 
     // 复制图片到剪贴板（Desktop: QClipboard 位图；Android: FileProvider content URI(image/*) + toast）
     bool copyStickerToClipboard(const QString& filePath);
+    // 由文件探测元信息（类型/大小/长宽/帧数/更新时间）
+    StickerMeta stickerMeta(const QString& filePath) const;
     // 按 scale 缩放后复制（静态→QImage scaled 位图；动画帧逐帧缩放，GIF 源保 GIF
     // 经 gif-h 重编码、其余动画源转 APNG；放大结果最长边 >4096 等比封顶）
     bool copyStickerScaledToClipboard(const QString& filePath, qreal scale);
