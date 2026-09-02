@@ -9,7 +9,8 @@
 #endif
 
 // 纯 C++ 方案（无 ObjC/.mm）：注册 com.compuserve.gif / public.gif ⇄ image/gif
-// 的 UTI↔MIME 转换器，使 mime->data("image/gif") 能取到剪贴板原始 GIF 字节。
+// 的 UTI↔MIME 转换器，使 mime->data("image/gif") 能取到剪贴板原始 GIF 字节，
+// 并使 setData("image/gif") 写剪贴板时原样落盘 com.compuserve.gif UTI。
 // 仅在 macOS 有实际实现；其它平台为空实现。
 void ensureMacGifConverter();
 

@@ -819,8 +819,14 @@ bool StickerStore::copyStickerToClipboard(const QString& filePath)
     if (QImageReader::imageFormat(filePath).toLower() == "gif") {
         QFile f(filePath);
         if (f.open(QIODevice::ReadOnly)) {
+            const QByteArray raw = f.readAll();
             QMimeData* mime = new QMimeData;
-            mime->setData("image/gif", f.readAll());
+            mime->setData("image/gif", raw);        // Qt 自回读：动画字节
+#if defined(Q_OS_MACOS)
+            ensureMacGifConverter();                // 注册 GIF UTI 转换器
+            mime->setData("public.gif", raw);       // 别名 UTI（mac 原生兼容）
+            mime->setUrls({QUrl::fromLocalFile(filePath)}); // public.file-url：文件粘贴方取原始多帧
+#endif
             mime->setImageData(QImage(filePath));   // PNG 位图回退
             QGuiApplication::clipboard()->setMimeData(mime);
             return true;

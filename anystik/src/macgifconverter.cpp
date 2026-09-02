@@ -45,10 +45,23 @@ QVariant MacGifUtiConverter::convertToMime(const QString &mime,
 }
 
 QList<QByteArray> MacGifUtiConverter::convertFromMime(const QString &,
-                                                      const QVariant &,
+                                                      const QVariant &data,
                                                       const QString &) const
 {
-    return QList<QByteArray>(); // 只读，从不写入剪贴板
+    // 写方向：mime->setData("image/gif", bytes) + setMimeData 时，
+    // Qt 经 utiForMime→com.compuserve.gif 调用本函数，把字节原样写入该 UTI。
+    // 这是 mac 原生 App（微信/QQ/Keynote 等）能拿到动画 GIF 字节的关键。
+    if (data.canConvert<QByteArray>()) {
+        const QByteArray bytes = data.toByteArray();
+        if (!bytes.isEmpty())
+            return {bytes};
+    }
+    if (data.canConvert<QList<QByteArray>>()) {
+        const QList<QByteArray> chunks = data.value<QList<QByteArray>>();
+        if (!chunks.isEmpty())
+            return chunks;
+    }
+    return QList<QByteArray>();
 }
 
 #else
