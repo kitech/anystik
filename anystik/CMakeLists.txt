@@ -76,6 +76,8 @@ qt_add_executable(anystik
     src/stickerpreviewoverlay.cpp
     src/dialogpopup.h
     src/dialogpopup.cpp
+    src/toastpopup.h
+    src/toastpopup.cpp
     src/davobfus.h
     src/davobfus.cpp
     ${qlapp_dir}/cJSON.c

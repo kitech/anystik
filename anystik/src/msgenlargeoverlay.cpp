@@ -1,5 +1,6 @@
 #include "msgenlargeoverlay.h"
 #include "androidutils.h"
+#include "toastpopup.h"
 
 #include <QGuiApplication>
 #include <QClipboard>
@@ -388,10 +389,10 @@ void MsgEnlargeOverlay::handlePress(const QPointF& scenePos)
         return;
     case MsgEnlargeOverlayNode::BTN_COPY:
         QGuiApplication::clipboard()->setText(m_item.content);
-        showAndroidToast(QString::fromUtf8("已复制"));
+        ToastPopup::show(this, QString::fromUtf8("已复制"));
         return;
     case MsgEnlargeOverlayNode::BTN_FAV:
-        showAndroidToast(QString::fromUtf8("收藏功能暂未实现"));
+        ToastPopup::show(this, QString::fromUtf8("收藏功能暂未实现"));
         return;
     case MsgEnlargeOverlayNode::BTN_TEXT:
         return;

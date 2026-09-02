@@ -1,5 +1,6 @@
 #include "stickerpreviewoverlay.h"
 #include "androidutils.h"
+#include "toastpopup.h"
 
 #include <QGuiApplication>
 #include <QClipboard>
@@ -307,8 +308,8 @@ void StickerPreviewOverlay::handlePress(const QPointF& scenePos)
         if (localPos.x() < w * (1.0 / 3.0)) {
             StickerStore::instance()->touchSticker(m_brief.id);
             bool ok = StickerStore::instance()->copyStickerToClipboard(m_brief.filePath);
-            showAndroidToast(ok ? QString::fromUtf8("已复制到剪贴板")
-                                : QString::fromUtf8("复制失败"));
+            ToastPopup::show(this, ok ? QString::fromUtf8("已复制到剪贴板")
+                                      : QString::fromUtf8("复制失败"));
         } else if (localPos.x() > w * (2.0 / 3.0)) {
             Q_EMIT deleteRequested(m_brief);
         }

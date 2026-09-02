@@ -2,6 +2,7 @@
 #include "myscrollarea.h"
 #include "androidutils.h"
 #include "dialogpopup.h"
+#include "toastpopup.h"
 
 #include <QSettings>
 #include <QSet>
@@ -229,6 +230,8 @@ void BundledPacksPage::addPackRow(QskLinearBox* list, const StickerPackBrief& pa
             [this, store, id = pack.id, installed]() {
         if (store->setPackInstalled(id, !installed))
             showToast(installed ? "已停用" : "已启用");
+        else
+            showToast("操作失败");
     });
 
     connect(uninstallBtn, &QskPushButton::clicked, this,
@@ -241,6 +244,8 @@ void BundledPacksPage::addPackRow(QskLinearBox* list, const StickerPackBrief& pa
                 if (yes) {
                     if (store->uninstallPack(id, false))
                         showToast("已卸载，文件保留");
+                    else
+                        showToast("卸载失败");
                 }
             });
     });
@@ -255,6 +260,8 @@ void BundledPacksPage::addPackRow(QskLinearBox* list, const StickerPackBrief& pa
                 if (yes) {
                     if (store->uninstallPack(id, true))
                         showToast("已彻底删除");
+                    else
+                        showToast("删除失败");
                 }
             });
     });
@@ -374,7 +381,7 @@ void BundledPacksPage::onDownloadFinished(const QString& url, bool ok, const QSt
 void BundledPacksPage::showToast(const QString& text)
 {
     qDebug() << "[BundledPacksPage]" << text;
-    showAndroidToast(text);
+    ToastPopup::show(this, text);
 }
 
 QString BundledPacksPage::formatSize(qint64 bytes)

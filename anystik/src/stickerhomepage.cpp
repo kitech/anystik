@@ -3,6 +3,7 @@
 #include "stickerpreviewoverlay.h"
 #include "menuoverlay.h"
 #include "dialogpopup.h"
+#include "toastpopup.h"
 #include "pushstatusbar.h"
 #include "androidutils.h"
 #include "pagemanager.h"
@@ -345,6 +346,8 @@ void StickerHomePage::confirmDeleteSticker(const StickerBrief& brief)
                 for (auto* o : findChildren<StickerPreviewOverlay*>())
                     o->deleteLater();
                 onTabChanged(m_tabBar->currentIndex());
+            } else {
+                showToast(QString::fromUtf8("删除失败"));
             }
         });
 }
@@ -642,7 +645,7 @@ void StickerHomePage::showDirPicker()
 
 void StickerHomePage::showToast(const QString& text)
 {
-    showAndroidToast(text);
+    ToastPopup::show(this, text);
     qDebug() << "[StickerHomePage]" << text;
 }
 
