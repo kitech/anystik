@@ -189,6 +189,8 @@ void StickerPreviewOverlay::show(const StickerBrief& brief)
     }
 
     // QMovie 不支持的动画格式：QImageReader 多帧逐帧播放
+    // APNG：Qt PNG 插件不识别动画帧，imageCount()==1 → 落入末分支静帧首帧
+    // （动画预览需引入 APNG 解码库，已知限制，见 detailed.md）
     if (!m_movie) {
         m_reader = new QImageReader(filePath);
         m_reader->setAutoTransform(true);

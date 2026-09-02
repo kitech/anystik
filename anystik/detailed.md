@@ -492,7 +492,7 @@ StickerStore::ensureInit()
   → StickerStore::pasteFromClipboard()
     → Desktop: QClipboard::image() 读位图 → QBuffer 编码 PNG
     → Android: JNI ShareActivity.readClipboardImageBytes()（先判 ClipDescription.hasMimeType("image/*")，再按 item.getUri() 读字节，全程 try/catch）
-    → importImageBytes: 按内容探测真实格式 → 落盘 dataDir/pastes/<sha1>.<ext>（幂等覆盖）
+    → importImageBytes: 按内容探测真实格式（PNG/APNG 走 chunk 自检，APNG 归一为 apng、保留 .png 字节落盘） → 落盘 dataDir/pastes/<sha1>.<ext>（幂等覆盖）
     → findOrCreatePack「粘贴板」（同名复用/哈希建包）
     → 事务 add_sticker → dataChanged → 刷新 Tab + 网格
   （Android 不再依赖 QClipboard::image()——Qt 文档确认 Android 仅支持 text/plain|text/html|text/uri-list，image() 恒 null）
@@ -502,8 +502,10 @@ StickerStore::ensureInit()
 ```
 单击瓦片 → touchSticker(id)（更新 last_used）
   → copyStickerToClipboard(filePath)
-    → Desktop(GIF): image/gif 原始多帧字节 + PNG 位图回退；
-        mac 另写 com.compuserve.gif/public.gif UTI + public.file-url 文件引用（file<->url 双通道）
+    → Desktop(GIF/APNG): image/gif·image/apng 原始多帧字节 + PNG 位图回退；
+        mac 另写 com.compuserve.gif/public.gif UTI（GIF）
+        + APNG 自定义类型串 org.kde.anystik.apng + public.png 别名（best-effort，原生查看器读默认图得静态首帧）
+        + public.file-url 文件引用（file<->url 双通道）
     → Desktop(其它): setImage(QImage(path))（PNG）
     → Android: JNI ShareActivity.copyImageToClipboard（FileProvider content URI(image/*) + Toast）
       → 粘贴方（含本应用 readClipboardImageBytes）经 ContentResolver 按 Uri 读字节；
@@ -540,7 +542,7 @@ StickerStore::ensureInit()
 | 能力 | Desktop | Android |
 |------|---------|---------|
 | 目录选择 | QskSimpleListBox 目录浏览器（纯 QSK） | 走 ShareActivity 分享意图导入（TODO: SAF ACTION_OPEN_DOCUMENT_TREE） |
-| 剪贴板复制 | GIF：`image/gif` 原字节（mac 补 GIF UTI＋file-url）；其它 `setImage` | JNI `copyImageToClipboard`（FileProvider URI） + Toast |
+| 剪贴板复制 | GIF/APNG：`image/gif·image/apng` 原字节（mac 补 GIF UTI＋file-url；APNG 补自定义类型串＋`public.png` 别名）；其它 `setImage` | JNI `copyImageToClipboard`（FileProvider URI） + Toast |
 | GIF 动图 | 网格=首帧；预览=QMovie 全帧 | 同左 |
 | WebP 动图 | Qt6 图像插件 | 缺 libwebp 时降级静态首帧 |
 
@@ -551,7 +553,7 @@ StickerStore::ensureInit()
 | 平台 | 粘贴链路 | 动画保留 |
 |------|----------|----------|
 | Linux | image/gif 原字节 或 text/uri-list 本地文件引用 | ✅ 源提供动图字节即保留 |
-| macOS | MIME 循环 → QUtiMimeConverter（gif UTI→image/gif） → 位图兜底 | ⚠️ 浏览器拷贝本就得静态（见下） |
+| macOS | MIME 循环 → QUtiMimeConverter（gif UTI→image/gif；APNG 走 chunk 自检） → 位图兜底 | ⚠️ 浏览器拷贝本就得静态（见下） |
 | Android | content:// Uri 原字节读取 | ✅ 剪贴板可读前提下 |
 
 存储（贴纸 id = SHA1(全量原字节) 入库）与预览（网格首帧、预览层 QMovie→QImageReader 全帧）三平台共用，动画无损。
@@ -573,16 +575,18 @@ StickerStore::ensureInit()
 | text/uri-list 本地文件引用（两段式校验） | `stickerstore.cpp:451-474` |
 | macOS 原始 GIF UTI 映射（QUtiMimeConverter，默认） | `macgifconverter.h/.cpp` + `stickerstore.cpp`（ensureMacGifConverter，MIME 循环前） |
 | 旧方案 macOS NSPasteboard 直读（同时编译，运行时切换） | `macpasteboard.mm`；环境变量 `ANYS_USE_MM_PASTEBOARD=1` 启用 |
-| 原字节验签入库（probeImageValidity/importImageBytes） | `stickerstore.cpp`（:233 附近起） |
+| 原字节验签入库（probeImageValidity/importImageBytes，含 PNG/APNG chunk 深度探测） | `stickerstore.cpp`（probePngChunks + isApng） |
+| 统一动画帧数派发（gif→imageCount，apng→acTL/fdAT，webp→ANMF 结构自检） | `stickerstore.cpp`（imageAnimationFrames ~:419） |
 | 通用动画预览（QMovie→QImageReader 逐帧→静态） | `stickerpreviewoverlay.cpp` |
 | Android 原字节读取 | `ShareActivity.readClipboardImageBytes/readUriBytes` |
 
 ### 已知限制
 
-- mac 浏览器/部分应用拷贝 GIF 时，源端常把动画重编码成**单帧**写进 `image/gif` 数据，同时保留 `text/uri-list` 指向原始多帧文件。已实现回退：检测到剪贴板 GIF 单帧（`frames=1`）且 uri 指向本地多帧 GIF 时，改读原始文件（`source=uri-gif-fallback`）。若源端连本地文件引用都不给（纯网页拷贝），剪贴板层不可恢复
-- mac 复制出已写 `com.compuserve.gif`/`public.gif` UTI 原始字节并附 `public.file-url` 文件引用（`MacGifUtiConverter::convertFromMime` 写方向启用）；仅读图片通道（TIFF/PNG）的接收方仍落回静态首帧——系统级行为，非本应用可绕
+- mac 浏览器/QQ 等应用拷贝动图时，源端常把动画重编码成**单帧**写进 `image/gif` 数据，同时保留 `text/uri-list` 指向原始多帧文件（QQ 场景 uri 实为 APNG `.png`）。已实现回退：检测到剪贴板 GIF/APNG 单帧且 uri 指向本地**多帧动画原稿**（同格式或 GIF↔APNG 跨格式、同尺寸、`frames>1`）时，改读原始文件（`source=uri-gif-fallback`，日志含 `clip=→file=` 注明跨类型）。若源端连本地文件引用都不给（纯网页拷贝），剪贴板层不可恢复
+- mac 复制出已写 `com.compuserve.gif`/`public.gif` UTI 原始字节并附 `public.file-url` 文件引用（`MacGifUtiConverter::convertFromMime` 写方向启用）；APNG 写自定义类型串 `org.kde.anystik.apng`＋`public.png` 别名（best-effort，自回读走 `image/apng`，原生查看器读默认图显静态首帧）；仅读图片通道（TIFF/PNG）的接收方仍落回静态首帧——系统级行为，非本应用可绕
 - Android 剪贴板 `text/uri-list`（文本型）未解析，仅日志
-- WebP 动图缺 libwebp 插件时降级静态首帧；APNG/AVIF 需对应 Qt 图像插件
+- WebP 动图缺 libwebp 插件时降级静态首帧；AVIF 需对应 Qt 图像插件
+- APNG：已实现 PNG chunk 深度探测（acTL/fdAT/fcTL）归一为 apng，粘贴/存储/拷贝出均保留原字节动画（存储仍 `.png` 扩展名）；解析强校验：acTL 按规范**必须位于首个 IDAT 前**、真动画需且一个 fcTL 帧控制块、quint64 偏移防 4GiB 溢出、8192 chunk 上限防超长/恶意。**动画预览仍静态首帧**（Qt PNG 插件不识别 APNG 帧，需引入解码库）
 - Android API 33+ 非本应用写入的剪贴板有遮蔽策略；读剪贴板为 UI 线程同步 I/O（既有 TODO）
 
 ### [StickerPaste] 日志速查
@@ -592,12 +596,13 @@ StickerStore::ensureInit()
 | `mime formats: …` | 剪贴板暴露的 MIME 全集（mac 排查关键：能确认源到底写了什么） |
 | `text/uri-list=…` / `uri[file/remote]…` | mac 诊断：源端原始文件引用（`file://` 可回退；`https://`=纯网页拷贝，源端限制不可救） |
 | `source=mime type=…` | 命中某 MIME 的原字节 |
-| `source=mime type=…(gif) … frames=… backend=…` | GIF 分支元信息行恒含后端；新增 `frames=`（`QImageReader::imageCount`）用于核对剪贴板 GIF 是否已被源端压成单帧 |
-| `source=uri-gif-fallback path=… … frames=…` | 剪贴板 GIF 为单帧时回退成功读取 uri 本地多帧原始 GIF（动画恢复点） |
+| `source=mime type=… … frames=… backend=…` | 动画分支（GIF/APNG/WebP）元信息行恒含后端；`frames=`（`imageAnimationFrames`：GIF 走 Qt imageCount、APNG 走 acTL/fdAT、WebP 走 ANMF 结构自检）用于核对剪贴板动画是否已被源端压成单帧 |
+| `[probe] decode read failed …` + `png sig=… chunks=[IHDR\|…] acTL=…(n) fcTL=… fdAT=…` | PNG/APNG 解码失败细诊断：chunk 摘要区分 真APNG / 截断损坏 / 重编码残片（IDAT 根因定位）；acTL 仅首个 IDAT 前计入、fcTL=真动画帧控制块数 |
+| `source=uri-gif-fallback path=… clip=→file=… … frames=…` | 剪贴板 GIF/APNG 为单帧时回退成功读取 uri 本地多帧原始动画（GIF 救 GIF / APNG 或 GIF→APNG 跨格式、同尺寸；`clip=→file=` 注明跨类型） |
 | `source=uri path=…` | text/uri-list 本地文件读取成功（常规空字节路径） |
 | `source=macpb type=…` | NSPasteboard 直读抢救成功（mac 专有；现含 `frames=`，单帧时同走 uri-gif-fallback 回退） |
-| `source=bitmap …` | 位图兜底 PNG（动画必然丢失处） |
-| `import ok fmt=…` | 入库成功 |
+| `source=bitmap …` | 位图兜底 PNG（动画必然丢失处）；附 `bitmap source qimage-format=`（QImage::Format 枚举 int，定位 Qt 重编码异常） |
+| `import ok fmt=…` / `import frames=…` | 入库成功（新：动画帧数行） |
 
 ## 新增文件对齐 CMakeLists
 
