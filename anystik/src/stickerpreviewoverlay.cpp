@@ -21,108 +21,99 @@ static constexpr qreal META_PAD_TOP = 10;
 static constexpr qreal META_LINE_H = 20;
 
 // ═══════════════════════════════════════════════════════════════════
-// StickerPreviewNode
+// renderContent — 渲染预览内容到 QImage（供 QSGImageNode 使用）
 // ═══════════════════════════════════════════════════════════════════
 
-void StickerPreviewNode::setData(const QString& emoji, const QImage& image,
-                                 const QSizeF& size, const QString& metaText)
+QImage StickerPreviewOverlay::renderContent() const
 {
-    m_emoji = emoji;
-    m_image = image;
-    m_size = size;
-    m_metaText = metaText;
-}
+    const qreal dpr = window() ? window()->devicePixelRatio() : 1.0;
+    const int w = int(width() * dpr);
+    const int h = int(height() * dpr);
+    if (w <= 0 || h <= 0)
+        return {};
 
-void StickerPreviewNode::triggerUpdate(QQuickWindow* window, const QRectF& rect,
-                                       const QSizeF& size)
-{
-    update(window, rect, size, nullptr);
-}
+    QImage img(w, h, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+    QPainter painter(&img);
+    painter.scale(dpr, dpr);
 
-void StickerPreviewNode::paint(QPainter* painter, const QSize& size, const void*)
-{
-    const qreal w = size.width();
-    const qreal h = size.height();
+    const qreal rw = width();
+    const qreal rh = height();
 
-    painter->fillRect(0, 0, w, h, QColor(0, 0, 0, 200));
+    painter.fillRect(0, 0, rw, rh, QColor(0, 0, 0, 200));
 
-    // ── 元信息文本区背景（图片区域下方，动作栏上方） ──
-    const qreal metaY = h - ACTION_H - META_H;
-    painter->fillRect(QRectF(0, metaY, w, META_H), QColor(18, 18, 26));
-    painter->setPen(QColor(35, 35, 45));
-    painter->drawLine(0, metaY, w, metaY);
+    // ── 元信息文本区背景 ──
+    const qreal metaY = rh - ACTION_H - META_H;
+    painter.fillRect(QRectF(0, metaY, rw, META_H), QColor(18, 18, 26));
+    painter.setPen(QColor(35, 35, 45));
+    painter.drawLine(0, metaY, rw, metaY);
 
-    // ── 绘制元信息文本（左对齐，小号字体） ──
+    // ── 元信息文本 ──
     if (!m_metaText.isEmpty()) {
         QFont metaFont;
         metaFont.setPixelSize(14);
-        painter->setFont(metaFont);
-        painter->setPen(QColor(200, 200, 210));
+        painter.setFont(metaFont);
+        painter.setPen(QColor(200, 200, 210));
         QStringList lines = m_metaText.split(QLatin1Char('\n'));
-        const qreal textW = w - META_PAD_LEFT * 2;
+        const qreal textW = rw - META_PAD_LEFT * 2;
         qreal ty = metaY + META_PAD_TOP + 14;
         for (const QString& line : lines) {
-            painter->drawText(QRectF(META_PAD_LEFT, ty - 14, textW, META_LINE_H),
+            painter.drawText(QRectF(META_PAD_LEFT, ty - 14, textW, META_LINE_H),
                 Qt::TextWordWrap | Qt::AlignLeft | Qt::AlignTop, line);
             ty += META_LINE_H;
         }
     }
 
-    // ── 图片 contain 居中（区域：顶部留 32px，下方扣 meta 区域和动作栏） ──
+    // ── 图片 contain 居中 ──
     if (!m_image.isNull()) {
-        const qreal availW = w - 32;
-        const qreal availH = h - ACTION_H - META_H - 64;
+        const qreal availW = rw - 32;
+        const qreal availH = rh - ACTION_H - META_H - 64;
         const QSizeF imgSize = m_image.size();
         qreal scale = qMin(availW / imgSize.width(), availH / imgSize.height());
         const qreal dw = imgSize.width()  * scale;
         const qreal dh = imgSize.height() * scale;
-        const QRectF dst((w - dw) / 2, (h - dh) / 2 - ACTION_H / 2 - META_H / 2, dw, dh);
+        const QRectF dst((rw - dw) / 2, (rh - dh) / 2 - ACTION_H / 2 - META_H / 2, dw, dh);
 
-        painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
-        painter->setRenderHint(QPainter::Antialiasing, true);
-        painter->drawImage(dst, m_image);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.drawImage(dst, m_image);
     }
 
     // ── 关闭按钮 ──
-    const QRectF closeBtn(w - CLOSE_BTN_SIZE - 12, 12,
-        CLOSE_BTN_SIZE, CLOSE_BTN_SIZE);
+    const QRectF closeBtn(rw - CLOSE_BTN_SIZE - 12, 12, CLOSE_BTN_SIZE, CLOSE_BTN_SIZE);
     QPainterPath closePath;
     closePath.addRoundedRect(closeBtn, 12, 12);
-    painter->fillPath(closePath, QColor(40, 40, 50, 220));
+    painter.fillPath(closePath, QColor(40, 40, 50, 220));
     QFont closeFont;
     closeFont.setPixelSize(24);
-    painter->setFont(closeFont);
-    painter->setPen(QColor(230, 230, 230));
-    painter->drawText(closeBtn, Qt::AlignCenter, QStringLiteral("✕"));
+    painter.setFont(closeFont);
+    painter.setPen(QColor(230, 230, 230));
+    painter.drawText(closeBtn, Qt::AlignCenter, QStringLiteral("✕"));
 
-    // ── 底部动作栏：复制 | Emoji | 删除 ──
-    const qreal barY = h - ACTION_H;
-    QRectF barRect(0, barY, w, ACTION_H);
-    painter->fillRect(barRect, QColor(20, 20, 28));
-    painter->setPen(QColor(40, 40, 50));
-    painter->drawLine(0, barY, w, barY);
+    // ── 底部动作栏 ──
+    const qreal barY = rh - ACTION_H;
+    painter.fillRect(QRectF(0, barY, rw, ACTION_H), QColor(20, 20, 28));
+    painter.setPen(QColor(40, 40, 50));
+    painter.drawLine(0, barY, rw, barY);
 
     QFont actionFont;
     actionFont.setPixelSize(15);
-    painter->setFont(actionFont);
+    painter.setFont(actionFont);
 
-    painter->setPen(QColor(110, 190, 255));
-    painter->drawText(QRectF(0, barY, w * (1.0 / 3.0), ACTION_H),
+    painter.setPen(QColor(110, 190, 255));
+    painter.drawText(QRectF(0, barY, rw * (1.0 / 3.0), ACTION_H),
         Qt::AlignCenter, QString::fromUtf8("复制"));
 
     if (!m_emoji.isEmpty()) {
-        painter->drawText(QRectF(w * (1.0 / 3.0), barY, w * (1.0 / 3.0), ACTION_H),
+        painter.drawText(QRectF(rw * (1.0 / 3.0), barY, rw * (1.0 / 3.0), ACTION_H),
             Qt::AlignCenter, QString::fromUtf8("Emoji: ") + m_emoji);
     }
 
-    painter->setPen(QColor(230, 110, 110));
-    painter->drawText(QRectF(w * (2.0 / 3.0), barY, w * (1.0 / 3.0), ACTION_H),
+    painter.setPen(QColor(230, 110, 110));
+    painter.drawText(QRectF(rw * (2.0 / 3.0), barY, rw * (1.0 / 3.0), ACTION_H),
         Qt::AlignCenter, QString::fromUtf8("删除"));
-}
 
-QskHashValue StickerPreviewNode::hash(const void*) const
-{
-    return qHash(m_emoji) ^ qHash(int(m_size.width())) ^ qHash(int(m_size.height()));
+    return img;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -269,20 +260,28 @@ bool StickerPreviewOverlay::metaRegionContains(const QPointF& localPos) const
 
 QSGNode* StickerPreviewOverlay::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
 {
-    auto* node = static_cast<StickerPreviewNode*>(oldNode);
-    if (!node) {
-        node = new StickerPreviewNode();
-    }
+    auto* imageNode = static_cast<QSGImageNode*>(oldNode);
+
     if (m_movie && m_movie->state() == QMovie::Running) {
         m_image = m_movie->currentImage();
     }
+
+    if (!imageNode) {
+        imageNode = window()->createImageNode();
+        imageNode->setOwnsTexture(true);
+        m_dirty = true;
+    }
+
     if (m_dirty) {
-        node->setData(m_emoji, m_image, size(), m_metaText);
-        node->triggerUpdate(window(),
-            QRectF(QPointF(0, 0), size()), size());
+        QImage rendered = renderContent();
+        if (!rendered.isNull()) {
+            imageNode->setTexture(window()->createTextureFromImage(rendered));
+            imageNode->setRect(QRectF(QPointF(0, 0), size()));
+        }
         m_dirty = false;
     }
-    return node;
+
+    return imageNode;
 }
 
 void StickerPreviewOverlay::touchEvent(QTouchEvent* event)
