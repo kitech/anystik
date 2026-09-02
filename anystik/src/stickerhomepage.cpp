@@ -253,6 +253,7 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
 
     auto* menu = new QskMenu(this);
     menu->setModal(true);
+    menu->setPopupFlag(QskPopup::DeleteOnClose, false);
     menu->addOption(QskLabelData(QString::fromUtf8("复制")));
     menu->addOption(QskLabelData(QString::fromUtf8("预览")));
     const int idxShare = menu->addOption(QskLabelData(QString::fromUtf8("分享")));
@@ -260,7 +261,7 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
     menu->setOrigin(scenePos);
 
     connect(menu, &QskMenu::triggered, this,
-        [this, idxShare, idxDelete](int index) {
+        [this, menu, idxShare, idxDelete](int index) {
         if (index == 0) {
             StickerStore::instance()->touchSticker(m_ctxBrief.id);
             bool ok = StickerStore::instance()->copyStickerToClipboard(m_ctxBrief.filePath);
@@ -273,10 +274,13 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
                 showToast(QString::fromUtf8("桌面暂不支持分享"));
             }
         } else if (index == idxDelete) {
-            confirmDeleteSticker(m_ctxBrief);
+            const StickerBrief brief = m_ctxBrief;
+            // QskMenu 自带 DeleteOnClose，close() 的 deleteLater 会在 question()
+            // 的嵌套事件循环里被冲刷 → 本菜单于 QskPopup::event() 派发栈内被销毁，
+            // :491 window() 打悬垂指针 SIGSEGV。确认框延迟到本次派发完成后弹出。
+            QTimer::singleShot(0, this, [this, brief]() { confirmDeleteSticker(brief); });
         }
-        if (auto* m = qobject_cast<QskMenu*>(sender()))
-            m->close();
+        menu->close();
     });
 
     {
@@ -293,7 +297,10 @@ void StickerHomePage::openPreview(const StickerBrief& brief)
     auto* overlay = new StickerPreviewOverlay(this);
     overlay->show(brief);
     connect(overlay, &StickerPreviewOverlay::deleteRequested,
-        this, [this](const StickerBrief& b) { confirmDeleteSticker(b); });
+        this, [this](const StickerBrief& b) {
+        // 确认框开嵌套事件循环，延迟到本次按钮事件派发完成后弹出，避免再入。
+        QTimer::singleShot(0, this, [this, b]() { confirmDeleteSticker(b); });
+    });
     connect(overlay, &StickerPreviewOverlay::closed,
             overlay, &QObject::deleteLater);
 }
@@ -332,6 +339,7 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
 
     auto* menu = new QskMenu(this);
     menu->setModal(true);
+    menu->setPopupFlag(QskPopup::DeleteOnClose, false);
 
     int idxBundled = 1;
     int idxImport = 0;
@@ -410,6 +418,7 @@ void StickerHomePage::showPackManageMenu()
 
     auto* menu = new QskMenu(this);
     menu->setModal(true);
+    menu->setPopupFlag(QskPopup::DeleteOnClose, false);
     menu->addOption(QskLabelData(QString::fromUtf8("重命名")));
     menu->addOption(QskLabelData(QString::fromUtf8("删除分组")));
     const QPointF center(this->width() / 2, this->height() / 2);
