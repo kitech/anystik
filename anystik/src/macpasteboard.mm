@@ -2,7 +2,11 @@
 
 #if defined(Q_OS_MACOS)
 #import <AppKit/AppKit.h>
+#import <stdio.h>
+#import <string.h>
 #include <QByteArray>
+#include <QFileInfo>
+#include <QUrl>
 
 QByteArray macPasteboardData(const char* typeName)
 {
@@ -24,48 +28,103 @@ QByteArray macPasteboardData(const char* typeName)
     return out;
 }
 
-QByteArray macPasteboardGifLike()
+QList<MacPasteCandidate> macPasteboardCollect()
 {
-    // 枚举 generalPasteboard 全部 flavor，选疑似动画图像（GIF/WebP/PNG magic）中
-    // 字节数最大者。QQ 类非标准 UTI 往往把完整动图存在 com.compuserve.gif/public.gif
-    // 之外的自定义 flavor 下；Qt 桥读到的 image/gif 只含重编码单帧，此处直取原始多帧。
-    NSPasteboard* pb = [NSPasteboard generalPasteboard];
-    QByteArray best;
-    NSUInteger bestLen = 0;
-    for (NSString* t in [pb types]) {
-        NSData* d = [pb dataForType:t];
-        NSUInteger len = d ? d.length : 0;
-        if (len <= bestLen) continue;                 // 优先更大（更可能完整动画）
-        if (len < 4) continue;
-        const unsigned char* b = (const unsigned char*)d.bytes;
-        bool gif  = b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x38; // GIF8
-        bool webp = b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F';    // RIFF(→WEBP)
-        bool png  = b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G';   // PNG
-        if (!(gif || webp || png)) continue;
-        QByteArray out(int(len), Qt::Uninitialized);
-        [d getBytes:out.data() length:len];
-        best = out;
-        bestLen = len;
-    }
-    return best;
-}
-
-void macPasteboardEnumDump()
-{
-    // 诊断：打印全部 flavor 类型名、字节数、前 4 字节 magic，用于定位真实动画 flavor。
+    // 权威读取：枚举 generalPasteboard 全部 flavor，按魔数收集图像候选并解析 file-url。
+    // 非标准 UTI（如 QQ 特有 flavor）装完整动图、Qt 桥读到的 image/gif 常只是单帧重编码；
+    // public.tiff 与 NeXT TIFF 等重复 flavor 按内容去重。
+    QList<MacPasteCandidate> out;
     @autoreleasepool {
         NSPasteboard* pb = [NSPasteboard generalPasteboard];
-        int i = 0;
+        int idx = 0;
         for (NSString* t in [pb types]) {
+            const char* tn = [t UTF8String];
             NSData* d = [pb dataForType:t];
+            const NSUInteger len = d ? d.length : 0;
             const unsigned char* b = (const unsigned char*)(d ? d.bytes : NULL);
-            int m0 = -1, m1 = -1, m2 = -1, m3 = -1;
-            if (d && d.length >= 4) { m0 = b[0]; m1 = b[1]; m2 = b[2]; m3 = b[3]; }
+            // 全 flavor 诊断：长度 + 前16字节 hex（public.png/Apple PNG/org.w3.*/dyn.* 均可见）
+            char hex[48];
+            const int nh = int(len < 16 ? len : 16);
+            for (int i = 0; i < nh; i++)
+                snprintf(hex + i * 2, 3, "%02x", b ? b[i] : 0);
+            hex[nh * 2] = '\0';
+            fprintf(stderr, "[StickerPaste][pbtypes][%d] type=%s len=%lld head=%s%s\n",
+                    idx++, tn, (long long)len, hex, len > 16 ? "..." : "");
+
+            // public.file-url：源端文件引用（Finder 粘贴=复制原文件，动画完整）
+            if (tn && strcmp(tn, "public.file-url") == 0) {
+                NSString* urlStr = [pb stringForType:t];
+                if (urlStr && urlStr.length > 0) {
+                    const QUrl u = QUrl(QString::fromUtf8([urlStr UTF8String]));
+                    if (u.isLocalFile()) {
+                        MacPasteCandidate c;
+                        c.type = QLatin1String(tn);
+                        c.isFileUrl = true;
+                        c.filePath = u.toLocalFile();
+                        out << c;
+                        fprintf(stderr, "            file-url file=%s\n",
+                                c.filePath.toUtf8().constData());
+                    }
+                }
+                continue;
+            }
+
+            // 承诺式文件引用：public.file-url 为空时 QQ/Chromium 可能只答应给文件
+            if (tn && (strcmp(tn, "com.apple.pasteboard.promised-file-url") == 0
+                    || strcmp(tn, "com.apple.pasteboard.promised-file-content-type") == 0)) {
+                NSString* urlStr = [pb stringForType:t];
+                if (urlStr && urlStr.length > 0) {
+                    const QUrl u = QUrl(QString::fromUtf8([urlStr UTF8String]));
+                    if (u.isLocalFile() && QFileInfo::exists(u.toLocalFile())) {
+                        MacPasteCandidate c;
+                        c.type = QLatin1String(tn);
+                        c.isFileUrl = true;
+                        c.filePath = u.toLocalFile();
+                        out << c;
+                        fprintf(stderr, "            promised-file-url file=%s\n",
+                                c.filePath.toUtf8().constData());
+                    }
+                }
+                continue;
+            }
+
+            if (len < 4) continue;
+            const bool gif  = b[0] == 'G' && b[1] == 'I' && b[2] == 'F' && b[3] == '8';
+            const bool webp = len >= 12 && b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F'
+                              && b[8] == 'W' && b[9] == 'E' && b[10] == 'B' && b[11] == 'P';
+            const bool png  = b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G';
+            const bool tiff = (b[0] == 'M' && b[1] == 'M' && b[2] == 0x00 && b[3] == 0x2a)
+                           || (b[0] == 'I' && b[1] == 'I' && b[2] == 0x2a && b[3] == 0x00);
+            const bool jpeg = b[0] == 0xFF && b[1] == 0xD8;
+            const bool bmp  = b[0] == 'B' && b[1] == 'M';
+            if (!(gif || webp || png || tiff || jpeg || bmp)) continue;
+
+            QByteArray data(int(len), Qt::Uninitialized);
+            [d getBytes:data.data() length:len];
+
+            // 去重：同内容 flavor（public.tiff 与 "NeXT TIFF v4.0 pasteboard type" 同字节）
+            bool dup = false;
+            for (const MacPasteCandidate& c : out) {
+                if (!c.isFileUrl && c.data == data) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) {
+                fprintf(stderr, "[StickerPaste][pbtypes][%d] type=%s len=%lld magic=%02x%02x%02x%02x dup=skip\n",
+                        idx++, tn, (long long)len, b[0], b[1], b[2], b[3]);
+                continue;
+            }
+
+            MacPasteCandidate c;
+            c.type = QLatin1String(tn);
+            c.data = data;
+            out << c;
             fprintf(stderr, "[StickerPaste][pbtypes][%d] type=%s len=%lld magic=%02x%02x%02x%02x\n",
-                    i++, [t UTF8String], (long long)(d ? d.length : 0),
-                    m0, m1, m2, m3);
+                    idx++, tn, (long long)len, b[0], b[1], b[2], b[3]);
         }
     }
+    return out;
 }
 
 #else
@@ -75,13 +134,9 @@ QByteArray macPasteboardData(const char*)
     return QByteArray();
 }
 
-QByteArray macPasteboardGifLike()
+QList<MacPasteCandidate> macPasteboardCollect()
 {
-    return QByteArray();
-}
-
-void macPasteboardEnumDump()
-{
+    return QList<MacPasteCandidate>();
 }
 
 #endif // Q_OS_MACOS

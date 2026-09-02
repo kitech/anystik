@@ -16,6 +16,12 @@ QString MacGifUtiConverter::mimeForUti(const QString &uti) const
 {
     if (uti == QLatin1String("com.compuserve.gif") || uti == QLatin1String("public.gif"))
         return QLatin1String("image/gif");
+    if (uti == QLatin1String("public.png"))
+        return QLatin1String("image/png");
+    if (uti == QLatin1String("public.jpeg"))
+        return QLatin1String("image/jpeg");
+    if (uti == QLatin1String("org.webmproject.webp"))
+        return QLatin1String("image/webp");
     return QString();
 }
 
@@ -25,6 +31,12 @@ QString MacGifUtiConverter::utiForMime(const QString &mime) const
         return mime;                 // 允许 B 循环按原始 UTI 名直读
     if (mime == QLatin1String("image/gif"))
         return QLatin1String("com.compuserve.gif");
+    if (mime == QLatin1String("image/png") || mime == QLatin1String("image/apng"))
+        return QLatin1String("public.png");   // APNG 无规范 UTI，归入 public.png
+    if (mime == QLatin1String("image/jpeg"))
+        return QLatin1String("public.jpeg");
+    if (mime == QLatin1String("image/webp"))
+        return QLatin1String("org.webmproject.webp");
     return QString();
 }
 
@@ -33,8 +45,15 @@ QVariant MacGifUtiConverter::convertToMime(const QString &mime,
                                            const QString &uti) const
 {
     if (mime == QLatin1String("image/gif")
+        || mime == QLatin1String("image/png")
+        || mime == QLatin1String("image/apng")
+        || mime == QLatin1String("image/webp")
+        || mime == QLatin1String("image/jpeg")
         || mime == QLatin1String("com.compuserve.gif")
-        || mime == QLatin1String("public.gif")) {
+        || mime == QLatin1String("public.gif")
+        || mime == QLatin1String("public.png")
+        || mime == QLatin1String("public.jpeg")
+        || mime == QLatin1String("org.webmproject.webp")) {
         QByteArray out;
         for (const QByteArray &chunk : data)
             out += chunk;

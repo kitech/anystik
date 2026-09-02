@@ -8,10 +8,13 @@
 #include <QVariant>
 #endif
 
-// 纯 C++ 方案（无 ObjC/.mm）：注册 com.compuserve.gif / public.gif ⇄ image/gif
-// 的 UTI↔MIME 转换器，使 mime->data("image/gif") 能取到剪贴板原始 GIF 字节，
-// 并使 setData("image/gif") 写剪贴板时原样落盘 com.compuserve.gif UTI。
-// 仅在 macOS 有实际实现；其它平台为空实现。
+// 纯 C++ 方案（无 ObjC/.mm）：注册常见图像 UTI ⇄ MIME 转换器，覆盖
+//   com.compuserve.gif / public.gif ⇄ image/gif
+//   public.png ⇄ image/png, image/apng
+//   public.jpeg ⇄ image/jpeg
+//   org.webmproject.webp ⇄ image/webp
+// 使 mime->data("image/gif"|"image/png"…) 能取到剪贴板原始字节，
+// 并使 setData(...) 写剪贴板时原样落盘对应 UTI。仅 macOS 有实现；其它平台空实现。
 void ensureMacGifConverter();
 
 #if defined(Q_OS_MACOS)

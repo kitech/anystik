@@ -424,14 +424,382 @@ static int gifFrameCount(const QByteArray& bytes)
     return reader.imageCount();
 }
 
-// 统一动画帧数：按 fmt 分派（gif 走 Qt imageCount；apng/webp 走 chunk 自检）
+// TIFF 帧数：多页 TIFF 由 Qt tiff 插件按页读；imageCount 可能返回 -1/1 不可靠，
+// 用「读帧→跳下一页」循环实测（GIF 走 gifFrameCount，不经此路径）。
+static int tiffFrameCount(const QByteArray& bytes)
+{
+    if (bytes.isEmpty()) return 0;
+    QBuffer probe;
+    probe.setData(bytes);
+    probe.open(QIODevice::ReadOnly);
+    QImageReader reader(&probe);
+    if (!reader.canRead()) return 0;
+    int n = 0;
+    while (n < 1024) {
+        const QImage frame = reader.read();
+        if (frame.isNull() || !frame.size().isValid()) break;
+        ++n;
+        if (!reader.jumpToNextImage()) break;
+    }
+    return n;
+}
+
+// QQ 磁盘文件去混淆：CloneWith 逆向出 QQNT marketface 为
+// 「30 字节原样 + 20 字节 ^0xFF」的循环结构；emoji-recv 缓存疑似同构混淆。
+// 产出三个变体供调用方 probe 验证（命中多帧动画才采用，正常图片绝不误伤）。
+static QList<QByteArray> deobfuscateQQ(const QByteArray& in)
+{
+    const auto block = [&in](int keep, int xored) {
+        QByteArray r = in;
+        int pos = 0;
+        const int n = r.size();
+        while (pos < n) {
+            const int kEnd = qMin(pos + keep, n);
+            pos = kEnd;
+            const int xEnd = qMin(pos + xored, n);
+            for (int i = pos; i < xEnd; ++i)
+                r[i] = char(uchar(r.at(i)) ^ 0xFF);
+            pos = xEnd;
+        }
+        return r;
+    };
+    QList<QByteArray> out;
+    out << block(30, 20);    // 变体A：保留30+异或20 循环（CloneWith 实测结构）
+    out << block(20, 30);    // 变体B：对调块长
+    QByteArray all = in;     // 变体C：全量 ^0xFF
+    for (int i = 0; i < all.size(); ++i)
+        all[i] = char(uchar(all.at(i)) ^ 0xFF);
+    out << all;
+    return out;
+}
+
+// 读本地图片候选：直读 probe 通过即返回；失败再试 QQ 去混淆变体
+// （仅当解出的是多帧动画才采用），全程留诊断日志（消除静默失败）。
+static bool loadLocalImageCandidate(const QString& path,
+                                    QByteArray* outBytes,
+                                    QByteArray* outFmt,
+                                    QSize* outSize,
+                                    int* outFrames)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        qWarning("[StickerPaste] uri read fail path=%s", qPrintable(path));
+        return false;
+    }
+    const QByteArray fb = f.readAll();
+    QByteArray fmt;
+    QSize s;
+    int frames = 0;
+    if (probeImageValidity(fb, &fmt, &s, &frames)) {
+        *outBytes = fb; *outFmt = fmt; *outSize = s; *outFrames = frames;
+        return true;
+    }
+    // 直读失败：留诊断（前 32 字节 hex + 长度），再试去混淆
+    {
+        QByteArray hex;
+        for (int i = 0; i < qMin(fb.size(), 32); ++i)
+            hex += QString("%1").arg(uchar(fb.at(i)), 2, 16, QLatin1Char('0')).toLatin1();
+        qWarning("[StickerPaste] uri probe fail path=%s len=%lld head0=%s deobf-try",
+                 qPrintable(path), (qint64)fb.size(), hex.constData());
+    }
+    const auto variants = deobfuscateQQ(fb);
+    for (int vi = 0; vi < variants.size(); ++vi) {
+        const QByteArray& v = variants.at(vi);
+        QByteArray vf;
+        QSize vs;
+        int vfr = 0;
+        if (probeImageValidity(v, &vf, &vs, &vfr)
+                && (vf == "gif" || vf == "apng" || vf == "webp")
+                && vfr > 1) {
+            *outBytes = v; *outFmt = vf; *outSize = vs; *outFrames = vfr;
+            qInfo("[StickerPaste] source=uri-deobf variant=%d path=%s fmt=%s size=%dx%d bytes=%lld frames=%d",
+                  vi + 1, qPrintable(path), vf.constData(), vs.width(), vs.height(),
+                  (qint64)v.size(), vfr);
+            return true;
+        }
+    }
+    qWarning("[StickerPaste] uri probe+deobf all fail path=%s", qPrintable(path));
+    return false;
+}
+
+// 统一动画帧数：按 fmt 分派（gif 走 Qt imageCount；apng/webp 走 chunk 自检；tiff 走逐页实测）
 static int imageAnimationFrames(const QByteArray& bytes, const QByteArray& fmt)
 {
     if (fmt == "gif")  return gifFrameCount(bytes);
     if (fmt == "apng") return apngFrameCount(bytes);
     if (fmt == "webp") return webpFrameCount(bytes);
+    if (fmt == "tif" || fmt == "tiff") return tiffFrameCount(bytes);
     return 0;
 }
+
+// ── APNG 组装（多页 TIFF → APNG 重编码用）───────────────────────────
+static quint32 s_crcTable[256];
+
+static void ensureCrcTable()
+{
+    static const bool done = []() {
+        for (quint32 n = 0; n < 256; ++n) {
+            quint32 c = n;
+            for (int k = 0; k < 8; ++k)
+                c = (c & 1) ? (0xedb88320u ^ (c >> 1)) : (c >> 1);
+            s_crcTable[n] = c;
+        }
+        return true;
+    }();
+    Q_UNUSED(done);
+}
+
+static quint32 pngCrc(const QByteArray& type, const QByteArray& data)
+{
+    ensureCrcTable();
+    quint32 c = 0xffffffffu;
+    const auto feed = [&c](char ch) {
+        const unsigned x = unsigned(uchar(ch));
+        c = s_crcTable[(c ^ x) & 0xff] ^ (c >> 8);
+    };
+    for (int i = 0; i < type.size(); ++i) feed(type.at(i));
+    for (int i = 0; i < data.size(); ++i) feed(data.at(i));
+    return c ^ 0xffffffffu;
+}
+
+static QByteArray pngChunk(const QByteArray& type, const QByteArray& data)
+{
+    if (type.size() != 4) return QByteArray();
+    QByteArray out;
+    out.reserve(12 + data.size());
+    const quint32 len = quint32(data.size());
+    out += char(len >> 24);
+    out += char(len >> 16);
+    out += char(len >> 8);
+    out += char(len);
+    out += type;
+    out += data;
+    const quint32 crc = pngCrc(type, data);
+    out += char(crc >> 24);
+    out += char(crc >> 16);
+    out += char(crc >> 8);
+    out += char(crc);
+    return out;
+}
+
+// 多页 TIFF → APNG 重编码：逐页 QImage(RGBA8888) → 手拼 IHDR/acTL/fcTL/IDAT/fdAT/IEND。
+// zlib 走 qCompress（filter=none 逐行）；产出自检（chunk 结构 + 首帧解码）通过才返回。
+// 失败返回空，调用方保守落静态首帧。
+static QByteArray multipageTiffToApng(const QByteArray& tiffBytes)
+{
+    QBuffer probe;
+    probe.setData(tiffBytes);
+    probe.open(QIODevice::ReadOnly);
+    QImageReader reader(&probe);
+    reader.setAutoTransform(true);
+    if (!reader.canRead()) return QByteArray();
+
+    QList<QImage> frames;
+    while (frames.size() < 1024) {
+        const QImage frame = reader.read();
+        if (frame.isNull() || !frame.size().isValid()) break;
+        frames << frame.convertToFormat(QImage::Format_RGBA8888);
+        if (!reader.jumpToNextImage()) break;
+    }
+    if (frames.size() < 2) return QByteArray();       // 单页 TIFF 不做重编码
+
+    const int w = frames.first().width();
+    const int h = frames.first().height();
+    const auto be32 = [](quint32 v) {
+        QByteArray b(4, '\0');
+        b[0] = char(v >> 24); b[1] = char(v >> 16); b[2] = char(v >> 8); b[3] = char(v);
+        return b;
+    };
+    const auto be16 = [](quint16 v) {
+        QByteArray b(2, '\0');
+        b[0] = char(v >> 8); b[1] = char(v);
+        return b;
+    };
+    // 逐行 filter=none + zlib
+    const auto scanlinesZ = [](const QImage& im) {
+        QByteArray raw;
+        const int bpl = im.width() * 4;
+        raw.reserve(im.height() * (bpl + 1));
+        for (int y = 0; y < im.height(); ++y) {
+            raw += char(0);
+            raw += QByteArray::fromRawData(
+                reinterpret_cast<const char*>(im.constScanLine(y)), bpl);
+        }
+        return qCompress(raw, 6);
+    };
+
+    QByteArray png;
+    {
+        const char sig[8] = {char(0x89), 'P', 'N', 'G', '\r', '\n', char(0x1a), '\n'};
+        png.append(sig, 8);
+    }
+    QByteArray ihdr;
+    ihdr += be32(quint32(w));
+    ihdr += be32(quint32(h));
+    ihdr += char(8);                 // bit depth
+    ihdr += char(6);                 // color type RGBA
+    ihdr += char(0);                 // compression
+    ihdr += char(0);                 // filter
+    ihdr += char(0);                 // interlace
+    png += pngChunk(QByteArrayLiteral("IHDR"), ihdr);
+
+    QByteArray actl;
+    actl += be32(quint32(frames.size()));
+    actl += be32(0);                 // 无限循环
+    png += pngChunk(QByteArrayLiteral("acTL"), actl);
+
+    quint32 seq = 0;
+    for (int i = 0; i < frames.size(); ++i) {
+        const QImage& fr = frames.at(i);
+        QByteArray fctl;
+        fctl += be32(seq++);
+        fctl += be32(quint32(fr.width()));
+        fctl += be32(quint32(fr.height()));
+        fctl += be32(0);             // x 偏移
+        fctl += be32(0);             // y 偏移
+        fctl += be16(1);             // delay_num
+        fctl += be16(10);            // delay_den → 100ms
+        fctl += char(0);             // dispose_op: none
+        fctl += char(0);             // blend_op: source
+        png += pngChunk(QByteArrayLiteral("fcTL"), fctl);
+
+        if (i == 0) {
+            png += pngChunk(QByteArrayLiteral("IDAT"), scanlinesZ(fr));
+        } else {
+            QByteArray fdat;
+            fdat += be32(seq++);
+            fdat += scanlinesZ(fr);
+            png += pngChunk(QByteArrayLiteral("fdAT"), fdat);
+        }
+    }
+    png += pngChunk(QByteArrayLiteral("IEND"), QByteArray());
+
+    // 自检：chunk 结构（acTL 帧数 / fdAT 数）+ 首帧可解码
+    const PngChunkInfo ver = probePngChunks(png);
+    QByteArray vf;
+    QSize vs;
+    if (!ver.validSignature || ver.acTlFrames != quint32(frames.size())
+        || ver.fdAtCount != frames.size() - 1
+        || !probeImageValidity(png, &vf, &vs)) {
+        qWarning("[StickerPaste] tiff→apng self-check fail acTL=%u fdAT=%d frames=%d",
+                 ver.acTlFrames, ver.fdAtCount, frames.size());
+        return QByteArray();
+    }
+    qInfo("[StickerPaste] tiff→apng ok frames=%d size=%dx%d bytes=%lld",
+          frames.size(), w, h, (qint64)png.size());
+    return png;
+}
+
+#if defined(Q_OS_MACOS)
+// macOS 权威读取（默认/旧 native 两模式统一）：NSPasteboard 全 flavor 直读原始字节。
+// Qt 预定义 UTI 表没有 GIF/PNG/APNG/WebP/JPEG（仅 public.tiff→application/x-qt-image）；
+// 这里按魔数收集候选，优先级：多帧动画（GIF/APNG/WebP）→ 多页 TIFF→APNG →
+// file-url 原文件多帧（Finder 粘贴=复制原文件）→ 单帧静态。
+static void macCollectPasteboard(QByteArray& bytes, QString* srcType = nullptr)
+{
+    const auto cands = macPasteboardCollect();
+    if (cands.isEmpty()) return;
+
+    QList<const MacPasteCandidate*> anim;      // 多帧 GIF/APNG/WebP
+    QList<const MacPasteCandidate*> statics;   // 单帧候选
+    const MacPasteCandidate* tiffMulti = nullptr;
+    QStringList fileUrls;
+
+    for (const auto& c : cands) {
+        if (c.isFileUrl) {
+            fileUrls << c.filePath;
+            continue;
+        }
+        QByteArray f;
+        QSize s;
+        int fr = 0;
+        if (!probeImageValidity(c.data, &f, &s, &fr)) {
+            qWarning("[StickerPaste] pb-cand probe fail type=%s len=%lld",
+                     qPrintable(c.type), (qint64)c.data.size());
+            continue;
+        }
+        const int frames = imageAnimationFrames(c.data, f);
+        qInfo("[StickerPaste] pb-cand type=%s fmt=%s size=%dx%d bytes=%lld frames=%d",
+              qPrintable(c.type), f.constData(), s.width(), s.height(),
+              (qint64)c.data.size(), frames);
+        if (frames > 1) {
+            if (f == "tif" || f == "tiff") {
+                if (!tiffMulti) tiffMulti = &c;
+            } else {
+                anim << &c;
+            }
+        } else {
+            statics << &c;
+        }
+    }
+
+    // 1) 多帧动画优先（GIF/APNG/WebP 原始字节直接可用）
+    if (!anim.isEmpty()) {
+        const MacPasteCandidate& c = *anim.first();
+        bytes = c.data;
+        QByteArray f;
+        QSize s;
+        probeImageValidity(bytes, &f, &s);
+        qInfo("[StickerPaste] source=pb-collect-anim type=%s fmt=%s size=%dx%d bytes=%lld frames=%d backend=NSPasteboard",
+              qPrintable(c.type), f.constData(), s.width(), s.height(),
+              (qint64)bytes.size(), imageAnimationFrames(bytes, f));
+        if (srcType) *srcType = c.type;
+        return;
+    }
+    // 2) 多页 TIFF → APNG 重编码（Apple 生态动画载体）
+    if (tiffMulti) {
+        const QByteArray apng = multipageTiffToApng(tiffMulti->data);
+        if (!apng.isEmpty()) {
+            bytes = apng;
+            qInfo("[StickerPaste] source=pb-tiff-apng type=%s bytes=%lld backend=NSPasteboard",
+                  qPrintable(tiffMulti->type), (qint64)apng.size());
+            if (srcType) *srcType = tiffMulti->type + QLatin1String("->apng");
+            return;
+        }
+        qWarning("[StickerPaste] pb-tiff-apng convert fail, fallback static type=%s len=%lld",
+                 qPrintable(tiffMulti->type), (qint64)tiffMulti->data.size());
+        statics.prepend(tiffMulti);  // 保守：多页 TIFF 当静态首帧入库
+    }
+    // 3) file-url 原文件副本（直读失败自动试 QQ 去混淆）
+    QByteArray fileStatic;
+    for (const QString& p : fileUrls) {
+        QByteArray fb;
+        QByteArray f;
+        QSize s;
+        int fr = 0;
+        if (!loadLocalImageCandidate(p, &fb, &f, &s, &fr)) continue;
+        if (fr > 1 && (f == "gif" || f == "apng" || f == "webp")) {
+            bytes = fb;
+            qInfo("[StickerPaste] source=pb-file path=%s fmt=%s size=%dx%d bytes=%lld frames=%d backend=NSPasteboard",
+                  qPrintable(p), f.constData(), s.width(), s.height(), (qint64)fb.size(), fr);
+            if (srcType) *srcType = QStringLiteral("file:") + p;
+            return;
+        }
+        if (fileStatic.isEmpty())
+            fileStatic = fb;
+    }
+    // 4) 单帧静态：优先剪贴板静态字节，其次 file-url 静态
+    if (!statics.isEmpty()) {
+        const MacPasteCandidate& c = *statics.first();
+        bytes = c.data;
+        QByteArray f;
+        QSize s;
+        probeImageValidity(bytes, &f, &s);
+        qInfo("[StickerPaste] source=pb-collect-static type=%s fmt=%s size=%dx%d bytes=%lld backend=NSPasteboard",
+              qPrintable(c.type), f.constData(), s.width(), s.height(), (qint64)bytes.size());
+        if (srcType) *srcType = c.type;
+    } else if (!fileStatic.isEmpty()) {
+        bytes = fileStatic;
+        QByteArray f;
+        QSize s;
+        probeImageValidity(bytes, &f, &s);
+        qInfo("[StickerPaste] source=pb-file-static path=%s fmt=%s size=%dx%d bytes=%lld backend=NSPasteboard",
+              qPrintable(fileUrls.first()), f.constData(), s.width(), s.height(),
+              (qint64)bytes.size());
+        if (srcType) *srcType = QStringLiteral("file:") + fileUrls.first();
+    }
+}
+#endif // Q_OS_MACOS
 
 // 按标题复用或新建贴纸包，返回 packId；失败返回空串
 static QString findOrCreatePack(StickerDbSyncInterface& db,
@@ -558,6 +926,7 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
     }
 
     QByteArray bytes;
+    QString srcType;
 
 #ifdef Q_OS_ANDROID
     // Java 读系统剪贴板图片字节（厂商剪贴板图片一般以 content:// uri 存放）
@@ -575,6 +944,7 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
                 bytes.resize(int(len));
                 je->GetByteArrayRegion(ja, 0, len,
                     reinterpret_cast<jbyte*>(bytes.data()));
+                srcType = QStringLiteral("android-clip");
             }
         }
     }
@@ -601,35 +971,24 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
                   u.toString().toUtf8().constData());
     }
 #endif
-    // 顺序：动画优先（gif/原始 UTI/webp/apng），静态兜底置后。
+    // 顺序：多帧动画优先（apng/webp/gif），静态兜底置后。
+    // 同一剪贴板可有多个 representation（如 QQ：image/gif 单帧 + image/apng 多帧），
+    // apng 排最前保证读到多帧原稿，与 Finder 保存 .png 的行为一致。
     // mac 上 Qt 通常不把 com.compuserve.gif/public.gif 映射为 image/gif，
     // 也不保证其原始 UTI 出现在 formats()（未注册的 UTI 不暴露）。
     // 此处按名 best-effort 取原始字节；mac 默认经 ensureMacGifConverter()(QUtiMimeConverter)
     // 权威读取，旧 macPasteboardData 直读随 ANYS_USE_MM_PASTEBOARD 运行时切换。
 #if defined(Q_OS_MACOS)
-    // 非标准 UTI 动画：枚举 NSPasteboard 全部 flavor，直取字节数最大的 GIF/WebP/PNG。
-    // QQ 类源端把完整动图存在 com.compuserve.gif/public.gif 之外的自定义 flavor 下，
-    // Qt 桥读到的 image/gif 仅重编码单帧；此处优先命中多帧原始字节。
-    macPasteboardEnumDump();                       // 诊断：打印全部 flavor 名/长度/magic
-    {
-        QByteArray nb = macPasteboardGifLike();
-        if (!nb.isEmpty()) {
-            QByteArray nf;
-            QSize ns;
-            int nframes = 0;
-            if (probeImageValidity(nb, &nf, &ns, &nframes) && nframes > 1) {
-                bytes = nb;                        // 直取真正的多帧动画
-                qInfo("[StickerPaste] source=pb-enum fmt=%s size=%dx%d bytes=%lld frames=%d backend=NSPasteboard-enum",
-                      nf.constData(), ns.width(), ns.height(),
-                      (qint64)nb.size(), nframes);
-            }
-        }
-    }
+    // 权威读取①（默认/旧 native 两模式统一）：NSPasteboard 全 flavor 直读原始字节。
+    // Qt 预定义 UTI 表没有 GIF/PNG/APNG/WebP/JPEG（仅 public.tiff→application/x-qt-image），
+    // 此处按魔数收集候选，优先多帧 / 多页 TIFF→APNG / file-url 原文件 / 单帧静态。
+    macCollectPasteboard(bytes, &srcType);
 #endif
-    for (const char* fmt : {"image/gif",
+    if (bytes.isEmpty()) {
+    for (const char* fmt : {"image/apng", "image/webp",
+                            "image/gif",
                             "com.compuserve.gif", "public.gif", "image/x-gif",
-                            "image/webp",
-                            "image/apng", "image/png",
+                            "image/png",
                             "image/jpeg", "image/tiff", "image/bmp",
                             "image/avif", "image/x-png"}) {
         QByteArray raw = mime ? mime->data(QLatin1String(fmt)) : QByteArray();
@@ -645,6 +1004,7 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
         QSize s;
         if (probeImageValidity(raw, &f, &s)) {
             bytes = raw;            // 保留原始格式（GIF/APNG 动画随之保留）
+            srcType = QLatin1String(fmt);
 #if defined(Q_OS_MACOS)
             if (gifBranch || f == "apng" || f == "webp")
                 // frames= 供核对剪贴板动画是否已被源端重编码成单帧
@@ -666,11 +1026,13 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
                   useMmPasteboard() ? "NSPasteboard native (.mm)" : "QUtiMimeConverter (Qt)");
 #endif
     }
+    }
     // 单帧动画→uri 原始多帧文件回退（mac 源端常把动画重编码成单帧塞进剪贴板，
     // 同时 text/uri-list 指向原始多帧文件；仅此病理触发，命中也只改读本地多帧文件）。
     // 同格式（GIF救GIF/APNG救APNG）或剪贴板为 GIF 时跨格式救回（QQ 场景：剪贴板单帧
-    // GIF、uri 实为 APNG 原稿）。提取为 lambda：MIME 循环产物与 macpb 直读产物共用。
-    auto rescueSingleFrameAnimation = [](QByteArray& raw, const QMimeData* md) -> void {
+    // GIF、uri 实为 APNG 原稿）。提取为 lambda：MIME 循环产物与 macpb 直读产物共用，
+    // 文件读取走 loadLocalImageCandidate（直读失败自动试 QQ 去混淆）。
+    auto rescueSingleFrameAnimation = [&srcType](QByteArray& raw, const QMimeData* md) -> void {
         if (raw.isEmpty()) return;
         QByteArray fmtG;
         QSize sizeG;
@@ -685,55 +1047,53 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
             const QString p = url.toLocalFile();
             if (p.isEmpty() || !QFileInfo::exists(p)) continue;
             if (!QFileInfo(p).isFile()) continue;
-            QFile f(p);
-            if (f.open(QIODevice::ReadOnly)) {
-                QByteArray fb = f.readAll();
-                QByteArray fmt2;
-                QSize s2;
-                int frames2 = 0;
-                if (probeImageValidity(fb, &fmt2, &s2, &frames2)
-                        && (fmt2 == fmtG || fmtG == "gif")   // 同格式，或剪贴板为 GIF（跨 GIF↔APNG）
-                        && (fmt2 == "gif" || fmt2 == "apng" || fmt2 == "webp")
-                        && frames2 > 1                        // 目标是多帧动画
-                        && s2 == sizeG) {                     // 同尺寸守卫，防误救无关文件
-                    raw = fb;
-                    qInfo("[StickerPaste] source=uri-gif-fallback path=%s clip=%s->file=%s size=%dx%d bytes=%lld frames=%d",
-                          qPrintable(p), fmtG.constData(), fmt2.constData(),
-                          s2.width(), s2.height(),
-                          (qint64)fb.size(), frames2);
-                    break;
-                }
+            QByteArray fb;
+            QByteArray fmt2;
+            QSize s2;
+            int frames2 = 0;
+            if (loadLocalImageCandidate(p, &fb, &fmt2, &s2, &frames2)
+                    && (fmt2 == fmtG || fmtG == "gif")   // 同格式，或剪贴板为 GIF（跨 GIF↔APNG）
+                    && (fmt2 == "gif" || fmt2 == "apng" || fmt2 == "webp")
+                    && frames2 > 1                        // 目标是多帧动画
+                    && s2 == sizeG) {                     // 同尺寸守卫，防误救无关文件
+                raw = fb;
+                srcType = QStringLiteral("uri-gif-fallback:") + p;
+                qInfo("[StickerPaste] source=uri-gif-fallback path=%s clip=%s->file=%s size=%dx%d bytes=%lld frames=%d",
+                      qPrintable(p), fmtG.constData(), fmt2.constData(),
+                      s2.width(), s2.height(),
+                      (qint64)fb.size(), frames2);
+                break;
             }
         }
     };
     rescueSingleFrameAnimation(bytes, mime);
     if (bytes.isEmpty()) {
-        // text/uri-list：文件管理器复制文件引用 → 读本地可读图片原始字节（保各格式/动画）
+        // text/uri-list：文件管理器复制文件引用 → 读本地可读图片原始字节
+        // （保各格式/动画；直读失败再试 QQ 去混淆）
         const QList<QUrl> urls = mime ? mime->urls() : QList<QUrl>();
         for (const QUrl& url : urls) {
             if (!url.isLocalFile()) continue;          // 只取本地文件
             const QString p = url.toLocalFile();
             if (p.isEmpty() || !QFileInfo::exists(p)) continue;
             if (!QFileInfo(p).isFile()) continue;
-            if (QImageReader::imageFormat(p).isEmpty()) continue;  // 前置：非可读图片
-            QFile f(p);
-            if (f.open(QIODevice::ReadOnly)) {
-                QByteArray fb = f.readAll();
-                QByteArray fmt2;
-                QSize s2;
-                if (probeImageValidity(fb, &fmt2, &s2)) {
-                    bytes = fb;
-                    qInfo("[StickerPaste] source=uri path=%s fmt=%s size=%dx%d bytes=%lld",
-                          qPrintable(p), fmt2.constData(), s2.width(), s2.height(),
-                          (qint64)fb.size());
-                    break;
-                }
+            QByteArray fb;
+            QByteArray fmt2;
+            QSize s2;
+            int frames2 = 0;
+            if (loadLocalImageCandidate(p, &fb, &fmt2, &s2, &frames2)) {
+                bytes = fb;
+                srcType = QStringLiteral("uri:") + p;
+                qInfo("[StickerPaste] source=uri path=%s fmt=%s size=%dx%d bytes=%lld frames=%d",
+                      qPrintable(p), fmt2.constData(), s2.width(), s2.height(),
+                      (qint64)fb.size(), frames2);
+                break;
             }
         }
     }
 #ifdef Q_OS_MACOS
     if (useMmPasteboard()) {
-        // 旧方案（运行时切回，ANYS_USE_MM_PASTEBOARD=1）：直接查系统 NSPasteboard
+        // 旧方案（运行时切回，ANYS_USE_MM_PASTEBOARD=1）：硬编码 UTI 直读兜底；
+        // 全 flavor 枚举已由 macCollectPasteboard 在权威读取①完成，此处只补老路径。
         if (bytes.isEmpty()) {
             static const char* kMacTypes[] = {
                 "com.compuserve.gif", "public.gif"
@@ -745,6 +1105,7 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
                 QSize s;
                 if (probeImageValidity(raw, &f, &s)) {
                     bytes = raw;
+                    srcType = QLatin1String(t);
                     qInfo("[StickerPaste] source=macpb type=%s fmt=%s size=%dx%d bytes=%d frames=%d backend=NSPasteboard native (.mm)",
                           t, f.constData(), s.width(), s.height(), raw.size(),
                           gifFrameCount(raw));
@@ -754,27 +1115,8 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
                       t, raw.size());
             }
         }
-        // 非标准 UTI：硬编码的 com.compuserve.gif/public.gif 之外，枚举全部 flavor 直取。
-        // 与默认路径共用同一逻辑，确保原生模式下也能拿到 QQ 类自定义 flavor 的完整动图。
-        if (bytes.isEmpty()) {
-            QByteArray nb = macPasteboardGifLike();
-            if (!nb.isEmpty()) {
-                QByteArray nf;
-                QSize ns;
-                int nframes = 0;
-                if (probeImageValidity(nb, &nf, &ns, &nframes) && nframes > 1) {
-                    bytes = nb;
-                    qInfo("[StickerPaste] source=pb-enum fmt=%s size=%dx%d bytes=%lld frames=%d backend=NSPasteboard-enum",
-                          nf.constData(), ns.width(), ns.height(),
-                          (qint64)nb.size(), nframes);
-                }
-            }
-        }
-        // macpb 产物同样可能为源端单帧重编码：此处补同一回退（修复旧路径漏网）
+        // macpb 产物同样可能为源端单帧重编码：补同一回退（修复旧路径漏网）
         rescueSingleFrameAnimation(bytes, mime);
-    } else {
-        // 默认方案：转换器已在 MIME 循环前 ensureMacGifConverter() 注册，
-        // image/gif 已由循环取出；此处 bytes 仍为空才顺延位图兜底。
     }
 #endif
     if (bytes.isEmpty()) {
@@ -783,22 +1125,71 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
             if (errorOut) *errorOut = QStringLiteral("剪贴板中没有图片");
             return false;
         }
-
-        QBuffer buffer(&bytes);
-        buffer.open(QIODevice::WriteOnly);
-        if (!img.save(&buffer, "PNG")) {
-            if (errorOut) *errorOut = QStringLiteral("图片编码失败");
-            return false;
-        }
-        qInfo("[StickerPaste] source=bitmap fmt=png size=%dx%d bytes=%lld",
-              img.width(), img.height(), (qint64)bytes.size());
         qInfo("[StickerPaste] bitmap source qimage-format=%d", int(img.format()));
+
+        // 自检修复：RGB555 等格式 encode 出的 PNG 可能无有效 IDAT（此前复现
+        // chunks=[IHDR|pHYs] + libpng IDAT failure），先归一 ARGB32 再编码并 probe 自验；
+        // 逐级降级格式，最后 BMP 兜底（Qt BMP 编码不含 zlib，必成）。
+        const QImage::Format kFormats[] = {
+            QImage::Format_ARGB32,
+            QImage::Format_RGB32,
+            QImage::Format_RGBA8888,
+        };
+        bool done = false;
+        for (QImage::Format fmt : kFormats) {
+            const QImage c = img.convertToFormat(fmt);
+            QByteArray trial;
+            QBuffer b(&trial);
+            if (!b.open(QIODevice::WriteOnly)) continue;
+            if (!c.save(&b, "PNG")) continue;
+            QByteArray tf;
+            QSize ts;
+            if (probeImageValidity(trial, &tf, &ts)) {
+                bytes = trial;
+                srcType = QStringLiteral("bitmap");
+                qInfo("[StickerPaste] source=bitmap fmt=png size=%dx%d bytes=%lld encode-ok qformat=%d",
+                      c.width(), c.height(), (qint64)bytes.size(), int(fmt));
+                done = true;
+                break;
+            }
+            qWarning("[StickerPaste] bitmap png self-check fail qformat=%d", int(fmt));
+        }
+        if (!done) {
+            const QImage c = img.convertToFormat(QImage::Format_ARGB32);
+            srcType = QStringLiteral("bitmap");
+            QBuffer b(&bytes);
+            if (!b.open(QIODevice::WriteOnly) || !c.save(&b, "BMP")) {
+                if (errorOut) *errorOut = QStringLiteral("图片编码失败");
+                return false;
+            }
+            QByteArray tf;
+            QSize ts;
+            if (!probeImageValidity(bytes, &tf, &ts)) {
+                if (errorOut) *errorOut = QStringLiteral("图片编码失败");
+                return false;
+            }
+            qInfo("[StickerPaste] source=bitmap fmt=bmp size=%dx%d bytes=%lld bmp-fallback",
+                  c.width(), c.height(), (qint64)bytes.size());
+        }
     }
 #endif
 
     if (bytes.isEmpty()) {
         if (errorOut) *errorOut = QStringLiteral("剪贴板中没有图片");
         return false;
+    }
+    {
+        QByteArray vf;
+        QSize vs;
+        const bool vok = probeImageValidity(bytes, &vf, &vs);
+        const QByteArray srcUtf = srcType.isEmpty() ? QByteArrayLiteral("?")
+                                                    : srcType.toUtf8();
+        qInfo("[StickerPaste] verify src=%s final-fmt=%s size=%dx%d bytes=%lld frames=%d probe-ok=%d",
+              srcUtf.constData(),
+              vok ? vf.constData() : "?",
+              vok ? vs.width() : 0, vok ? vs.height() : 0,
+              (qint64)bytes.size(),
+              vok ? imageAnimationFrames(bytes, vf) : 0, int(vok));
     }
     return importImageBytes(bytes, errorOut);
 }
