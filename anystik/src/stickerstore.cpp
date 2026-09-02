@@ -534,6 +534,50 @@ static int imageAnimationFrames(const QByteArray& bytes, const QByteArray& fmt)
     return 0;
 }
 
+// 缩放自验证：缩放结果写临时文件保留，与原图对比格式+帧数，不匹配则 qWarning。
+// 保原格式语义：GIF→GIF、APNG→APNG 应一致；WebP→APNG 属既有预期转换，豁免不误报。
+static void verifyScaledResult(const QByteArray& srcRaw,
+                               const QByteArray& scaledBytes,
+                               const char* tag)
+{
+    if (srcRaw.isEmpty() || scaledBytes.isEmpty()) return;
+
+    QByteArray srcFmt, scaleFmt;
+    QSize srcSize, scaleSize;
+    int srcFrames = 0, scaleFrames = 0;
+    probeImageValidity(srcRaw, &srcFmt, &srcSize, &srcFrames);
+    probeImageValidity(scaledBytes, &scaleFmt, &scaleSize, &scaleFrames);
+    if (srcFrames == 0)
+        srcFrames = imageAnimationFrames(srcRaw, srcFmt);
+    if (scaleFrames == 0)
+        scaleFrames = imageAnimationFrames(scaledBytes, scaleFmt);
+
+    QTemporaryFile tmp(QDir::tempPath()
+                       + QStringLiteral("/anystik_scale_verify_XXXXXX"));
+    QString tmpPath;
+    if (tmp.open()) {
+        tmp.write(scaledBytes);
+        tmp.flush();
+        tmpPath = tmp.fileName();
+    }
+
+    const bool fmtConvert = (srcFmt == "webp" && scaleFmt == "apng");
+    const bool fmtOk = (srcFmt == scaleFmt) || fmtConvert;
+    const bool framesOk = (srcFrames == scaleFrames);
+    if (!fmtOk || !framesOk) {
+        qWarning("[StickerScale][%s] MISMATCH orig=fmt:%s frames:%d %dx%d "
+                 "vs scaled=fmt:%s frames:%d %dx%d tmp=%s",
+                 tag, srcFmt.constData(), srcFrames, srcSize.width(), srcSize.height(),
+                 scaleFmt.constData(), scaleFrames, scaleSize.width(), scaleSize.height(),
+                 qPrintable(tmpPath));
+    } else {
+        qInfo("[StickerScale][%s] verify ok fmt=%s frames=%d %dx%d->%dx%d",
+              tag, scaleFmt.constData(), scaleFrames,
+              srcSize.width(), srcSize.height(),
+              scaleSize.width(), scaleSize.height());
+    }
+}
+
 // ── APNG 组装（多页 TIFF → APNG 重编码用）───────────────────────────
 static quint32 s_crcTable[256];
 
@@ -1491,7 +1535,8 @@ bool StickerStore::shareStickerFile(const QString& filePath)
 #ifndef Q_OS_ANDROID
 static bool stashAnimationClipboard(const QByteArray& fmt,
                                     const QByteArray& bytes,
-                                    const QString& filePath)
+                                    const QString& filePath,
+                                    const QImage& pngFallback)
 {
     const QByteArray mimeType = (fmt == "gif")
             ? QByteArray("image/gif") : QByteArray("image/apng");
@@ -1505,12 +1550,15 @@ static bool stashAnimationClipboard(const QByteArray& fmt,
         // APNG：macOS 未声明规范 UTI，写入自定义类型串（自回读走 image/apng）
         mime->setData("org.kde.anystik.apng", bytes);
         // public.png 别名：APNG 默认图像是合法独立 PNG，原生查看器可显示静态首帧
-        mime->setData("public.png", bytes);
+        QBuffer pb;
+        pb.open(QIODevice::WriteOnly);
+        if (pngFallback.save(&pb, "PNG"))
+            mime->setData("public.png", pb.data());
     }
     if (!filePath.isEmpty())
         mime->setUrls({QUrl::fromLocalFile(filePath)}); // public.file-url：文件粘贴方取原始多帧
 #endif
-    mime->setImageData(QImage(filePath));   // PNG 位图回退
+    mime->setImageData(pngFallback);        // PNG 位图回退（缩放结果）
     QGuiApplication::clipboard()->setMimeData(mime);
     qInfo("[StickerCopy] fmt=%s bytes=%d frames=%d",
           fmt.constData(), bytes.size(), imageAnimationFrames(bytes, fmt));
@@ -1523,7 +1571,8 @@ static bool copyScaledFramesToClipboard(const QList<QImage>& frames,
                                         const QVector<int>& delayMs,
                                         const QByteArray& srcFmt,
                                         const QSize& targetSize,
-                                        const QString& srcPath)
+                                        const QString& srcPath,
+                                        const QByteArray& srcRaw)
 {
     QList<QImage> scaled;
     scaled.reserve(frames.size());
@@ -1536,12 +1585,16 @@ static bool copyScaledFramesToClipboard(const QList<QImage>& frames,
 
     if (srcFmt == "gif") {
         const QByteArray gifBytes = buildGifBytes(scaled, delayMs);
-        if (!gifBytes.isEmpty())
-            return stashAnimationClipboard("gif", gifBytes, srcPath);
+        if (!gifBytes.isEmpty()) {
+            verifyScaledResult(srcRaw, gifBytes, "desktop-gif");
+            return stashAnimationClipboard("gif", gifBytes, srcPath, scaled.first());
+        }
     } else {
         const QByteArray apng = buildApngFromFrames(scaled, delayMs);
-        if (!apng.isEmpty())
-            return stashAnimationClipboard("apng", apng, srcPath);
+        if (!apng.isEmpty()) {
+            verifyScaledResult(srcRaw, apng, "desktop-apng");
+            return stashAnimationClipboard("apng", apng, srcPath, scaled.first());
+        }
     }
 
     // 重编码失败：保守落静态首帧位图
@@ -1591,7 +1644,7 @@ bool StickerStore::copyStickerToClipboard(const QString& filePath)
         QFile f(filePath);
         if (f.open(QIODevice::ReadOnly)) {
             const QByteArray raw = f.readAll();
-            return stashAnimationClipboard(animFmt, raw, filePath);
+            return stashAnimationClipboard(animFmt, raw, filePath, QImage(filePath));
         }
     }
     QImage img(filePath);
@@ -1608,7 +1661,7 @@ bool StickerStore::copyStickerToClipboard(const QString& filePath)
 static bool storeScaledTmpThenCopy(const QImage& scaled)
 {
     const QString tmpPath = QStandardPaths::writableLocation(
-        QStandardPaths::CacheLocation) + QStringLiteral("/scaled.png");
+        QStandardPaths::AppLocalDataLocation) + QStringLiteral("/scaled.png");
     QFile out(tmpPath);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
     scaled.save(&out, "PNG");
@@ -1639,15 +1692,16 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
         return false;
     }
 #ifdef Q_OS_ANDROID
-    // 读取原图，逐帧缩放后写 CacheLocation 临时文件（扩展名按动画类型），
+    // 读取原图，逐帧缩放后写 AppLocalDataLocation 临时文件（扩展名按动画类型），
     // 复用 ShareActivity.copyImageToClipboard（按扩展名给 image/gif|png MIME）。
     QList<QImage> frames;
     QVector<int> delays;
     QByteArray srcFmt;
+    QByteArray raw;
     {
         QFile pb(filePath);
         if (!pb.open(QIODevice::ReadOnly)) return false;
-        const QByteArray raw = pb.readAll();
+        raw = pb.readAll();
         QByteArray fmt; QSize size; int cnt = 0;
         probeImageValidity(raw, &fmt, &size, &cnt);
         srcFmt = fmt;
@@ -1691,11 +1745,13 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
     if (bytes.isEmpty()) return false;
 
     const QString tmpPath = QStandardPaths::writableLocation(
-        QStandardPaths::CacheLocation) + QStringLiteral("/scaled") + ext;
+        QStandardPaths::AppLocalDataLocation) + QStringLiteral("/scaled") + ext;
     QFile out(tmpPath);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
     out.write(bytes);
     out.close();
+
+    verifyScaledResult(raw, bytes, "android-anim");
 
     showAndroidToast(QStringLiteral("已复制到剪贴板"));
     bool copied = false;
@@ -1731,7 +1787,7 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
         if (decodeAllFrames(raw, &frames, &delays))
             return copyScaledFramesToClipboard(frames, delays, fmt,
                                                cappedScaledSize(frames.first().size(), scale),
-                                               filePath);
+                                               filePath, raw);
         // 解码失败：回退为静态单帧
     }
 
