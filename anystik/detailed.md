@@ -577,7 +577,7 @@ StickerStore::ensureInit()
 
 ### 已知限制
 
-- macOS 浏览器拷贝动图在源端已变静态，剪贴板层不可恢复（Photocopier 只能重新下载 GIF 再写 RTFD 补救）
+- mac 浏览器/部分应用拷贝 GIF 时，源端常把动画重编码成**单帧**写进 `image/gif` 数据，同时保留 `text/uri-list` 指向原始多帧文件。已实现回退：检测到剪贴板 GIF 单帧（`frames=1`）且 uri 指向本地多帧 GIF 时，改读原始文件（`source=uri-gif-fallback`）。若源端连本地文件引用都不给（纯网页拷贝），剪贴板层不可恢复
 - Android 剪贴板 `text/uri-list`（文本型）未解析，仅日志
 - WebP 动图缺 libwebp 插件时降级静态首帧；APNG/AVIF 需对应 Qt 图像插件
 - Android API 33+ 非本应用写入的剪贴板有遮蔽策略；读剪贴板为 UI 线程同步 I/O（既有 TODO）
@@ -587,10 +587,12 @@ StickerStore::ensureInit()
 | 日志 | 含义 |
 |------|------|
 | `mime formats: …` | 剪贴板暴露的 MIME 全集（mac 排查关键：能确认源到底写了什么） |
+| `text/uri-list=…` / `uri[file/remote]…` | mac 诊断：源端原始文件引用（`file://` 可回退；`https://`=纯网页拷贝，源端限制不可救） |
 | `source=mime type=…` | 命中某 MIME 的原字节 |
-| `source=uri path=…` | text/uri-list 本地文件读取成功 |
-| `source=macpb type=…` | NSPasteboard 直读抢救成功（mac 专有） |
-| `source=mime type=…(gif) backend=…` / `source=macpb … backend=…` | GIF 分支元信息行始终含后端：`QUtiMimeConverter (Qt)` 或 `NSPasteboard native (.mm)`；无效时该行记 `decode-failed`，仍显示后端 |
+| `source=mime type=…(gif) … frames=… backend=…` | GIF 分支元信息行恒含后端；新增 `frames=`（`QImageReader::imageCount`）用于核对剪贴板 GIF 是否已被源端压成单帧 |
+| `source=uri-gif-fallback path=… … frames=…` | 剪贴板 GIF 为单帧时回退成功读取 uri 本地多帧原始 GIF（动画恢复点） |
+| `source=uri path=…` | text/uri-list 本地文件读取成功（常规空字节路径） |
+| `source=macpb type=…` | NSPasteboard 直读抢救成功（mac 专有；现含 `frames=`，单帧时同走 uri-gif-fallback 回退） |
 | `source=bitmap …` | 位图兜底 PNG（动画必然丢失处） |
 | `import ok fmt=…` | 入库成功 |
 

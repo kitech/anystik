@@ -293,6 +293,18 @@ static bool probeImageValidity(const QByteArray& bytes,
     return true;
 }
 
+// GIF 帧数：多帧动画返回 >1，单帧/不可确定返回 <=1（QBuffer 上 QImageReader::imageCount）
+static int gifFrameCount(const QByteArray& bytes)
+{
+    if (bytes.isEmpty()) return 0;
+    QBuffer probe;
+    probe.setData(bytes);
+    probe.open(QIODevice::ReadOnly);
+    QImageReader reader(&probe);
+    if (!reader.canRead()) return 0;
+    return reader.imageCount();
+}
+
 // 按标题复用或新建贴纸包，返回 packId；失败返回空串
 static QString findOrCreatePack(StickerDbSyncInterface& db,
                                 const QString& packTitle,
@@ -449,6 +461,18 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
     if (mime)
         qInfo("[StickerPaste] mime formats: %s",
               mime->formats().join('|').toUtf8().constData());
+#if defined(Q_OS_MACOS)
+    // 只读诊断：核对源端原始文件引用（public.file-url⇔file:// 可回退 / public.url⇔https 源端限制）
+    if (mime) {
+        const QByteArray uriRaw = mime->data("text/uri-list");
+        qInfo("[StickerPaste] text/uri-list=%s",
+              uriRaw.trimmed().isEmpty() ? "<none>" : uriRaw.trimmed().constData());
+        for (const QUrl& u : mime->urls())
+            qInfo("[StickerPaste] uri[%s]%s",
+                  u.isLocalFile() ? "file" : "remote",
+                  u.toString().toUtf8().constData());
+    }
+#endif
     // 顺序：动画优先（gif/原始 UTI/webp/apng），静态兜底置后。
     // mac 上 Qt 通常不把 com.compuserve.gif/public.gif 映射为 image/gif，
     // 也不保证其原始 UTI 出现在 formats()（未注册的 UTI 不暴露）。
@@ -475,8 +499,10 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
             bytes = raw;            // 保留原始格式（GIF 动画随之保留）
 #if defined(Q_OS_MACOS)
             if (gifBranch)
-                qInfo("[StickerPaste] source=mime type=%s fmt=%s size=%dx%d bytes=%d backend=%s",
+                // frames= 供核对剪贴板 GIF 是否已被源端重编码成单帧
+                qInfo("[StickerPaste] source=mime type=%s fmt=%s size=%dx%d bytes=%d frames=%d backend=%s",
                       fmt, f.constData(), s.width(), s.height(), raw.size(),
+                      gifFrameCount(raw),
                       useMmPasteboard() ? "NSPasteboard native (.mm)" : "QUtiMimeConverter (Qt)");
             else
 #endif
@@ -492,6 +518,41 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
                   useMmPasteboard() ? "NSPasteboard native (.mm)" : "QUtiMimeConverter (Qt)");
 #endif
     }
+    // 单帧 GIF→uri 原始多帧文件回退（mac 源端常把动画重编码成单帧塞进 image/gif，
+    // 同时 text/uri-list 指向原始多帧文件；仅此病理触发，命中也只改读本地多帧 GIF）。
+    // 提取为 lambda：MIME 循环产物与 macpb 直读产物两处字节落地后共用。
+    auto rescueSingleFrameGif = [](QByteArray& raw, const QMimeData* md) -> void {
+        if (raw.isEmpty()) return;
+        QByteArray fmtG;
+        QSize sizeG;
+        if (!(probeImageValidity(raw, &fmtG, &sizeG) && fmtG == "gif"
+                && gifFrameCount(raw) <= 1)) {
+            return;
+        }
+        const QList<QUrl> urls = md ? md->urls() : QList<QUrl>();
+        for (const QUrl& url : urls) {
+            if (!url.isLocalFile()) continue;              // 只取本地文件
+            const QString p = url.toLocalFile();
+            if (p.isEmpty() || !QFileInfo::exists(p)) continue;
+            if (!QFileInfo(p).isFile()) continue;
+            if (QImageReader::imageFormat(p) != "gif") continue;  // 只救 GIF
+            QFile f(p);
+            if (f.open(QIODevice::ReadOnly)) {
+                QByteArray fb = f.readAll();
+                QByteArray fmt2;
+                QSize s2;
+                if (probeImageValidity(fb, &fmt2, &s2)
+                        && gifFrameCount(fb) > 1) {        // 原始文件确为多帧
+                    raw = fb;
+                    qInfo("[StickerPaste] source=uri-gif-fallback path=%s fmt=%s size=%dx%d bytes=%lld frames=%d",
+                          qPrintable(p), fmt2.constData(), s2.width(), s2.height(),
+                          (qint64)fb.size(), gifFrameCount(fb));
+                    break;
+                }
+            }
+        }
+    };
+    rescueSingleFrameGif(bytes, mime);
     if (bytes.isEmpty()) {
         // text/uri-list：文件管理器复制文件引用 → 读本地可读图片原始字节（保各格式/动画）
         const QList<QUrl> urls = mime ? mime->urls() : QList<QUrl>();
@@ -530,14 +591,17 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
                 QSize s;
                 if (probeImageValidity(raw, &f, &s)) {
                     bytes = raw;
-                    qInfo("[StickerPaste] source=macpb type=%s fmt=%s size=%dx%d bytes=%d backend=NSPasteboard native (.mm)",
-                          t, f.constData(), s.width(), s.height(), raw.size());
+                    qInfo("[StickerPaste] source=macpb type=%s fmt=%s size=%dx%d bytes=%d frames=%d backend=NSPasteboard native (.mm)",
+                          t, f.constData(), s.width(), s.height(), raw.size(),
+                          gifFrameCount(raw));
                     break;
                 }
                 qInfo("[StickerPaste] source=macpb type=%s bytes=%d backend=NSPasteboard native (.mm) decode-failed",
                       t, raw.size());
             }
         }
+        // macpb 产物同样可能为源端单帧重编码：此处补同一回退（修复旧路径漏网）
+        rescueSingleFrameGif(bytes, mime);
     } else {
         // 默认方案：转换器已在 MIME 循环前 ensureMacGifConverter() 注册，
         // image/gif 已由循环取出；此处 bytes 仍为空才顺延位图兜底。
