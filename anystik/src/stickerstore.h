@@ -128,8 +128,24 @@ public:
     // 图片描述长度上限（140 字）；写入/编辑描述时按此截断
     static constexpr int MaxDescriptionLength = 140;
 
+    // ── 贴纸存储根（base）切换 ──
+    // AppPrivate = AppLocalDataLocation；Pictures = 平台相册/anystik 目录。
+    // 注意：切到 Pictures 仅当作「文件存储位置」，不主动触发系统相册索引
+    //       刷新（MediaScanner），因此新图片不会立即出现在系统相册中。
+    enum class StorageRoot { AppPrivate, Pictures };
+    bool   switchStorageRoot(StorageRoot target, QString* errorOut = nullptr);
+    QString storageRootPath(StorageRoot r) const;
+    bool   isCurrentStoragePictures() const;
+    QString currentStickerBaseDir() const { return stickerBaseDir(); }
+
 Q_SIGNALS:
     void dataChanged();
+    // 迁移进度：进度按「文件数」计算（done/total）；copiedBytes 为已拷贝字节，
+    // 仅用于展示、不参与进度计算。工作线程发出。
+    void migrationProgress(int done, int total, qint64 copiedBytes,
+                           const QString& current);
+    // 迁移结束（GUI 线程发出）。ok=false 时 detail 为失败原因。
+    void migrationFinished(bool ok, const QString& detail);
     // size: -1 = 未知(如 codeload zip 无 Content-Length)
     // version/versionRaw: commit sha / ETag / Last-Modified / 未知
     void probeDone(const QString& url, qint64 size, const QString& version,
@@ -185,6 +201,11 @@ private:
     QString stickerBaseDir() const;
     QString resolveStickerPath(const QString& stored);
     QString relativeToBase(const QString& abs);
+    // 迁移异步：工作线程执行「阶段一 只复制」（不碰源/DB），全部成功后才在
+    // GUI 线程执行「阶段二 DB 转换 + 持久化 + 切 base」。任一步失败仅清理
+    // 目标侧副本，绝不动旧数据与文件（详见 switchStorageRoot 实现）。
+    bool m_migrating = false;
+    StorageRoot m_pendingStorageRoot = StorageRoot::AppPrivate;
 
     static StickerStore* s_instance;
     bool m_initialized = false;

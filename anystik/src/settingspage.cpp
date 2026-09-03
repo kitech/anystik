@@ -3,6 +3,8 @@
 #include "phonemonitor.h"
 #include "pushhandler.h"
 #include "androidutils.h"
+#include "stickerstore.h"
+#include "migrationdialog.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
@@ -17,8 +19,11 @@
 #include <QskSkinManager.h>
 #include <QskSkin.h>
 #include <QskTextField.h>
+#include <QskBoxShapeMetrics.h>
 #include <QSettings>
 #include <QDebug>
+#include <QTimer>
+#include <QDir>
 #if defined(Q_OS_ANDROID)
 #include <QJniObject>
 #endif
@@ -189,6 +194,37 @@ SettingsPage::SettingsPage(QQuickItem* parent)
 
     updateGotifyVisibility(0);
 
+    new QskSeparator(Qt::Horizontal, layout);
+
+    // ── Row 11: 贴纸存储位置（当前 base 目录，只读） ──
+    auto* row11 = new QskLinearBox(Qt::Horizontal, layout);
+    row11->setSpacing(12);
+    auto* curRootLabel = new QskTextLabel(QString::fromUtf8("当前存储"), row11);
+    curRootLabel->setPreferredWidth(160);
+    m_currentRootValue = new QskTextLabel(QString(), row11);
+    m_currentRootValue->setWrapMode(QskTextOptions::WordWrap);
+    m_currentRootValue->setSizePolicy(
+        QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    new QskSeparator(Qt::Horizontal, layout);
+
+    // ── Row 12: 切换目标目录 + 迁移按钮 ──
+    auto* row12 = new QskLinearBox(Qt::Horizontal, layout);
+    row12->setSpacing(12);
+    auto* targetRootLabel = new QskTextLabel(QString::fromUtf8("迁移到相册"), row12);
+    targetRootLabel->setPreferredWidth(160);
+    m_targetRootValue = new QskTextLabel(QString(), row12);
+    m_targetRootValue->setWrapMode(QskTextOptions::WordWrap);
+    m_targetRootValue->setSizePolicy(
+        QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    auto* migrateBtn = new QskPushButton(QString::fromUtf8("迁移"), row12);
+    migrateBtn->setBoxShapeHint(QskPushButton::Panel,
+        QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+    m_migrateButton = migrateBtn;
+    connect(migrateBtn, &QskPushButton::clicked, this,
+            &SettingsPage::onMigrateStorageClicked);
+
     layout->addStretch(1);
 }
 
@@ -263,6 +299,81 @@ void SettingsPage::rebuildBackendLabels(const QStringList& installed)
     m_backendCombo->blockSignals(false);
 }
 
+void SettingsPage::refreshStorageRows()
+{
+    auto* store = StickerStore::instance();
+    if (!store)
+        return;
+
+    const QString current = store->currentStickerBaseDir();
+    const QString target = picturesTargetPath();
+
+    if (m_currentRootValue)
+        m_currentRootValue->setText(current);
+    if (m_targetRootValue)
+        m_targetRootValue->setText(target);
+
+    if (m_migrateButton) {
+        const bool already = !target.isEmpty()
+            && QDir::cleanPath(current) == QDir::cleanPath(target);
+        m_migrateButton->setEnabled(!already);
+        m_migrateButton->setText(already
+            ? QString::fromUtf8("已在相册")
+            : QString::fromUtf8("迁移"));
+    }
+}
+
+QString SettingsPage::picturesTargetPath() const
+{
+    auto* store = StickerStore::instance();
+    if (!store)
+        return QString();
+    return store->storageRootPath(
+        StickerStore::StorageRoot::Pictures);
+}
+
+void SettingsPage::onMigrateStorageClicked()
+{
+    auto* store = StickerStore::instance();
+    if (!store)
+        return;
+
+    const QString fromRoot = store->currentStickerBaseDir();
+    const QString toRoot = picturesTargetPath();
+
+    if (toRoot.isEmpty()) {
+        showAndroidToast(QString::fromUtf8("无法确定相册目录"));
+        return;
+    }
+    if (QDir::cleanPath(fromRoot) == QDir::cleanPath(toRoot)) {
+        showAndroidToast(QString::fromUtf8("已在相册目录"));
+        refreshStorageRows();
+        return;
+    }
+
+#if defined(Q_OS_ANDROID)
+    if (!androidStorageAccessGranted()) {
+        requestAndroidStorageAccess();
+        showAndroidToast(QString::fromUtf8(
+            "请在权限页授予存储访问权限，返回后再点迁移"));
+        return;
+    }
+#endif
+
+    // 打开进度对话框（完成/失败自动关闭）
+    MigrationDialog::show(this, fromRoot, toRoot);
+
+    QString err;
+    const bool ok = store->switchStorageRoot(
+        StickerStore::StorageRoot::Pictures, &err);
+    if (!ok) {
+        showAndroidToast(err.isEmpty() ? QString::fromUtf8("迁移启动失败")
+                                       : err);
+    }
+    // sync 失败（同根/建目录失败等）时马上刷新按钮状态
+    QTimer::singleShot(0, this, [this]() { refreshStorageRows(); });
+}
+
 void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
 {
     s_instance = this;
@@ -276,6 +387,8 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     m_debugBgSwitch->setChecked(settings.value("debugBackground", false).toBool());
     m_phoneAnswerCombo->setCurrentIndex(settings.value("phoneAnswer", 0).toInt());
     m_pushNotifySwitch->setChecked(settings.value("pushNotification", true).toBool());
+
+    refreshStorageRows();
 
     // ── Restore Push Backend settings ──
     m_gotifyUrlEdit->setText(settings.value("gotifyUrl").toString());
@@ -449,4 +562,10 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
         QskSetup::setUpdateFlag(
             QskItem::DebugForceBackground, m_debugBgSwitch->isChecked());
     }
+
+    // 迁移完成后刷新「当前存储」显示与按钮状态
+    connect(StickerStore::instance(), &StickerStore::migrationFinished,
+            this, [this](bool /*ok*/, const QString& /*detail*/) {
+        refreshStorageRows();
+    });
 }

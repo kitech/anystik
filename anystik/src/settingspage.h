@@ -11,6 +11,8 @@
 class QskTextField;
 class QskSeparator;
 class QskLinearBox;
+class QskTextLabel;
+class QskPushButton;
 
 struct FontSizes {
     int body = 21, title = 29, caption = 19, global = 16;
@@ -45,6 +47,9 @@ protected:
 private:
     void updateGotifyVisibility(int backendIndex);
     void rebuildBackendLabels(const QStringList& installed);
+    void refreshStorageRows();
+    void onMigrateStorageClicked();
+    QString picturesTargetPath() const;
 
     bool m_signalsConnected = false;
     int m_currentAnimatorIdx = 3;
@@ -63,6 +68,11 @@ private:
     QskSeparator* m_gotifySep1 = nullptr;
     QskSeparator* m_gotifySep2 = nullptr;
     QStringList m_knownDistPackages;
+
+    // ── 存储位置（贴纸 base 目录切换）──
+    QskTextLabel* m_currentRootValue = nullptr;
+    QskTextLabel* m_targetRootValue = nullptr;
+    QskPushButton* m_migrateButton = nullptr;
 
     static QPointer<SettingsPage> s_instance;
 };

@@ -16,6 +16,7 @@ public class PermissionHelper {
     private static final int REQ_MEDIA = 9002;
     private static final int REQ_PHONE_CALL = 9003;
     private static final int REQ_DOCUMENT_TREE = 9004;
+    private static final int REQ_WRITE_STORAGE = 9005;
 
     public static boolean hasNotificationPermission(Activity activity) {
         if (Build.VERSION.SDK_INT < 33)
@@ -78,6 +79,30 @@ public class PermissionHelper {
                     Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
             } catch (Exception ignored) { }
         }
+    }
+
+    // ── 外部存储写入（Android 6-10，API 23-29）──
+    // Android 11+（API 30+）写入任意目录须 MANAGE（见上）；Android 6-10 走
+    // WRITE_EXTERNAL_STORAGE 运行时权限；Android 5 及以下安装即授权无需申请。
+    public static boolean hasWriteExternalStorage(Activity activity) {
+        if (Build.VERSION.SDK_INT >= 30)
+            return hasManageExternalStorage(activity);   // 高版本写任意外部路径需 MANAGE
+        if (Build.VERSION.SDK_INT < 23)
+            return true;                       // 安装即授权
+        return ContextCompat.checkSelfPermission(activity,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    public static void requestWriteExternalStorage(Activity activity) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            requestManageExternalStorage(activity);   // →所有文件访问设置页
+            return;
+        }
+        if (Build.VERSION.SDK_INT < 23)
+            return;
+        if (hasWriteExternalStorage(activity)) return;
+        ActivityCompat.requestPermissions(activity,
+            new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_WRITE_STORAGE);
     }
 
     // ── SAF 目录/图库选择启动（系统弹窗授权，无需 MANAGE 权限即可用）──

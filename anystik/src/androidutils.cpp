@@ -43,6 +43,7 @@ void installLogHandler()
 
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
+#include <QJniEnvironment>
 
 void showAndroidToast(const QString& message) {
     QNativeInterface::QAndroidApplication::runOnAndroidMainThread([message]() {
@@ -59,8 +60,68 @@ void showAndroidToast(const QString& message) {
         }
     });
 }
+
+QString androidPicturesStickerBaseDir()
+{
+    QJniObject javaDir = QJniObject::callStaticObjectMethod(
+        "android/os/Environment",
+        "getExternalStoragePublicDirectory",
+        "(Ljava/lang/String;)Ljava/io/File;",
+        QJniObject::fromString("Pictures").object());
+    if (!javaDir.isValid())
+        return QString();
+    QJniObject abs = javaDir.callObjectMethod(
+        "getAbsolutePath", "()Ljava/lang/String;");
+    if (!abs.isValid())
+        return QString();
+    const QString pics = abs.toString();
+    if (pics.isEmpty())
+        return QString();
+    // 注意：Pictures/anystik 仅当作「文件存储位置」，不主动触发
+    // MediaScanner 广播，因此切到相册后图片不会实时出现在系统相册索引中。
+    return pics + QStringLiteral("/anystik");
+}
+
+bool androidStorageAccessGranted()
+{
+    QJniObject activity = QNativeInterface::QAndroidApplication::context();
+    if (!activity.isValid())
+        return false;
+    return QJniObject::callStaticMethod<jboolean>(
+        "io/fedlet/mobutil/PermissionHelper",
+        "hasWriteExternalStorage",
+        "(Landroid/app/Activity;)Z",
+        activity.object());
+}
+
+void requestAndroidStorageAccess()
+{
+    QJniObject activity = QNativeInterface::QAndroidApplication::context();
+    if (!activity.isValid())
+        return;
+    QJniObject::callStaticMethod<void>(
+        "io/fedlet/mobutil/PermissionHelper",
+        "requestWriteExternalStorage",
+        "(Landroid/app/Activity;)V",
+        activity.object());
+}
 #else
 void showAndroidToast(const QString& message) {
     Q_UNUSED(message)
+}
+
+QString androidPicturesStickerBaseDir()
+{
+    return QString();   // 桌面/非 Android：用 QStandardPaths::PicturesLocation
+}
+
+bool androidStorageAccessGranted()
+{
+    return true;        // 桌面平台无需外部存储授权
+}
+
+void requestAndroidStorageAccess()
+{
+    // 桌面平台空操作
 }
 #endif

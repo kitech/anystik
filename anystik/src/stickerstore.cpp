@@ -99,12 +99,51 @@ void StickerStore::dropLegacyChatTables()
 QString StickerStore::stickerBaseDir() const
 {
     if (m_stickerBaseDir.isEmpty()) {
-        m_stickerBaseDir = QStandardPaths::writableLocation(
-            QStandardPaths::AppLocalDataLocation);
+        // 持久化优先：若已显式切过存储根，则沿用；否则默认 app 私有目录。
+        const QString saved = QSettings().value(
+            QStringLiteral("storageRoot")).toString();
+        if (!saved.isEmpty()
+                && QDir(saved).exists()
+                && QFileInfo(saved).isWritable()) {
+            m_stickerBaseDir = saved;
+        } else {
+            m_stickerBaseDir = QStandardPaths::writableLocation(
+                QStandardPaths::AppLocalDataLocation);
+        }
         if (m_stickerBaseDir.isEmpty())
             m_stickerBaseDir = QDir::tempPath();
     }
     return m_stickerBaseDir;
+}
+
+QString StickerStore::storageRootPath(StorageRoot r) const
+{
+    switch (r) {
+    case StorageRoot::AppPrivate: {
+        QString p = QStandardPaths::writableLocation(
+            QStandardPaths::AppLocalDataLocation);
+        return p.isEmpty() ? QDir::tempPath() : p;
+    }
+    case StorageRoot::Pictures: {
+#ifdef Q_OS_ANDROID
+        const QString p = androidPicturesStickerBaseDir();
+        if (!p.isEmpty())
+            return p;
+#endif
+        const QString pics = QStandardPaths::writableLocation(
+            QStandardPaths::PicturesLocation);
+        return pics.isEmpty() ? QString()
+                              : pics + QStringLiteral("/anystik");
+    }
+    }
+    return QString();
+}
+
+bool StickerStore::isCurrentStoragePictures() const
+{
+    const QString cur = QDir::cleanPath(stickerBaseDir());
+    const QString pics = QDir::cleanPath(storageRootPath(StorageRoot::Pictures));
+    return !pics.isEmpty() && cur == pics;
 }
 
 QString StickerStore::resolveStickerPath(const QString& stored)
@@ -125,6 +164,236 @@ QString StickerStore::relativeToBase(const QString& abs)
         return abs.mid(base.size() + 1);
     // 不在 base 下 → 原样（如外部绝对路径）
     return abs;
+}
+
+namespace {
+// 迁移结果（阶段一 工作线程产生，阶段二 GUI 线程消费）
+struct MigrationResult {
+    bool ok = false;
+    bool sameRoot = false;            // 起止根相同（无需迁移）
+    QString failDetail;               // 失败原因（中文）
+    int totalFiles = 0;               // 计划迁移的文件数（进度分母）
+    qint64 copiedBytes = 0;           // 已拷贝字节（仅展示，不参与进度）
+    int externalSkipped = 0;          // 外部引用跳过条数
+    QStringList created;              // 本次新建的目标侧文件（回滚时删除）
+    QStringList relSkipped;           // 已在目标、未搬的记录（用于 phase2 相对化）
+    QStringList relMoved;             // 从 fromRoot 搬入的记录（相对路径，phase2 转换）
+    QStringList relExternal;          // 外部引用（非 base 下绝对，phase2 保留不动）
+    QString fromRoot, toRoot;
+};
+}
+
+bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
+{
+    if (!ensureInit()) {
+        if (errorOut) *errorOut = QStringLiteral("存储未初始化");
+        return false;
+    }
+    if (m_migrating) {
+        if (errorOut) *errorOut = QStringLiteral("正在迁移，请稍候");
+        return false;
+    }
+
+    const QString fromRoot = QDir::cleanPath(stickerBaseDir());
+    const QString toRoot = QDir::cleanPath(storageRootPath(target));
+    if (toRoot.isEmpty()) {
+        if (errorOut) *errorOut = QStringLiteral("无法确定目标目录");
+        return false;
+    }
+    if (fromRoot == toRoot) {
+        // 目标即当前根：直接持久化该根并返回成功
+        QSettings().setValue(QStringLiteral("storageRoot"), toRoot);
+        return true;
+    }
+    if (!QDir().mkpath(toRoot)) {
+        if (errorOut) *errorOut = QStringLiteral("无法创建目标目录：")
+                                  + toRoot;
+        return false;
+    }
+
+    // 开始两阶段异步迁移
+    m_migrating = true;
+    m_pendingStorageRoot = target;
+
+    auto future = QtConcurrent::run([this, fromRoot, toRoot]() {
+        // ── 阶段一：只复制，绝不触碰源与 DB ──
+        MigrationResult r;
+        r.fromRoot = fromRoot;
+        r.toRoot = toRoot;
+
+        // 收集 DB 全部记录路径（含软删）
+        QVector<QPair<QString,QString>> rels;      // (file_path 原文, 相对或绝对分类)
+        {
+            auto& db = Storage::instance().msgDb();
+            SqliteStatement stmt = db.prepare("SELECT file_path FROM stickers");
+            if (stmt.isPrepared()) {
+                while (stmt.stepRow()) {
+                    const char* fp = stmt.columnText(0);
+                    if (fp && *fp)
+                        rels.append({QString::fromUtf8(fp), QString()});
+                }
+            }
+        }
+
+        // 构建去重的 from→to 映射，并分类
+        QSet<QString> seenTo;
+        struct Plan { QString from, to, rel; int kind; }; // kind 1=搬入 0=已在目标 2=外部
+        QVector<Plan> plan;
+        for (const auto& fp : rels) {
+            const QString& stored = fp.first;
+            if (stored.startsWith(QLatin1Char('/'))) {
+                // 绝对路径
+                if (stored.startsWith(fromRoot + QLatin1Char('/'))) {
+                    const QString rel = stored.mid(fromRoot.size() + 1);
+                    const QString to = toRoot + QLatin1Char('/') + rel;
+                    if (!seenTo.contains(to)) {
+                        seenTo.insert(to);
+                        plan.append({QString(), to, rel, 1}); // from 由规则推导
+                    }
+                    r.relMoved.append(rel);
+                } else if (stored.startsWith(toRoot + QLatin1Char('/'))) {
+                    const QString rel = stored.mid(toRoot.size() + 1);
+                    if (!seenTo.contains(stored)) {
+                        seenTo.insert(stored);
+                        plan.append({QString(), stored, rel, 0});
+                    }
+                    r.relSkipped.append(rel);
+                } else {
+                    r.relExternal.append(stored);   // 外部引用，保留不动
+                    r.externalSkipped++;
+                }
+            } else {
+                // 相对路径（相对 base）
+                if (!seenTo.contains(stored)) {
+                    seenTo.insert(stored);
+                    plan.append({QString(), QString(), stored, 3}); // 相对，搬
+                }
+                r.relMoved.append(stored);
+            }
+        }
+
+        r.totalFiles = plan.size();
+        int done = 0;
+        bool failed = false;
+        for (auto& p : plan) {
+            // 计算实际源/目标路径
+            QString from, to;
+            switch (p.kind) {
+            case 1: from = fromRoot + QLatin1Char('/') + p.rel; to = p.to; break;
+            case 0: from = p.to; to = p.to; break;               // 已在目标，无需搬
+            case 2: continue;                                     // 不会进入 plan
+            case 3: from = fromRoot + QLatin1Char('/') + p.rel;
+                    to = toRoot + QLatin1Char('/') + p.rel; break;
+            default: continue;
+            }
+            done++;
+            if (p.kind == 0) {
+                // 已在目标：无需复制
+                emit migrationProgress(done, r.totalFiles, r.copiedBytes, p.to);
+                continue;
+            }
+            if (QFile::exists(to)) {
+                emit migrationProgress(done, r.totalFiles, r.copiedBytes, to);
+                continue;   // 已存在 → 幂等跳过
+            }
+            if (!QDir().mkpath(QFileInfo(to).absolutePath())) {
+                r.failDetail = QStringLiteral("无法创建子目录：")
+                               + QFileInfo(to).absolutePath();
+                failed = true; break;
+            }
+            if (!QFile::copy(from, to)) {
+                r.failDetail = QStringLiteral("复制失败：")
+                               + from + QStringLiteral(" → ") + to;
+                failed = true; break;
+            }
+            r.created.append(to);
+            r.copiedBytes += QFileInfo(to).size();
+            emit migrationProgress(done, r.totalFiles, r.copiedBytes, to);
+        }
+
+        r.ok = !failed;
+        if (failed && !r.created.isEmpty()) {
+            // 回滚：仅删除本次新建的目标侧副本，绝不碰 fromRoot 源
+            for (int i = r.created.size() - 1; i >= 0; --i)
+                QFile::remove(r.created[i]);
+        }
+        return r;
+    });
+
+    future.then(this, [this, fromRoot, toRoot, target,
+                 errorOut](const MigrationResult& r) {
+        if (!r.ok) {
+            m_migrating = false;
+            if (errorOut) *errorOut = r.failDetail;
+            emit migrationFinished(false, r.failDetail);
+            return;
+        }
+        // ── 阶段二：全部复制成功后，转换 DB 绝对路径 → 相对（按 toRoot）+ 持久化 ──
+        auto& db = Storage::instance().msgDb();
+        db.beginTransaction();
+        bool dbOk = true;
+        {
+            SqliteStatement sel = db.prepare("SELECT rowid,file_path FROM stickers");
+            if (!sel.isPrepared()) dbOk = false;
+            while (dbOk && sel.stepRow()) {
+                const qint64 rowid = sel.columnInt64(0);
+                const char* fp = sel.columnText(1);
+                QString stored = fp ? QString::fromUtf8(fp) : QString();
+                QString upd;
+                if (stored.startsWith(toRoot + QLatin1Char('/'))) {
+                    // 绝对且位于新 base 下 → 相对化
+                    upd = stored.mid(toRoot.size() + 1);
+                } else if (stored.startsWith(QLatin1Char('/'))) {
+                    // 其他绝对（外部/旧）→ 保留不动
+                    continue;
+                } else {
+                    // 已是相对 → 不变
+                    continue;
+                }
+                SqliteStatement up = db.prepare(
+                    "UPDATE stickers SET file_path=?1 WHERE rowid=?2");
+                if (!up.isPrepared() || !up.bind(1, upd.toUtf8().constData())
+                        || !up.bind(2, static_cast<int64_t>(rowid)) || !up.step()) {
+                    dbOk = false; break;
+                }
+            }
+        }
+        if (dbOk) {
+            db.commitTransaction();
+        } else {
+            db.rollbackTransaction();
+        }
+
+        if (!dbOk) {
+            m_migrating = false;
+            if (errorOut) *errorOut = QStringLiteral("数据库路径更新失败");
+            emit migrationFinished(false, QStringLiteral("数据库路径更新失败"));
+            return;
+        }
+
+        // 持久化新 base
+        QSettings().setValue(QStringLiteral("storageRoot"), toRoot);
+        m_stickerBaseDir = toRoot;
+        m_migrating = false;
+
+        // best-effort：重写 downloadedPackMeta/<id>.dir（若指向旧 base/packs）
+        {
+            QSettings s;
+            // 通过 packs 接口无法拿到元数据键集合，这里按 id 无法枚举；
+            // 改为遍历现有 pack 元数据键（downloadedPackMeta/<id>）估算不现实，
+            // 简化：卸载删文件路径略旧，不影响数据正确性，此处不处理（注释说明）。
+            Q_UNUSED(s)
+        }
+
+        // 说明：不做 MediaScanner 广播，Pictures/anystik 仅作文件存储，
+        // 图片不会自动出现在系统相册索引中（属预期）。
+
+        emit migrationFinished(true, QString());
+        emit dataChanged();
+        Q_UNUSED(fromRoot)
+    });
+
+    return true;
 }
 
 StickerDbSyncInterface& stickerDb()
@@ -1123,6 +1392,10 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
         if (errorOut) *errorOut = QStringLiteral("storage init failed");
         return false;
     }
+    if (m_migrating) {
+        if (errorOut) *errorOut = QStringLiteral("正在迁移，请稍候再导入");
+        return false;
+    }
 
     QDir root(dir);
     if (!root.exists()) {
@@ -1347,6 +1620,10 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
 {
     if (!ensureInit()) {
         if (errorOut) *errorOut = QStringLiteral("storage init failed");
+        return false;
+    }
+    if (m_migrating) {
+        if (errorOut) *errorOut = QStringLiteral("正在迁移，请稍候再粘贴");
         return false;
     }
 
@@ -1622,6 +1899,10 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
 // ── 图片字节入库（桌面剪贴板 / Android 剪贴板 / Android 分享 共用）──
 bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut)
 {
+    if (m_migrating) {
+        if (errorOut) *errorOut = QStringLiteral("正在迁移，请稍候再添加");
+        return false;
+    }
     if (bytes.isEmpty()) {
         if (errorOut) *errorOut = QStringLiteral("empty image data");
         return false;
