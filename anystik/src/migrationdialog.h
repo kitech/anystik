@@ -2,6 +2,7 @@
 #define MIGRATION_DIALOG_H
 
 #include <QskPopup.h>
+#include <QElapsedTimer>
 #include <QString>
 
 class QskBox;
@@ -53,6 +54,12 @@ private:
     QskTextLabel* m_bytesLabel = nullptr;
     QskPushButton* m_pauseButton = nullptr;
     QskPushButton* m_cancelButton = nullptr;
+
+    // 迁移统计（完成 toast / 日志用）
+    QElapsedTimer m_timer;            // 从对话框弹出开始计时
+    int m_lastDone = 0;
+    int m_lastTotal = 0;
+    qint64 m_lastBytes = 0;
 };
 
 #endif // MIGRATION_DIALOG_H

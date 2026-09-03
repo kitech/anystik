@@ -1,5 +1,6 @@
 #include "migrationdialog.h"
 #include "stickerstore.h"
+#include "toastpopup.h"
 
 #include <QskBox.h>
 #include <QskBoxShapeMetrics.h>
@@ -40,6 +41,8 @@ MigrationDialog::MigrationDialog(const QString& fromRoot, const QString& toRoot,
     setModal(true);
     setOverlay(true);
     setPopupFlag(QskPopup::DeleteOnClose, true);   // finished 后 deleteLater
+    // 迁移进行中禁止点击对话框外部关闭（CloseOnPressOutside 默认开启需显式清除）
+    setPopupFlag(QskPopup::CloseOnPressOutside, false);
     setPolishOnResize(true);
     setPolishOnParentResize(true);
 
@@ -98,6 +101,7 @@ MigrationDialog::MigrationDialog(const QString& fromRoot, const QString& toRoot,
     connect(store, &StickerStore::migrationFinished,
             this, &MigrationDialog::onFinished);
 
+    m_timer.start();
     open();
 }
 
@@ -126,6 +130,10 @@ void MigrationDialog::updateLayout()
 void MigrationDialog::onProgress(int done, int total, qint64 copiedBytes,
                                  const QString& /*current*/)
 {
+    m_lastDone = done;
+    m_lastTotal = total;
+    m_lastBytes = copiedBytes;
+
     if (total > 0)
         m_progress->setValue(qBound<qreal>(0.0, qreal(done) / qreal(total), 1.0));
     else
@@ -140,8 +148,36 @@ void MigrationDialog::onProgress(int done, int total, qint64 copiedBytes,
 
 void MigrationDialog::onFinished(bool ok, const QString& detail)
 {
-    if (!ok && !detail.isEmpty())
-        qDebug() << "[StickerStore] 迁移失败:" << detail;
+    // 统计：时长（对话框弹出起）、文件数、字节数（字节统一用 MB 被人读友好格式）
+    const qint64 ms = m_timer.elapsed();
+    const double sec = double(ms) / 1000.0;
+    const QString dur = (ms < 1000)
+        ? QString::number(ms) + QStringLiteral(" 毫秒")
+        : QString::number(sec, 'f', 1) + QStringLiteral(" 秒");
+
+    const double mb = double(m_lastBytes) / (1024.0 * 1024.0);
+    const QString files = (m_lastTotal > 0 && m_lastDone != m_lastTotal)
+        ? QStringLiteral("%1/%2").arg(m_lastDone).arg(m_lastTotal)
+        : QString::number(m_lastTotal);
+
+    // 日志：成功 qInfo、失败 qWarning
+    if (ok) {
+        qInfo("[StickerStore] 迁移成功：%d 个文件，%.1f MB，用时 %s",
+              m_lastTotal, mb, qPrintable(dur));
+    } else {
+        qWarning("[StickerStore] 迁移失败：文件 %s（共 %d），已拷贝 %.1f MB，用时 %s；%s",
+                 qPrintable(files), m_lastTotal, mb, qPrintable(dur),
+                 qPrintable(detail));
+    }
+
+    // 无论成败都弹 toast（Android 走原生系统 toast）
+    const QString text = ok
+        ? QString::fromUtf8("迁移完成：%1 个文件，%2 MB，用时 %3")
+              .arg(m_lastTotal).arg(mb, 0, 'f', 1).arg(dur)
+        : QString::fromUtf8("迁移失败：已迁移 %1 个，用时 %2；%3")
+              .arg(files).arg(dur).arg(detail);
+    ToastPopup::show(parentItem(), text);
+
     // 完成即关闭（DeleteOnClose 负责销毁）
     close();
 }

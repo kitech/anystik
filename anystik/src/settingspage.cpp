@@ -208,22 +208,41 @@ SettingsPage::SettingsPage(QQuickItem* parent)
 
     new QskSeparator(Qt::Horizontal, layout);
 
-    // ── Row 12: 切换目标目录 + 迁移按钮 ──
+    // ── Row 12: 迁移到相册（目标目录 + 迁移按钮） ──
     auto* row12 = new QskLinearBox(Qt::Horizontal, layout);
     row12->setSpacing(12);
     auto* targetRootLabel = new QskTextLabel(QString::fromUtf8("迁移到相册"), row12);
     targetRootLabel->setPreferredWidth(160);
-    m_targetRootValue = new QskTextLabel(QString(), row12);
-    m_targetRootValue->setWrapMode(QskTextOptions::WordWrap);
-    m_targetRootValue->setSizePolicy(
+    m_targetPicsValue = new QskTextLabel(QString(), row12);
+    m_targetPicsValue->setWrapMode(QskTextOptions::WordWrap);
+    m_targetPicsValue->setSizePolicy(
         QskSizePolicy::Expanding, QskSizePolicy::Preferred);
 
     auto* migrateBtn = new QskPushButton(QString::fromUtf8("迁移"), row12);
     migrateBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
-    m_migrateButton = migrateBtn;
+    m_migratePicsButton = migrateBtn;
     connect(migrateBtn, &QskPushButton::clicked, this,
-            &SettingsPage::onMigrateStorageClicked);
+            [this]() { onMigrateStorageClicked(StickerStore::StorageRoot::Pictures); });
+
+    new QskSeparator(Qt::Horizontal, layout);
+
+    // ── Row 13: 迁移回私用（目标 AppLocalDataLocation + 迁移按钮） ──
+    auto* row13 = new QskLinearBox(Qt::Horizontal, layout);
+    row13->setSpacing(12);
+    auto* targetPrivateLabel = new QskTextLabel(QString::fromUtf8("迁移回私用"), row13);
+    targetPrivateLabel->setPreferredWidth(160);
+    m_targetPrivateValue = new QskTextLabel(QString(), row13);
+    m_targetPrivateValue->setWrapMode(QskTextOptions::WordWrap);
+    m_targetPrivateValue->setSizePolicy(
+        QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    auto* migratePrivateBtn = new QskPushButton(QString::fromUtf8("迁移"), row13);
+    migratePrivateBtn->setBoxShapeHint(QskPushButton::Panel,
+        QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+    m_migratePrivateButton = migratePrivateBtn;
+    connect(migratePrivateBtn, &QskPushButton::clicked, this,
+            [this]() { onMigrateStorageClicked(StickerStore::StorageRoot::AppPrivate); });
 
     layout->addStretch(1);
 }
@@ -306,53 +325,63 @@ void SettingsPage::refreshStorageRows()
         return;
 
     const QString current = store->currentStickerBaseDir();
-    const QString target = picturesTargetPath();
+    const QString pics = targetPath(StickerStore::StorageRoot::Pictures);
+    const QString priv = targetPath(StickerStore::StorageRoot::AppPrivate);
+    const bool inPics = store->isCurrentStoragePictures();
 
     if (m_currentRootValue)
         m_currentRootValue->setText(current);
-    if (m_targetRootValue)
-        m_targetRootValue->setText(target);
+    if (m_targetPicsValue)
+        m_targetPicsValue->setText(pics);
+    if (m_targetPrivateValue)
+        m_targetPrivateValue->setText(priv);
 
-    if (m_migrateButton) {
-        const bool already = !target.isEmpty()
-            && QDir::cleanPath(current) == QDir::cleanPath(target);
-        m_migrateButton->setEnabled(!already);
-        m_migrateButton->setText(already
+    if (m_migratePicsButton) {
+        m_migratePicsButton->setEnabled(!inPics);
+        m_migratePicsButton->setText(inPics
             ? QString::fromUtf8("已在相册")
             : QString::fromUtf8("迁移"));
     }
+    if (m_migratePrivateButton) {
+        m_migratePrivateButton->setEnabled(inPics);
+        m_migratePrivateButton->setText(inPics
+            ? QString::fromUtf8("迁移")
+            : QString::fromUtf8("已在私用"));
+    }
 }
 
-QString SettingsPage::picturesTargetPath() const
+QString SettingsPage::targetPath(StickerStore::StorageRoot r) const
 {
     auto* store = StickerStore::instance();
     if (!store)
         return QString();
-    return store->storageRootPath(
-        StickerStore::StorageRoot::Pictures);
+    return store->storageRootPath(r);
 }
 
-void SettingsPage::onMigrateStorageClicked()
+void SettingsPage::onMigrateStorageClicked(StickerStore::StorageRoot target)
 {
     auto* store = StickerStore::instance();
     if (!store)
         return;
 
     const QString fromRoot = store->currentStickerBaseDir();
-    const QString toRoot = picturesTargetPath();
+    const QString toRoot = targetPath(target);
 
     if (toRoot.isEmpty()) {
-        showAndroidToast(QString::fromUtf8("无法确定相册目录"));
+        showAndroidToast(QString::fromUtf8("无法确定目标目录"));
         return;
     }
     if (QDir::cleanPath(fromRoot) == QDir::cleanPath(toRoot)) {
-        showAndroidToast(QString::fromUtf8("已在相册目录"));
+        showAndroidToast(target == StickerStore::StorageRoot::Pictures
+            ? QString::fromUtf8("已在相册目录")
+            : QString::fromUtf8("已在私用目录"));
         refreshStorageRows();
         return;
     }
 
 #if defined(Q_OS_ANDROID)
-    if (!androidStorageAccessGranted()) {
+    if (target == StickerStore::StorageRoot::Pictures
+        && !androidStorageAccessGranted()) {
         requestAndroidStorageAccess();
         showAndroidToast(QString::fromUtf8(
             "请在权限页授予存储访问权限，返回后再点迁移"));
@@ -364,8 +393,7 @@ void SettingsPage::onMigrateStorageClicked()
     MigrationDialog::show(this, fromRoot, toRoot);
 
     QString err;
-    const bool ok = store->switchStorageRoot(
-        StickerStore::StorageRoot::Pictures, &err);
+    const bool ok = store->switchStorageRoot(target, &err);
     if (!ok) {
         showAndroidToast(err.isEmpty() ? QString::fromUtf8("迁移启动失败")
                                        : err);

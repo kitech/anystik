@@ -2,6 +2,7 @@
 #define SETTINGS_PAGE_H
 
 #include "page.h"
+#include "stickerstore.h"
 #include <QskComboBox.h>
 #include <QskSwitchButton.h>
 #include <QPointer>
@@ -48,8 +49,8 @@ private:
     void updateGotifyVisibility(int backendIndex);
     void rebuildBackendLabels(const QStringList& installed);
     void refreshStorageRows();
-    void onMigrateStorageClicked();
-    QString picturesTargetPath() const;
+    void onMigrateStorageClicked(StickerStore::StorageRoot target);
+    QString targetPath(StickerStore::StorageRoot r) const;
 
     bool m_signalsConnected = false;
     int m_currentAnimatorIdx = 3;
@@ -71,8 +72,10 @@ private:
 
     // ── 存储位置（贴纸 base 目录切换）──
     QskTextLabel* m_currentRootValue = nullptr;
-    QskTextLabel* m_targetRootValue = nullptr;
-    QskPushButton* m_migrateButton = nullptr;
+    QskTextLabel* m_targetPicsValue = nullptr;
+    QskPushButton* m_migratePicsButton = nullptr;
+    QskTextLabel* m_targetPrivateValue = nullptr;
+    QskPushButton* m_migratePrivateButton = nullptr;
 
     static QPointer<SettingsPage> s_instance;
 };

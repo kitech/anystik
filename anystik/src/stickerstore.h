@@ -201,6 +201,8 @@ private:
     QString stickerBaseDir() const;
     QString resolveStickerPath(const QString& stored);
     QString relativeToBase(const QString& abs);
+    // 迁移完全成功后清理旧 base 的贴纸文件（packs/、pastes/），避免两份拷贝
+    void cleanupMigrationSource(const QString& fromRoot);
     // 迁移异步：工作线程执行「阶段一 只复制」（不碰源/DB），全部成功后才在
     // GUI 线程执行「阶段二 DB 转换 + 持久化 + 切 base」。任一步失败仅清理
     // 目标侧副本，绝不动旧数据与文件（详见 switchStorageRoot 实现）。

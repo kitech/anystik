@@ -166,6 +166,26 @@ QString StickerStore::relativeToBase(const QString& abs)
     return abs;
 }
 
+void StickerStore::cleanupMigrationSource(const QString& fromRoot)
+{
+    if (fromRoot.isEmpty())
+        return;
+    // 只删旧 base 下的贴纸文件目录（packs/ 包、pastes/ 散图）；
+    // 绝不动 fromRoot 根下 cache.db/message.db/cache_fs 等非贴纸数据。
+    const QStringList subDirs = { QStringLiteral("packs"),
+                                  QStringLiteral("pastes") };
+    for (const QString& sub : subDirs) {
+        const QString p = fromRoot + QLatin1Char('/') + sub;
+        QDir d(p);
+        if (d.exists()) {
+            // best-effort：失败仅残留旧副本，不影响迁移成功的正确性
+            if (!QDir(d.path()).removeRecursively())
+                qWarning("[StickerStore] 清理旧目录失败: %s",
+                         qPrintable(p));
+        }
+    }
+}
+
 namespace {
 // 迁移结果（阶段一 工作线程产生，阶段二 GUI 线程消费）
 struct MigrationResult {
@@ -375,6 +395,10 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
         QSettings().setValue(QStringLiteral("storageRoot"), toRoot);
         m_stickerBaseDir = toRoot;
         m_migrating = false;
+
+        // 迁移完全成功（DB 已转、base 已切）后清理旧 base 的贴纸文件，避免两份拷贝。
+        // 只删 packs/、pastes/；绝不动 fromRoot 根下 cache.db/message.db/cache_fs 等。
+        cleanupMigrationSource(fromRoot);
 
         // best-effort：重写 downloadedPackMeta/<id>.dir（若指向旧 base/packs）
         {
@@ -2803,6 +2827,16 @@ void StickerStore::finishIfComplete(DownloadTask* task)
 
 void StickerStore::runInstall(DownloadTask* task)
 {
+    if (m_migrating) {
+        // 迁移中不启动安装：保留 .part 续传状态（rename 尚未发生），
+        // 迁移结束后 UI 显示「继续」，用户可点继续重新安装。
+        const QString url = task->url;
+        m_tasks.remove(url);
+        delete task;
+        emit downloadFinished(url, false,
+            QStringLiteral("正在迁移存储位置，下载已完成，请稍后点击「继续」"));
+        return;
+    }
     task->installing = true;
     auto future = QtConcurrent::run([this, task]() {
         return runInstallWork(task);
