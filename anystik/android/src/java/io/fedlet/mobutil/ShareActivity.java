@@ -205,4 +205,28 @@ public class ShareActivity extends QtActivity {
         if (n.endsWith(".bmp"))  return "image/bmp";
         return "image/*";
     }
+
+    // 打开目录：成功拉起文件管理器返回 true，否则 false。
+    // 先尝试 FileProvider content URI，失败回退 file://；整段捕获异常避免崩溃。
+    public static boolean openDir(Context ctx, String path) {
+        if (ctx == null || path == null || path.isEmpty()) return false;
+        File dir = new File(path);
+        if (!dir.isDirectory()) return false;
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                Uri contentUri = FileProvider.getUriForFile(ctx,
+                    ctx.getPackageName() + ".qtprovider", dir);
+                intent.setData(contentUri);
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception e1) {
+                intent.setData(Uri.fromFile(dir));
+            }
+            ctx.startActivity(intent);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 }

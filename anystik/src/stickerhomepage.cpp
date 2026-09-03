@@ -32,6 +32,9 @@
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QSettings>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QStandardPaths>
 
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
@@ -54,6 +57,27 @@ static void jniKeepScreenOn(bool on) {
     }).waitForFinished();
 #else
     Q_UNUSED(on)
+#endif
+}
+
+// Android 打开目录：经 ShareActivity.openDir 拉起文件管理器，
+// 成功返回 true，失败返回 false（调用方据此提示）。
+static bool jOpenDir(const QString& path)
+{
+#ifdef Q_OS_ANDROID
+    bool ok = false;
+    QNativeInterface::QAndroidApplication::runOnAndroidMainThread([&ok, path]() {
+        QJniObject context = QNativeInterface::QAndroidApplication::context();
+        if (!context.isValid()) return;
+        ok = QJniObject::callStaticMethod<jboolean>(
+            "io/fedlet/mobutil/ShareActivity", "openDir",
+            "(Landroid/content/Context;Ljava/lang/String;)Z",
+            context.object(), QJniObject::fromString(path).object());
+    }).waitForFinished();
+    return ok;
+#else
+    Q_UNUSED(path)
+    return false;
 #endif
 }
 
@@ -378,12 +402,14 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
     int idxBundled = 1;
     int idxImport = 0;
     int idxPaste = 2;
+    int idxOpenFolder = 3;
     int idxManage = -1;
     menu->addOption(QskLabelData(QString::fromUtf8("导入表情包文件夹")));
     menu->addOption(QskLabelData(QString::fromUtf8("表情包目录")));
     menu->addOption(QskLabelData(QString::fromUtf8("粘贴添加")));
+    menu->addOption(QskLabelData(QString::fromUtf8("打开目录")));
     if (!m_packs.isEmpty()) {
-        idxManage = 3;
+        idxManage = 4;
         menu->addOption(QskLabelData(QString::fromUtf8("分组管理")));
     }
     menu->addSeparator();
@@ -396,14 +422,16 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
                        : QString("  Keep Screen On")));
     menu->setOrigin(origin);
 
-    connect(menu, &QskMenu::triggered, this, [this, idxBundled, idxImport, idxPaste, idxManage,
-        idxLog, idxSettings, idxAbout, idxKeep](int index) {
+    connect(menu, &QskMenu::triggered, this, [this, idxBundled, idxImport, idxPaste, idxOpenFolder,
+        idxManage, idxLog, idxSettings, idxAbout, idxKeep](int index) {
         if (index == idxImport) {
             requestImportFolder();
         } else if (index == idxBundled) {
             pageManager()->open("bundledpacks");
         } else if (index == idxPaste) {
             requestPasteSticker();
+        } else if (index == idxOpenFolder) {
+            openStickerFolder();
         } else if (idxManage >= 0 && index == idxManage) {
             showPackManageMenu();
         } else if (index == idxLog) {
@@ -655,6 +683,25 @@ void StickerHomePage::showToast(const QString& text)
 {
     ToastPopup::show(this, text);
     qDebug() << "[StickerHomePage]" << text;
+}
+
+void StickerHomePage::openStickerFolder()
+{
+    const QString dataDir = QStandardPaths::writableLocation(
+        QStandardPaths::AppLocalDataLocation);
+    if (dataDir.isEmpty()) {
+        showToast(QString::fromUtf8("无法获取目录路径"));
+        return;
+    }
+
+#ifdef Q_OS_ANDROID
+    // Android 贴纸存放于应用私有目录（/data/data/<pkg>/files），多数
+    // 文件管理器无法访问，尝试打开，失败则仅提示。
+    if (!jOpenDir(dataDir))
+        showToast(QString::fromUtf8("无法打开贴纸目录（位于应用私有存储）"));
+#else
+    QDesktopServices::openUrl(QUrl::fromLocalFile(dataDir));
+#endif
 }
 
 #include "moc_stickerhomepage.cpp"

@@ -39,6 +39,7 @@ private:
     void requestPasteSticker();
     void showRenameDialog(const StickerPackBrief& pack);
     void removePack(const StickerPackBrief& pack);
+    void openStickerFolder();
 
     void showDirPicker();
 
