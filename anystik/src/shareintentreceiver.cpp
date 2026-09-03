@@ -65,19 +65,21 @@ void registerShareNavigator(std::function<void()> navigateToStickerHome)
 
 void drainPendingShareIntents()
 {
-    QVector<PendingShare> items;
-    {
-        QMutexLocker lock(&s_mutex);
-        if (s_draining) return;
-        s_draining = true;
-        items.swap(s_queue);
-    }
-    for (const auto& item : items) {
-        runOnMainThread([item]() { processOne(item); });
-    }
-    {
-        QMutexLocker lock(&s_mutex);
-        s_draining = false;
+    // 循环 drain 直至队列空：修复逐张入队时 s_draining 期间新入队件被丢弃的问题
+    for (;;) {
+        QVector<PendingShare> items;
+        {
+            QMutexLocker lock(&s_mutex);
+            if (s_queue.isEmpty()) {
+                s_draining = false;
+                break;
+            }
+            s_draining = true;
+            items.swap(s_queue);
+        }
+        for (const auto& item : items) {
+            runOnMainThread([item]() { processOne(item); });
+        }
     }
 }
 

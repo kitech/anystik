@@ -36,6 +36,9 @@ public class ShareActivity extends QtActivity {
         handleIntent(intent);
     }
 
+    // 分享图片最大导入张数（超出部分忽略并提示）
+    private static final int MAX_SHARE_IMAGES = 32;
+
     private void handleIntent(Intent intent) {
         String action = intent.getAction();
         if (action == null) return;
@@ -48,31 +51,86 @@ public class ShareActivity extends QtActivity {
         String type = intent.getType();
         String text = intent.getStringExtra(Intent.EXTRA_TEXT);
         JSONArray uris = new JSONArray();
-        byte[] imageBytes = null;
         boolean imageMime = type != null && type.startsWith("image/");
 
-        ClipData clipData = intent.getClipData();
+        // 收集图片 URI：ClipData + EXTRA_STREAM(单/多) + getData 三来源合并去重，
+        // 兼容只走 EXTRA_STREAM 的分享 app（如 Google Photos）。
+        java.util.LinkedHashSet<Uri> imageUris = new java.util.LinkedHashSet<>();
         try {
+            ClipData clipData = intent.getClipData();
             if (clipData != null) {
                 for (int i = 0; i < clipData.getItemCount(); i++) {
                     Uri uri = clipData.getItemAt(i).getUri();
-                    if (uri != null) {
-                        uris.put(uri.toString());
-                        if (imageMime && imageBytes == null) {
-                            imageBytes = readUriBytes(this, uri);
-                        }
-                    }
+                    if (uri != null) imageUris.add(uri);
                 }
             }
-
-            if (imageBytes == null && imageMime) {
-                imageBytes = readUriBytes(this, intent.getData());
+            // 单图：EXTRA_STREAM 是单个 Uri
+            Object single = android.os.Build.VERSION.SDK_INT >= 33
+                ? intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri.class)
+                : intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (single instanceof Uri) imageUris.add((Uri) single);
+            // 多图：EXTRA_STREAM 是 ArrayList<Uri>
+            @SuppressWarnings("deprecation")
+            java.util.ArrayList<Uri> multi = android.os.Build.VERSION.SDK_INT >= 33
+                ? intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri.class)
+                : intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+            if (multi != null) {
+                for (Uri u : multi) {
+                    if (u != null) imageUris.add(u);
+                }
             }
+            if (intent.getData() != null) imageUris.add(intent.getData());
         } catch (Exception e) {
-            // ignore share reading failures, fall back to intent payload below
+            // ignore malformed intent extras
         }
-        if (imageMime && imageBytes != null) {
-            onShareImageReceived(imageBytes, type);
+        for (Uri u : imageUris) uris.put(u.toString());
+
+        // 图片：后台线程逐张读字节并逐个入队批量导入，
+        // 避免在主线程阻塞 I/O（ANR）。主线程此处立即返回。
+        if (imageMime && !imageUris.isEmpty()) {
+            final Uri[] arr = imageUris.toArray(new Uri[0]);
+            final int importCount = Math.min(arr.length, MAX_SHARE_IMAGES);
+            final boolean exceeded = arr.length > MAX_SHARE_IMAGES;
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    int imported = 0;
+                    for (int i = 0; i < importCount; i++) {
+                        byte[] b = readUriBytes(ShareActivity.this, arr[i]);
+                        if (b != null && b.length > 0) {
+                            final byte[] fb = b;
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    onShareImageReceived(fb, type);
+                                }
+                            });
+                            imported++;
+                        }
+                    }
+                    if (imported == 0) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                onShareIntentReceived(action, type, text,
+                                    uris.toString());
+                            }
+                        });
+                        return;
+                    }
+                    if (exceeded) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                android.widget.Toast.makeText(ShareActivity.this,
+                                    "图片超过 " + MAX_SHARE_IMAGES
+                                        + " 张，已导入前 " + MAX_SHARE_IMAGES + " 张",
+                                    android.widget.Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                    }
+                }
+            }, "share-read").start();
             return;
         }
 
