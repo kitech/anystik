@@ -1,11 +1,20 @@
 #include "shareintentreceiver.h"
 #include "stickerstore.h"
 #include "androidutils.h"
+#include "dialogpopup.h"
 
 #include <QGuiApplication>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDebug>
+#include <QDir>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMutex>
+#include <QStandardPaths>
+#include <QStringList>
 #include <QThread>
 #include <QVariant>
 #include <QVector>
@@ -25,10 +34,16 @@ struct PendingShare {
 QMutex s_mutex;
 QVector<PendingShare> s_queue;
 std::function<void()> s_navigator;
+std::function<QQuickItem*()> s_confirmHost;
 bool s_draining = false;
+
+// ── 第一步：待确认元信息（单笔，不重复）──
+PendingShareMeta s_pendingMeta;
+bool s_metaReady = false;
 
 void processOne(const PendingShare& item)
 {
+    // 第二步填入：后台 importImageBytesAsync
     if (item.type == PendingShare::Image) {
         QString err;
         if (StickerStore::instance()->importImageBytes(item.bytes, &err)) {
@@ -63,9 +78,85 @@ void registerShareNavigator(std::function<void()> navigateToStickerHome)
     s_navigator = std::move(navigateToStickerHome);
 }
 
+void registerShareConfirmHost(std::function<QQuickItem*()> host)
+{
+    QMutexLocker lock(&s_mutex);
+    s_confirmHost = std::move(host);
+}
+
+PendingShareMeta takePendingShareMeta()
+{
+    QMutexLocker lock(&s_mutex);
+    PendingShareMeta m;
+    if (s_metaReady) {
+        m = std::move(s_pendingMeta);
+        s_metaReady = false;
+    }
+    return m;
+}
+
 void drainPendingShareIntents()
 {
-    // 循环 drain 直至队列空：修复逐张入队时 s_draining 期间新入队件被丢弃的问题
+    // 第一步：先处理待确认元信息（弹 ConfirmPopup）
+    {
+        QMutexLocker lock(&s_mutex);
+        if (s_metaReady && s_confirmHost) {
+            PendingShareMeta meta = std::move(s_pendingMeta);
+            s_metaReady = false;
+            lock.unlock(); // 释放锁，避免在持锁状态调 Qt 方法
+
+            runOnMainThread([meta]() {
+                auto hostFn = s_confirmHost;
+                if (!hostFn) return;
+                QQuickItem* host = hostFn();
+                if (!host) return;
+
+                // 大小格式化
+                const auto fmtBytes = [](qint64 n) -> QString {
+                    if (n < 1024) return QStringLiteral("%1 B").arg(n);
+                    if (n < 1024 * 1024)
+                        return QStringLiteral("%1 KB").arg(n / 1024.0, 0, 'f', 1);
+                    if (n < 1024LL * 1024 * 1024)
+                        return QStringLiteral("%1 MB").arg(n / (1024.0 * 1024), 0, 'f', 1);
+                    return QStringLiteral("%1 GB").arg(n / (1024.0 * 1024 * 1024), 0, 'f', 2);
+                };
+
+                QString title = QStringLiteral("导入分享");
+                QStringList lines;
+                QString kind = meta.action.contains(QStringLiteral("SEND_MULTIPLE"))
+                    ? QStringLiteral("多文件")
+                    : QStringLiteral("文件");
+                lines << QStringLiteral("收到 %1 张%2").arg(meta.imageCount).arg(kind);
+                if (meta.totalBytes > 0)
+                    lines << QStringLiteral("大小：%1").arg(fmtBytes(meta.totalBytes));
+                if (!meta.mime.isEmpty())
+                    lines << QStringLiteral("类型：%1").arg(meta.mime);
+                lines << QStringLiteral("来自：%1").arg(meta.sourceApp);
+                if (!meta.displayName.isEmpty())
+                    lines << QStringLiteral("文件名：%1").arg(meta.displayName);
+                if (meta.receivedAt > 0)
+                    lines << QStringLiteral("时间：%1").arg(
+                        QDateTime::fromMSecsSinceEpoch(meta.receivedAt)
+                            .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+
+                ConfirmPopup::show(host, title, lines.join(QStringLiteral("\n")),
+                    QStringLiteral("继续处理"),
+                    QStringLiteral("取消"),
+                    [meta](bool accepted) {
+                        if (accepted) {
+                            showAndroidToast(QStringLiteral("处理中…"));
+                            // 第二步占位：在此触发后台读字节+导入
+                            // TODO: 第二步实现
+                        } else {
+                            showAndroidToast(QStringLiteral("已取消"));
+                        }
+                    });
+            });
+            return; // 元信息弹出后立即返回，不处理队列
+        }
+    }
+
+    // 原有 image/generic 队列处理（第二步填入后台 import）
     for (;;) {
         QVector<PendingShare> items;
         {
@@ -83,6 +174,75 @@ void drainPendingShareIntents()
     }
 }
 
+// ── 统一收口：扫描 pending_shares 落盘元信息 → 弹确认框 ──
+void scanPendingShareDir()
+{
+    auto* app = QCoreApplication::instance();
+    if (!app) return;
+
+    // Java 端用 context.getFilesDir()/pending_shares 落盘。Qt 的
+    // AppDataLocation 在 Android 上的具体映射与 getFilesDir() 存在歧义，
+    // 因此探测两个候选路径（AppDataLocation 本身 与 AppDataLocation/files）。
+    const QString base = QStandardPaths::writableLocation(
+        QStandardPaths::AppDataLocation);
+    const QStringList candidates{
+        base + QStringLiteral("/pending_shares"),
+        base + QStringLiteral("/files/pending_shares"),
+    };
+
+    QString dir;
+    for (const auto& c : candidates) {
+        if (QFile::exists(c + QStringLiteral("/pending_meta.json"))) {
+            dir = c;
+            break;
+        }
+    }
+    if (dir.isEmpty()) return;
+
+    QFile metaFile(dir + QStringLiteral("/pending_meta.json"));
+    if (!metaFile.open(QIODevice::ReadOnly)) {
+        qWarning() << "[shareintentreceiver] open meta failed:" << dir;
+        return;
+    }
+    const QByteArray raw = metaFile.readAll();
+    metaFile.close();
+    if (raw.isEmpty()) return;
+
+    QJsonParseError err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(raw, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "[shareintentreceiver] meta parse error:" << err.errorString();
+        return;
+    }
+
+    const QJsonObject obj = doc.object();
+    PendingShareMeta meta;
+    meta.action     = obj.value(QStringLiteral("action")).toString();
+    meta.mime       = obj.value(QStringLiteral("mime")).toString();
+    meta.text       = obj.value(QStringLiteral("text")).toString();
+    meta.sourceApp  = obj.value(QStringLiteral("sourceApp")).toString();
+    meta.imageCount = obj.value(QStringLiteral("imageCount")).toInt();
+    meta.receivedAt = obj.value(QStringLiteral("receivedAt")).toVariant().toLongLong();
+    meta.totalBytes = obj.value(QStringLiteral("totalBytes")).toVariant().toLongLong();
+    meta.displayName= obj.value(QStringLiteral("displayName")).toString();
+    if (meta.sourceApp.isEmpty()) meta.sourceApp = QStringLiteral("未知来源");
+
+    {
+        QMutexLocker lock(&s_mutex);
+        s_pendingMeta = std::move(meta);
+        s_metaReady = true;
+    }
+
+    qDebug() << "[shareintentreceiver] pending meta loaded"
+             << "action:" << meta.action
+             << "mime:" << meta.mime
+             << "count:" << meta.imageCount
+             << "source:" << meta.sourceApp
+             << "bytes:" << meta.totalBytes;
+
+    drainPendingShareIntents();
+}
+
 #if defined(Q_OS_ANDROID)
 #include <jni.h>
 #include <QJsonDocument>
@@ -95,6 +255,14 @@ static void enqueueAndDrain(PendingShare item)
         s_queue.append(item);
     }
     drainPendingShareIntents();
+}
+
+// ── 热启动通知：receiver 已把分享内容落盘，扫描并弹确认框 ──
+extern "C" JNIEXPORT void JNICALL
+Java_io_fedlet_mobutil_ShareActivity_notifyPendingShare(
+    JNIEnv* /*env*/, jobject /*thiz*/)
+{
+    runOnMainThread([]() { scanPendingShareDir(); });
 }
 
 extern "C" JNIEXPORT void JNICALL

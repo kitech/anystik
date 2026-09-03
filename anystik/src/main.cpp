@@ -262,6 +262,15 @@ int main(int argc, char* argv[]) {
         pageManager->open("stickerhome");
     });
 
+    // 弹分享确认框的 parent（stickerhome 页面本身）
+    registerShareConfirmHost([pageManager]() -> QQuickItem* {
+        auto* p = pageManager->currentPage();
+        if (p && p->pageId() == "stickerhome")
+            return p;
+        pageManager->open("stickerhome");
+        return pageManager->currentPage();
+    });
+
     // ── Restore persisted settings and apply to global state ──
     {
         QSettings s;
@@ -347,8 +356,8 @@ int main(int argc, char* argv[]) {
     // ── Start with sticker home page ──  (window 已就绪，控件可正常解析 skin hint)
     pageManager->open("stickerhome");
 
-    // 处理 Android 启动时（Qt 就绪前）到达的分享意图
-    drainPendingShareIntents();
+    // 处理 Android 启动时（Qt 就绪前）到达的分享意图（从 pending 落盘收口）
+    scanPendingShareDir();
 
 #ifdef Q_OS_ANDROID
     window.update();

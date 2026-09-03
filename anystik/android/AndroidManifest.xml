@@ -45,7 +45,7 @@
         <activity
             android:name="io.fedlet.mobutil.ShareActivity"
             android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
             android:screenOrientation="unspecified"
             android:exported="true">
             <intent-filter>
@@ -53,6 +53,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+          <meta-data
+                android:name="android.app.lib_name"
+                android:value="anystik" />
+
+          <meta-data
+                android:name="android.app.arguments"
+                android:value="" />
+        </activity>
+
+        <activity
+            android:name="io.fedlet.mobutil.ShareReceiverActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -73,14 +87,6 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="*/*" />
             </intent-filter>
-
-          <meta-data
-                android:name="android.app.lib_name"
-                android:value="anystik" />
-
-          <meta-data
-                android:name="android.app.arguments"
-                android:value="" />
         </activity>
 
         <provider
