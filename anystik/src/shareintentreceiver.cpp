@@ -17,6 +17,9 @@
 #include <QStringList>
 #include <QThread>
 #include <QVariant>
+#if defined(Q_OS_ANDROID)
+#include <QJniObject>
+#endif
 #include <QVector>
 #include <functional>
 
@@ -138,6 +141,30 @@ void drainPendingShareIntents()
                     lines << QStringLiteral("时间：%1").arg(
                         QDateTime::fromMSecsSinceEpoch(meta.receivedAt)
                             .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+
+                // ── 调试验证面板：双独立来源判定主 QtActivity 状态 ──
+#if defined(Q_OS_ANDROID)
+                const bool qtValid = QJniObject::callStaticMethod<jboolean>(
+                    "org/qtproject/qt/android/QtNative", "isActivityValid", "()Z");
+                const QJniObject st = QJniObject::callStaticObjectMethod(
+                    "org/qtproject/qt/android/QtNative", "getStateDetails",
+                    "()Lorg/qtproject/qt/android/QtNative$ApplicationStateDetails;");
+                const bool qtStarted = st.isValid() && st.getField<jboolean>("isStarted");
+                const bool lcRunning = QJniObject::callStaticMethod<jboolean>(
+                    "io/fedlet/mobutil/AnystikApplication",
+                    "isMainActivityRunning", "()Z");
+                const bool lcVisible = QJniObject::callStaticMethod<jboolean>(
+                    "io/fedlet/mobutil/AnystikApplication",
+                    "isMainActivityVisible", "()Z");
+                lines << QStringLiteral("[Qt内部] 实例%1 已启动%2")
+                           .arg(qtValid ? QStringLiteral("存活") : QStringLiteral("无"))
+                           .arg(qtStarted ? QStringLiteral("✓") : QStringLiteral("✗"));
+                lines << QStringLiteral("[生命周期] %1 %2")
+                           .arg(lcRunning ? QStringLiteral("运行")
+                                          : QStringLiteral("未运行"))
+                           .arg(lcVisible ? QStringLiteral("可见")
+                                          : QStringLiteral("后台"));
+#endif
 
                 ConfirmPopup::show(host, title, lines.join(QStringLiteral("\n")),
                     QStringLiteral("继续处理"),

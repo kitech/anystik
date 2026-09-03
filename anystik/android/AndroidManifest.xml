@@ -34,7 +34,7 @@
     </queries>
 
     <application
-        android:name="org.qtproject.qt.android.bindings.QtApplication"
+        android:name="io.fedlet.mobutil.AnystikApplication"
         android:hardwareAccelerated="true"
         android:label="anystik"
         android:requestLegacyExternalStorage="true"
