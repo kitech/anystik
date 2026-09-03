@@ -17,6 +17,7 @@
 #include <QStringList>
 #include <QThread>
 #include <QVariant>
+#include <QtConcurrent/QtConcurrent>
 #if defined(Q_OS_ANDROID)
 #include <QJniObject>
 #endif
@@ -71,6 +72,71 @@ void runOnMainThread(std::function<void()> fn)
     } else {
         QMetaObject::invokeMethod(app, std::move(fn), Qt::QueuedConnection);
     }
+}
+
+// 串行化导入锁：并发分享时串行执行整个 读+导入+清理 临界区，避免误删对方目录
+static QMutex s_importMutex;
+
+// ── 第二步：读落盘字节 → 导入「粘贴板」→ 清理 → 反馈 ──
+void importPendingShares(const PendingShareMeta& meta)
+{
+    // imageCount 现在等于 files.size()（实际成功落盘数）。这里不再依赖它判纯文本，
+    // 而是以文件是否落盘 + mime 是否为图片/文件意图来区分：
+    //   无落盘 + 非图片意图 → 纯文本分享（暂不支持文本导入）
+    //   无落盘 + 图片意图   → 有图但读取失败（分享内容未能读取）
+    if (meta.files.isEmpty()) {
+        const QString m = meta.mime.trimmed().toLower();
+        const bool imageIntent = m.startsWith("image/")
+            || m.startsWith("application/")
+            || m == "text/gif"
+            || m == "text/gif!";
+        showAndroidToast(imageIntent
+            ? QStringLiteral("分享内容未能读取")
+            : QStringLiteral("暂不支持文本导入"));
+        return;
+    }
+
+    // 后台线程导入（与 downloadPack 先例一致；qldox rwlock 跨线程安全，
+    // importImageBytes 内 emit dataChanged 经 AutoConnection 队列化到主线程）
+    QtConcurrent::run([meta]() {
+        QMutexLocker lock(&s_importMutex);       // 串行化导入+清理
+        int okCount = 0, failCount = 0;
+        QString firstErr;
+        for (const QString& fn : meta.files) {
+            QFile f(meta.pendingDir + QLatin1Char('/') + fn);
+            if (!f.open(QIODevice::ReadOnly)) {
+                if (firstErr.isEmpty()) firstErr = fn;
+                ++failCount;
+                continue;
+            }
+            const QByteArray bytes = f.readAll();
+            f.close();
+            QString err;
+            if (StickerStore::instance()->importImageBytes(bytes, &err)) {
+                ++okCount;
+            } else {
+                if (firstErr.isEmpty()) firstErr = err;
+                ++failCount;
+            }
+        }
+
+        // 无论成败整体删 pending 目录（成功图已持久化到 pastes/）；检查返回值并记录
+        if (!QDir(meta.pendingDir).removeRecursively())
+            qWarning() << "[shareintentreceiver] cleanup pending failed:"
+                       << meta.pendingDir;
+
+        // 结果回主线程反馈
+        runOnMainThread([okCount, failCount, firstErr]() {
+            auto nav = s_navigator;
+            if (nav) nav();           // 跳 stickerhome（dataChanged 已自动刷新「粘贴板」）
+            if (okCount > 0)
+                showAndroidToast(QStringLiteral("已导入 %1 张贴纸到「粘贴板」").arg(okCount));
+            if (failCount > 0)
+                showAndroidToast(firstErr.isEmpty()
+                    ? QStringLiteral("有 %1 张导入失败").arg(failCount)
+                    : QStringLiteral("导入失败：%1").arg(firstErr));
+        });
+    });
 }
 
 } // namespace
@@ -172,8 +238,7 @@ void drainPendingShareIntents()
                     [meta](bool accepted) {
                         if (accepted) {
                             showAndroidToast(QStringLiteral("处理中…"));
-                            // 第二步占位：在此触发后台读字节+导入
-                            // TODO: 第二步实现
+                            importPendingShares(meta);
                         } else {
                             showAndroidToast(QStringLiteral("已取消"));
                         }
@@ -252,6 +317,12 @@ void scanPendingShareDir()
     meta.receivedAt = obj.value(QStringLiteral("receivedAt")).toVariant().toLongLong();
     meta.totalBytes = obj.value(QStringLiteral("totalBytes")).toVariant().toLongLong();
     meta.displayName= obj.value(QStringLiteral("displayName")).toString();
+    meta.pendingDir = dir;
+    const QJsonArray filesArr = obj.value(QStringLiteral("files")).toArray();
+    for (const QJsonValue& v : filesArr) {
+        const QString n = v.toString();
+        if (!n.isEmpty()) meta.files << n;
+    }
     if (meta.sourceApp.isEmpty()) meta.sourceApp = QStringLiteral("未知来源");
 
     {

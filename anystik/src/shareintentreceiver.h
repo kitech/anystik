@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <QString>
+#include <QStringList>
 
 class QQuickItem;
 
@@ -17,6 +18,8 @@ struct PendingShareMeta {
     qint64 totalBytes = 0;      // 落盘字节总和
     QString displayName;        // 首文件原始文件名
     QString urisJson;
+    QString pendingDir;         // scan 命中的 pending_shares 目录（读 bin + 整体清理）
+    QStringList files;          // meta["files"]：落盘 bin 文件名清单（保序）
 };
 
 // 获取待确认分享元信息（取出即消费）；无待确认项时返回空 action

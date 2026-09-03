@@ -328,6 +328,67 @@ static int webpFrameCount(const QByteArray& bytes)
     return anmf > 0 ? anmf : 0;
 }
 
+// 运行时实际可用的图片格式集合（缓存）。
+// 白名单写死 vs 插件缺失可能产生「支持列表有但运行时尚无法解码 → 静默失败」，
+// 这里以 QImageReader::supportedImageFormats() 为准做交集兜底。
+// 映射：内部 normalized 名（apng/svgz）→ 真实插件名（png/svg）。
+static QSet<QByteArray> runtimeSupportedImageFormats()
+{
+    static const QSet<QByteArray> kCache = [] {
+        QSet<QByteArray> s;
+        const auto fmts = QImageReader::supportedImageFormats();
+        for (const QByteArray& f : fmts) {
+            const QByteArray lo = f.trimmed().toLower();
+            if (lo.isEmpty()) continue;
+            s.insert(lo);
+            if (lo == "png")  s.insert("apng");   // APNG 由 png 插件读取
+            if (lo == "svg")  s.insert("svgz");   // gzip svg 同名插件
+            if (lo == "jpeg") s.insert("jpg");
+            if (lo == "tif")  s.insert("tiff");
+        }
+        return s;
+    }();
+    return kCache;
+}
+
+// 单次解码首帧（鲁棒版）：每个 QImageReader 只用一次 read()，绝不 seek 回绕复用。
+// Qt 官方明确：QImageReader 生命周期内修改其 device 位置 = undefined results；
+// 且 QJpegHandler 等内置插件在首次 read() 后进入 ReadingEnd 状态，二次 read() 必败。
+// 失败时依次降级：关 autoTransform（EXIF/旋转元数据故障点）→ 显式定格式 → 组合。
+// 返回成功 QImage（失败为 null），outErr/outErrStr 携带最终失败原由。
+static QImage robustDecodeFirstFrame(const QByteArray& bytes,
+                                     const QByteArray& fmt,
+                                     QImageReader::ImageReaderError* outErr = nullptr,
+                                     QString* outErrStr = nullptr)
+{
+    QByteArray readerFmt = fmt.trimmed().toLower();
+    if (readerFmt == "apng") readerFmt = "png";  // APNG 由 png 插件读取
+    if (readerFmt == "svgz") readerFmt = "svg";
+    if (readerFmt == "jpg")  readerFmt = "jpeg";
+
+    const auto attempt = [&](bool autoTransform, const QByteArray& forcedFmt) {
+        QBuffer buf;
+        buf.setData(bytes);
+        if (!buf.open(QIODevice::ReadOnly)) return QImage();
+        QImageReader r(&buf);
+        r.setAutoTransform(autoTransform);
+        if (!forcedFmt.isEmpty()) r.setFormat(forcedFmt);
+        QImage img = r.read();
+        if (outErr)   *outErr   = r.error();
+        if (outErrStr) *outErrStr = r.errorString();
+        return img.size().isValid() ? img : QImage();
+    };
+
+    QImage img = attempt(true, readerFmt);
+    if (!img.isNull() || readerFmt.isEmpty()) return img;
+    img = attempt(false, readerFmt);
+    if (!img.isNull()) return img;
+    img = attempt(true, QByteArray());   // 显式定格式失败 → 交还自动探测
+    if (!img.isNull()) return img;
+    img = attempt(false, QByteArray());
+    return img;
+}
+
 // 统一的图片来源有效性/尺寸探测：
 // 拦截级：空 / 不可读 / 尺寸无效 / 格式不在白名单 / read() 解码失败 → 返回 false
 // 观测级：过小 → 仅 qWarning
@@ -381,6 +442,14 @@ static bool probeImageValidity(const QByteArray& bytes,
                  fmt.constData());
         return false;
     }
+    // 运行时插件兜底：白名单写死 ≠ 当前运行时插件真实支持。
+    // 若格式在 supportedImageFormats() 中缺失则明确拒绝（避免解码静默失败无日志）。
+    if (!runtimeSupportedImageFormats().contains(fmt)) {
+        qWarning("[StickerPaste][probe] format not supported by runtime plugins fmt=%s "
+                 "(whitelisted but missing imageformats plugin)",
+                 fmt.constData());
+        return false;
+    }
 
     const QSize size = reader.size();
     if (!size.isValid()) {
@@ -388,14 +457,25 @@ static bool probeImageValidity(const QByteArray& bytes,
         return false;
     }
 
-    // 终验：完整解码首帧（只校验，不用于入库尺寸）
-    if (!probe.seek(0)) {
-        qWarning("[StickerPaste][probe] seek failed fmt=%s", fmt.constData());
-        return false;
-    }
-    QImage first = reader.read();
+    // 终验：完整解码首帧（只校验，不用于入库尺寸）。
+    // 用全新 QBuffer + 全新 QImageReader 独立 read() 一次 ——
+    // 绝不在既有 reader 生命周期内对其 device 手动 seek 复用（Qt 官方 = undefined，
+    // 内置插件二次 read() 必败，正是此前「部分图片解码失败」的根因）。
+    QImageReader::ImageReaderError decodeErr = QImageReader::UnknownError;
+    QString decodeErrStr;
+    QImage first = robustDecodeFirstFrame(bytes, fmt, &decodeErr, &decodeErrStr);
     if (first.isNull() || !first.size().isValid()) {
-        qWarning("[StickerPaste][probe] decode read failed fmt=%s", fmt.constData());
+        qWarning("[StickerPaste][probe] decode read failed fmt=%s err=%d errstr=%s size=%dx%d",
+                 fmt.constData(), int(decodeErr), qPrintable(decodeErrStr),
+                 size.width(), size.height());
+        // 大图/内存限制兜底：Qt 因 allocation limit 拒绝（RawImageFormatError/InvalidDataError
+        // 且错误串含 allocation）。贴纸导入超大图本不合理，明确拒绝并给出可读提示路径。
+        if (decodeErrStr.contains("allocation", Qt::CaseInsensitive)
+            || decodeErrStr.contains("memory", Qt::CaseInsensitive)) {
+            qWarning("[StickerPaste][probe] image exceeds QImageReader allocation limit "
+                     "(QT_IMAGEIO_MAXALLOC default 256MB) size=%dx%d bytes=%lld",
+                     size.width(), size.height(), (qint64)bytes.size());
+        }
         // 细诊断：区分 真APNG / 截断损坏 / Qt 重编码残片（IDAT 根因定位）
         if (fmt.contains("png")) {
             const PngChunkInfo png = probePngChunks(bytes);

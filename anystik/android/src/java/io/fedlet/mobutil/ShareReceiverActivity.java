@@ -85,8 +85,10 @@ public class ShareReceiverActivity extends Activity {
                 }
 
                 long receivedAt = System.currentTimeMillis();
+                // imageCount 统一为「实际成功落盘」的图片数量（= files.size()），
+                // 与 totalBytes / files 口径一致；若某 URI 读取失败则不虚增计数。
                 writeMeta(dir, action, mime, text, source,
-                    uris.size(), files, receivedAt, totalBytes, displayName);
+                    files.size(), files, receivedAt, totalBytes, displayName);
 
                 runOnUiThread(new Runnable() {
                     @Override
