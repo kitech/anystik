@@ -178,6 +178,14 @@ private:
     void finalizeInstall(DownloadTask* task, const InstallResult& r);
     void closeOut(DownloadTask* task);
 
+    // 贴纸存储根目录（macOS/Android 通用；默认 = AppLocalDataLocation）。
+    // DB 的 file_path/cover_path 存「相对 base」的相对路径；读取时经
+    // resolveStickerPath() 拼回 base 得到绝对路径。
+    mutable QString m_stickerBaseDir;
+    QString stickerBaseDir() const;
+    QString resolveStickerPath(const QString& stored);
+    QString relativeToBase(const QString& abs);
+
     static StickerStore* s_instance;
     bool m_initialized = false;
     QNetworkAccessManager* m_nam = nullptr;

@@ -96,6 +96,37 @@ void StickerStore::dropLegacyChatTables()
     qDebug() << "[StickerStore] legacy chat tables dropped";
 }
 
+QString StickerStore::stickerBaseDir() const
+{
+    if (m_stickerBaseDir.isEmpty()) {
+        m_stickerBaseDir = QStandardPaths::writableLocation(
+            QStandardPaths::AppLocalDataLocation);
+        if (m_stickerBaseDir.isEmpty())
+            m_stickerBaseDir = QDir::tempPath();
+    }
+    return m_stickerBaseDir;
+}
+
+QString StickerStore::resolveStickerPath(const QString& stored)
+{
+    const QString base = stickerBaseDir();
+    if (stored.isEmpty())
+        return stored;
+    // 以 '/' 开头的视为绝对路径（旧数据/外部导入透传），否则拼到当前 base
+    if (stored.startsWith(QLatin1Char('/')))
+        return stored;
+    return base + QLatin1Char('/') + stored;
+}
+
+QString StickerStore::relativeToBase(const QString& abs)
+{
+    const QString base = stickerBaseDir();
+    if (abs == base || abs.startsWith(base + QLatin1Char('/')))
+        return abs.mid(base.size() + 1);
+    // 不在 base 下 → 原样（如外部绝对路径）
+    return abs;
+}
+
 StickerDbSyncInterface& stickerDb()
 {
     return *Storage::instance().stickerDb();
@@ -114,7 +145,7 @@ QVector<StickerPackBrief> StickerStore::packs(int installed, const char* orderby
         b.id = QString::fromStdString(row.id);
         b.title = QString::fromUtf8(row.title.c_str());
         b.author = QString::fromUtf8(row.author.c_str());
-        b.coverPath = QString::fromStdString(row.cover_path);
+        b.coverPath = resolveStickerPath(QString::fromStdString(row.cover_path));
         b.position = row.position;
         result.append(b);
     }
@@ -136,7 +167,7 @@ QVector<StickerBrief> StickerStore::stickers(const QString& packId,
         StickerBrief b;
         b.id = QString::fromStdString(row.id);
         b.packId = QString::fromStdString(row.pack_id);
-        b.filePath = QString::fromStdString(row.file_path);
+        b.filePath = resolveStickerPath(QString::fromStdString(row.file_path));
         b.emoji = QString::fromUtf8(row.emoji.c_str());
         b.width = row.width;
         b.height = row.height;
@@ -159,7 +190,7 @@ QVector<StickerBrief> StickerStore::recent(int limit)
         StickerBrief b;
         b.id = QString::fromStdString(row.id);
         b.packId = QString::fromStdString(row.pack_id);
-        b.filePath = QString::fromStdString(row.file_path);
+        b.filePath = resolveStickerPath(QString::fromStdString(row.file_path));
         b.emoji = QString::fromUtf8(row.emoji.c_str());
         b.width = row.width;
         b.height = row.height;
@@ -182,7 +213,7 @@ QVector<StickerBrief> StickerStore::search(const QString& query)
         StickerBrief b;
         b.id = QString::fromStdString(row.id);
         b.packId = QString::fromStdString(row.pack_id);
-        b.filePath = QString::fromStdString(row.file_path);
+        b.filePath = resolveStickerPath(QString::fromStdString(row.file_path));
         b.emoji = QString::fromUtf8(row.emoji.c_str());
         b.width = row.width;
         b.height = row.height;
@@ -1113,6 +1144,16 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
     QString packTitle = root.dirName();
     if (packTitle.isEmpty()) packTitle = QStringLiteral("sticker pack");
 
+    // 一律复制进 base 下：base/packs/<标题>/。若源目录本身已在 base/packs 下
+    // （如 Android 解压安装后调用），复制到自身会因目标已存在而跳过，幂等。
+    const QString base = stickerBaseDir();
+    const QString targetDir = base + QStringLiteral("/packs/") + packTitle;
+    if (!QDir().mkpath(targetDir)) {
+        if (errorOut) *errorOut = QStringLiteral("无法创建包目录");
+        return false;
+    }
+    const QString rootAbs = root.absolutePath();
+
     db.begin_write_transaction();
 
     const QString packId = findOrCreatePack(db, packTitle,
@@ -1125,8 +1166,23 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
     int pos = 0;
     bool importedAny = false;
     for (const auto& file : files) {
-        QFileInfo fi(file);
-        QImageReader reader(file);
+        // 相对源根的相对子路径，保持目录层级复制到目标
+        const QString rel = QDir(rootAbs).relativeFilePath(file);
+        const QString dst = targetDir + QLatin1Char('/') + rel;
+        if (!QFile::exists(dst)) {
+            if (!QDir().mkpath(QFileInfo(dst).absolutePath())) {
+                if (errorOut) *errorOut = QStringLiteral("无法创建包子目录");
+                continue;
+            }
+            if (!QFile::copy(file, dst)) {
+                if (errorOut) *errorOut = QStringLiteral("文件复制失败：")
+                                          + file;
+                continue;
+            }
+        }
+
+        QFileInfo fi(dst);
+        QImageReader reader(dst);
         reader.setAutoTransform(true);
         const QSizeF imgSize = reader.size();
         const qint64 fileBytes = fi.size();
@@ -1134,7 +1190,7 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
         StickerRow row;
         row.id = fileIdFor(file).toStdString();
         row.pack_id = packId.toUtf8().constData();
-        row.file_path = file.toStdString();
+        row.file_path = relativeToBase(dst).toStdString();
         row.emoji = "";
         row.width = int(imgSize.width());
         row.height = int(imgSize.height());
@@ -1603,10 +1659,9 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut)
     // 幂等 ID + 落盘路径
     const QString idHex = QString(QCryptographicHash::hash(
         bytes, QCryptographicHash::Sha1).toHex());
-    const QString dataDir = QStandardPaths::writableLocation(
-        QStandardPaths::AppLocalDataLocation);
+    const QString base = stickerBaseDir();
 
-    QDir pasteDir(dataDir + QStringLiteral("/pastes"));
+    QDir pasteDir(base + QStringLiteral("/pastes"));
     if (!pasteDir.exists() && !pasteDir.mkpath(".")) {
         if (errorOut) *errorOut = QStringLiteral("无法创建 pastes 目录");
         return false;
@@ -1635,7 +1690,7 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut)
     StickerRow row;
     row.id = idHex.toStdString();
     row.pack_id = packId.toUtf8().constData();
-    row.file_path = filePath.toStdString();
+    row.file_path = (QStringLiteral("pastes/") + idHex + ext).toStdString();
     row.emoji = "";
     row.width = imgSize.width();
     row.height = imgSize.height();
@@ -2116,9 +2171,7 @@ static QByteArray fileMd5(const QString& path)
 
 QString StickerStore::downloadPartPath(const QString& url) const
 {
-    const QString dataDir = QStandardPaths::writableLocation(
-        QStandardPaths::AppLocalDataLocation);
-    return dataDir + QStringLiteral("/packs/.download/")
+    return stickerBaseDir() + QStringLiteral("/packs/.download/")
            + urlHex(url) + QStringLiteral(".part");
 }
 
@@ -2484,8 +2537,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     const QString partPath = task->partPath;
     const QString zipPath = partPath.left(partPath.size() - 5)
                             + QStringLiteral(".zip");
-    const QString dataDir = QStandardPaths::writableLocation(
-        QStandardPaths::AppLocalDataLocation);
+    const QString base = stickerBaseDir();
 
     auto failNow = [&](const QString& msg, bool removeZip) -> InstallResult {
         if (removeZip) QFile::remove(zipPath);
@@ -2551,7 +2603,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     }
     title = sanitizeToken(title);
 
-    const QString targetDir = dataDir + QStringLiteral("/packs/") + title;
+    const QString targetDir = base + QStringLiteral("/packs/") + title;
     if (QFile::exists(targetDir)) {
         if (!QDir(targetDir).removeRecursively()) {
             zip.close();
@@ -2689,8 +2741,7 @@ bool StickerStore::uninstallPack(const QString& packId, bool removeFiles)
 
 void StickerStore::cleanupAbandonedDownloads(const QStringList& knownUrls)
 {
-    const QString dataDir = QStandardPaths::writableLocation(
-        QStandardPaths::AppLocalDataLocation);
+    const QString dataDir = stickerBaseDir();
     if (dataDir.isEmpty()) {
         return;
     }
