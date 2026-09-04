@@ -730,3 +730,44 @@ part → zip rename → `QZipReader`（`<QtCore/private/qzipreader_p.h>`，需�
 - GitHub API commit 解析匿名额 60/h，超限时版本回落「未知」。
 - Android 真机验证待做（下载/续传/安装/卸载全链路）。
 - **偏差记录（D）**：①「version 一致且已装」仅提示「已装且未变化」，不自动跳过；②下载采用**全局单并发门闩**（一次仅一个下载任务，非行内并发）；③运行时冒烟受沙箱限制：LINE 源与 Android 真机链路未验证，仅桌面 offscreen 自检（`ANYSTIK_SELFTEST=1`）+ 编译冒烟；④codeload SDK 包会将仓库全部源码文件解出到 `dataDir/packs/`（仅图片入库），磁盘占用偏大。
+
+# 已完成功能清单（2026-09）
+
+以下为近轮已实现/需记录的功能项，按用户清单逐项核对代码后整理。（`x` 标记 = 已实现；唯「空白处拷贝成功」为残留问题，归入末尾已知限制。）
+
+## 已实现功能
+
+### 1. 预览界面显示 stik 图片完整元信息
+- 位置：`stickerpreviewoverlay.cpp:239-241`。
+- 预览 `show()` 时调用 `StickerStore::stickerMeta(filePath)` 探测（类型/大小/长宽/帧数/更新时间），经 `formatStickerMeta()` 拼成多行文本存入 `m_metaText`，在底部自绘元信息区（`META_H=150`，`renderContent()` 内以文本行绘制，不用 qskinny 控件）。
+- 元信息结构见 `stickerstore.h:41-52`（`StickerMeta`：类型标签/MIME/是否动画/帧数/宽高/字节数/修改时间）。
+
+### 2. 菜单项复制 stik 图片完整元信息
+- 位置：`stickerhomepage.cpp:353-355`（`showStickerMenu` 内）。
+- 复制字段与预览一致（同一 `stickerMeta` + `formatStickerMeta`），写入剪贴板并 `showToast("已复制元信息")`。预览界面点击元信息区域亦可复制（`stickerpreviewoverlay.cpp:292/308`）。
+
+### 3. QSkinny 实现安卓风格 toast，并多处接入
+- 新文件 `toastpopup.h/cpp`：`ToastPopup::show(QQuickItem* parent, const QString& text)`，非模态、底部居中、延时自动消失（`QskPopup`）。
+- 平台分发：Android 走原生 `showAndroidToast` 系统浮层；其余平台用 QQuickWindow 内 `QskPopup` 桌面浮层，与 `ConfirmPopup`/`SelectPopup` 同机制（非阻塞，`closed`→`deleteLater`）。
+- 接入点（约 30 处）：复制/缩放复制（`stickerhomepage.cpp:189/337/342/347`）、删除/删除失败（`:403/408`）、重命名（`:565/567`）、分组删除（`:586`）、粘贴（`:609/611`）、导入（`:690/692`）、分享（`:355/358`）、打不开目录（`:718/724`）；`bundledpackspage.cpp:232-374`（启用/卸载/删除/安装）；`stickerpreviewoverlay.cpp`（复制/复制元信息）。
+- 实现助手：`StickerHomePage::showToast`、`BundledPacksPage::showToast`（内部转调 `ToastPopup::show`）。
+
+### 4. 搜索框一行拆两半，后半段显示当前贴纸数
+- 位置：`stickerhomepage.cpp:141-154`。
+- `searchRow`（横向 `QskLinearBox`）内含 `m_searchField`（左，Expanding）+ `m_countLabel`（右，固定 72px，右对齐），显示「N 个」。
+- 计数刷新：`stickerhomepage.cpp:293`（每次 tab/搜索刷新时更新为当前网格贴纸数）。
+
+### 5. 跨平台打开 stik 图片存放根目录的按钮
+- 位置：`stickerhomepage.cpp:714-728` `openStickerFolder()`。
+- 取 `currentStickerBaseDir()`；Android 走 `jOpenDir(baseDir)`，桌面走 `QDesktopServices::openUrl(QUrl::fromLocalFile(baseDir))`。入口为 options 菜单（`showOptionsMenu`）。
+
+### 6. Android 分享导入（A 工作 / B 待记录）
+- **A（已实现）**：分享接收及反馈——`shareintentreceiver.cpp` 解析多图分享并导入「粘贴板」，导入完成后 `showAndroidToast("已导入 N 张贴纸到粘贴板")`，失败数单独提示。
+- **B（需记录为已知问题）**：**从某些 app 直接分享过来会卡住、界面黑屏空白、无任何显示；从 Android 系统自带图库 app 分享则正常。** 根因尚未定位，纳入「已知限制」跟踪。
+
+## 已知残留问题（第 7 项）
+
+### 7. 点击主贴纸列表空白区域仍误报「拷贝成功」
+- 位置：`stickerlist.cpp:182-190`（`QQuickTapHandler::singleTapped`）。
+- 当前实现：`indexAt(point.position())` 在瓦片间隙（右侧/下方 10px）/越界时返回 `-1`，`idx < 0` 时本应**不**触发 `stickerClicked`。
+- 但实测：点击主贴纸显示列表的空白处**仍**提示「拷贝成功」。该行为为残留 bug（可能与点击命中判定/事件投递有关），先在此记录，待后续修复。
