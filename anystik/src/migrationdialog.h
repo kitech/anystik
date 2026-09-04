@@ -42,7 +42,8 @@ private:
     MigrationDialog(const QString& fromRoot, const QString& toRoot,
                     QQuickItem* parent);
     void updateGeometry();
-    void onProgress(int done, int total, qint64 copiedBytes, const QString& current);
+    void onProgress(int done, int total, qint64 copiedBytes,
+                    int copiedFiles, int skippedFiles, const QString& current);
     void onFinished(bool ok, const QString& detail);
 
     QskBox* m_panel = nullptr;
@@ -59,6 +60,8 @@ private:
     QElapsedTimer m_timer;            // 从对话框弹出开始计时
     int m_lastDone = 0;
     int m_lastTotal = 0;
+    int m_lastCopied = 0;
+    int m_lastSkipped = 0;
     qint64 m_lastBytes = 0;
 };
 

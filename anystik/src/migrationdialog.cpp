@@ -128,10 +128,13 @@ void MigrationDialog::updateLayout()
 }
 
 void MigrationDialog::onProgress(int done, int total, qint64 copiedBytes,
+                                 int copiedFiles, int skippedFiles,
                                  const QString& /*current*/)
 {
     m_lastDone = done;
     m_lastTotal = total;
+    m_lastCopied = copiedFiles;
+    m_lastSkipped = skippedFiles;
     m_lastBytes = copiedBytes;
 
     if (total > 0)
@@ -141,9 +144,9 @@ void MigrationDialog::onProgress(int done, int total, qint64 copiedBytes,
 
     const double mb = double(copiedBytes) / (1024.0 * 1024.0);
     m_bytesLabel->setText(
-        QString::fromUtf8("已拷贝：%1 MB (%2/%3) 个文件")
+        QString::fromUtf8("已拷贝：%1 MB (%2 实际拷贝 / %3 跳过)")
             .arg(mb, 0, 'f', 1)
-            .arg(done).arg(total));
+            .arg(copiedFiles).arg(skippedFiles));
 }
 
 void MigrationDialog::onFinished(bool ok, const QString& detail)
@@ -162,18 +165,18 @@ void MigrationDialog::onFinished(bool ok, const QString& detail)
 
     // 日志：成功 qInfo、失败 qWarning
     if (ok) {
-        qInfo("[StickerStore] 迁移成功：%d 个文件，%.1f MB，用时 %s",
-              m_lastTotal, mb, qPrintable(dur));
+        qInfo("[StickerStore] 迁移成功：共 %d 个文件，实际拷贝 %d 个（%.1f MB），跳过 %d 个（已一致），用时 %s",
+              m_lastTotal, m_lastCopied, mb, m_lastSkipped, qPrintable(dur));
     } else {
-        qWarning("[StickerStore] 迁移失败：文件 %s（共 %d），已拷贝 %.1f MB，用时 %s；%s",
-                 qPrintable(files), m_lastTotal, mb, qPrintable(dur),
+        qWarning("[StickerStore] 迁移失败：文件 %s（共 %d），实际拷贝 %d，已拷贝 %.1f MB，用时 %s；%s",
+                 qPrintable(files), m_lastTotal, m_lastCopied, mb, qPrintable(dur),
                  qPrintable(detail));
     }
 
     // 无论成败都弹 toast（Android 走原生系统 toast）
     const QString text = ok
-        ? QString::fromUtf8("迁移完成：%1 个文件，%2 MB，用时 %3")
-              .arg(m_lastTotal).arg(mb, 0, 'f', 1).arg(dur)
+        ? QString::fromUtf8("迁移完成：拷贝 %1 个（%2 MB），跳过 %3 个，用时 %4")
+              .arg(m_lastCopied).arg(mb, 0, 'f', 1).arg(m_lastSkipped).arg(dur)
         : QString::fromUtf8("迁移失败：已迁移 %1 个，用时 %2；%3")
               .arg(files).arg(dur).arg(detail);
     ToastPopup::show(parentItem(), text);

@@ -193,6 +193,8 @@ struct MigrationResult {
     bool sameRoot = false;            // 起止根相同（无需迁移）
     QString failDetail;               // 失败原因（中文）
     int totalFiles = 0;               // 计划迁移的文件数（进度分母）
+    int copiedFiles = 0;              // 实际执行拷贝的文件数
+    int skippedFiles = 0;             // CRC64+大小校验一致跳过的文件数
     qint64 copiedBytes = 0;           // 已拷贝字节（仅展示，不参与进度）
     int externalSkipped = 0;          // 外部引用跳过条数
     QStringList created;              // 本次新建的目标侧文件（回滚时删除）
@@ -309,12 +311,25 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
             done++;
             if (p.kind == 0) {
                 // 已在目标：无需复制
-                emit migrationProgress(done, r.totalFiles, r.copiedBytes, p.to);
+                r.skippedFiles++;
+                emit migrationProgress(done, r.totalFiles, r.copiedBytes,
+                                       r.copiedFiles, r.skippedFiles, p.to);
                 continue;
             }
             if (QFile::exists(to)) {
-                emit migrationProgress(done, r.totalFiles, r.copiedBytes, to);
-                continue;   // 已存在 → 幂等跳过
+                // 目标已存在 → CRC64 + 大小校验
+                QFileInfo toInfo(to);
+                QFileInfo fromInfo(from);
+                if (toInfo.size() == fromInfo.size()
+                    && crc64File(to) == crc64File(from)) {
+                    // 完全一致，跳过
+                    r.skippedFiles++;
+                    emit migrationProgress(done, r.totalFiles, r.copiedBytes,
+                                           r.copiedFiles, r.skippedFiles, to);
+                    continue;
+                }
+                // 不一致 → 删除旧文件，重新拷贝
+                QFile::remove(to);
             }
             if (!QDir().mkpath(QFileInfo(to).absolutePath())) {
                 r.failDetail = QStringLiteral("无法创建子目录：")
@@ -327,8 +342,10 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
                 failed = true; break;
             }
             r.created.append(to);
+            r.copiedFiles++;
             r.copiedBytes += QFileInfo(to).size();
-            emit migrationProgress(done, r.totalFiles, r.copiedBytes, to);
+            emit migrationProgress(done, r.totalFiles, r.copiedBytes,
+                                   r.copiedFiles, r.skippedFiles, to);
         }
 
         r.ok = !failed;
@@ -982,6 +999,40 @@ static void verifyScaledResult(const QByteArray& srcRaw,
               srcSize.width(), srcSize.height(),
               scaleSize.width(), scaleSize.height());
     }
+}
+
+// ── CRC64（ECMA-182）用于迁移时文件完整性校验 ──────────────────────
+static quint64 s_crc64Table[256];
+
+static void ensureCrc64Table()
+{
+    static const bool done = []() {
+        for (quint64 n = 0; n < 256; ++n) {
+            quint64 c = n;
+            for (int k = 0; k < 8; ++k)
+                c = (c & 1) ? (0x95ac9329ac4bc9b5ULL ^ (c >> 1)) : (c >> 1);
+            s_crc64Table[n] = c;
+        }
+        return true;
+    }();
+    Q_UNUSED(done);
+}
+
+static quint64 crc64File(const QString& path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return 0;
+    ensureCrc64Table();
+    quint64 crc = 0xFFFFFFFFFFFFFFFFULL;
+    char buf[65536];
+    while (!f.atEnd()) {
+        const qint64 n = f.read(buf, sizeof(buf));
+        if (n <= 0) break;
+        for (qint64 i = 0; i < n; ++i)
+            crc = s_crc64Table[(crc ^ uchar(buf[i])) & 0xFF] ^ (crc >> 8);
+    }
+    return crc ^ 0xFFFFFFFFFFFFFFFFULL;
 }
 
 // ── APNG 组装（多页 TIFF → APNG 重编码用）───────────────────────────

@@ -141,8 +141,10 @@ public:
 Q_SIGNALS:
     void dataChanged();
     // 迁移进度：进度按「文件数」计算（done/total）；copiedBytes 为已拷贝字节，
-    // 仅用于展示、不参与进度计算。工作线程发出。
+    // 仅用于展示、不参与进度计算。copiedFiles/skippedFiles 分别为实际拷贝和
+    // CRC64+大小校验一致跳过的文件数。工作线程发出。
     void migrationProgress(int done, int total, qint64 copiedBytes,
+                           int copiedFiles, int skippedFiles,
                            const QString& current);
     // 迁移结束（GUI 线程发出）。ok=false 时 detail 为失败原因。
     void migrationFinished(bool ok, const QString& detail);
