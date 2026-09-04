@@ -186,6 +186,40 @@ void StickerStore::cleanupMigrationSource(const QString& fromRoot)
     }
 }
 
+// ── CRC64（ECMA-182）用于迁移时文件完整性校验 ──────────────────────
+static quint64 s_crc64Table[256];
+
+static void ensureCrc64Table()
+{
+    static const bool done = []() {
+        for (quint64 n = 0; n < 256; ++n) {
+            quint64 c = n;
+            for (int k = 0; k < 8; ++k)
+                c = (c & 1) ? (0x95ac9329ac4bc9b5ULL ^ (c >> 1)) : (c >> 1);
+            s_crc64Table[n] = c;
+        }
+        return true;
+    }();
+    Q_UNUSED(done);
+}
+
+static quint64 crc64File(const QString& path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return 0;
+    ensureCrc64Table();
+    quint64 crc = 0xFFFFFFFFFFFFFFFFULL;
+    char buf[65536];
+    while (!f.atEnd()) {
+        const qint64 n = f.read(buf, sizeof(buf));
+        if (n <= 0) break;
+        for (qint64 i = 0; i < n; ++i)
+            crc = s_crc64Table[(crc ^ uchar(buf[i])) & 0xFF] ^ (crc >> 8);
+    }
+    return crc ^ 0xFFFFFFFFFFFFFFFFULL;
+}
+
 namespace {
 // 迁移结果（阶段一 工作线程产生，阶段二 GUI 线程消费）
 struct MigrationResult {
@@ -999,40 +1033,6 @@ static void verifyScaledResult(const QByteArray& srcRaw,
               srcSize.width(), srcSize.height(),
               scaleSize.width(), scaleSize.height());
     }
-}
-
-// ── CRC64（ECMA-182）用于迁移时文件完整性校验 ──────────────────────
-static quint64 s_crc64Table[256];
-
-static void ensureCrc64Table()
-{
-    static const bool done = []() {
-        for (quint64 n = 0; n < 256; ++n) {
-            quint64 c = n;
-            for (int k = 0; k < 8; ++k)
-                c = (c & 1) ? (0x95ac9329ac4bc9b5ULL ^ (c >> 1)) : (c >> 1);
-            s_crc64Table[n] = c;
-        }
-        return true;
-    }();
-    Q_UNUSED(done);
-}
-
-static quint64 crc64File(const QString& path)
-{
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly))
-        return 0;
-    ensureCrc64Table();
-    quint64 crc = 0xFFFFFFFFFFFFFFFFULL;
-    char buf[65536];
-    while (!f.atEnd()) {
-        const qint64 n = f.read(buf, sizeof(buf));
-        if (n <= 0) break;
-        for (qint64 i = 0; i < n; ++i)
-            crc = s_crc64Table[(crc ^ uchar(buf[i])) & 0xFF] ^ (crc >> 8);
-    }
-    return crc ^ 0xFFFFFFFFFFFFFFFFULL;
 }
 
 // ── APNG 组装（多页 TIFF → APNG 重编码用）───────────────────────────

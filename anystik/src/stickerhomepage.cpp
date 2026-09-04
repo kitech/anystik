@@ -34,7 +34,6 @@
 #include <QSettings>
 #include <QDesktopServices>
 #include <QUrl>
-#include <QStandardPaths>
 
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
@@ -687,20 +686,17 @@ void StickerHomePage::showToast(const QString& text)
 
 void StickerHomePage::openStickerFolder()
 {
-    const QString dataDir = QStandardPaths::writableLocation(
-        QStandardPaths::AppLocalDataLocation);
-    if (dataDir.isEmpty()) {
+    const QString baseDir = StickerStore::instance()->currentStickerBaseDir();
+    if (baseDir.isEmpty()) {
         showToast(QString::fromUtf8("无法获取目录路径"));
         return;
     }
 
 #ifdef Q_OS_ANDROID
-    // Android 贴纸存放于应用私有目录（/data/data/<pkg>/files），多数
-    // 文件管理器无法访问，尝试打开，失败则仅提示。
-    if (!jOpenDir(dataDir))
-        showToast(QString::fromUtf8("无法打开贴纸目录（位于应用私有存储）"));
+    if (!jOpenDir(baseDir))
+        showToast(QString::fromUtf8("无法打开贴纸目录"));
 #else
-    QDesktopServices::openUrl(QUrl::fromLocalFile(dataDir));
+    QDesktopServices::openUrl(QUrl::fromLocalFile(baseDir));
 #endif
 }
 

@@ -59,6 +59,8 @@ cp vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcrypto_3.so "$LIB_DIR/"
 # 复制自定义 Java 源码到 Android 构建目录
 mkdir -p "$APK_DIR/src/main/java"
 cp -R android/src/java/* "$APK_DIR/src/main/java/"
+# 复制自定义 Android res（覆盖 qt 模板默认的 qtprovider_paths.xml，加入 Pictures 目录授权）
+cp -R android/res/* "$APK_DIR/res/"
 # 复制应用图标到 Android res
 mkdir -p "$APK_DIR/res/drawable"
 cp app_icon.png "$APK_DIR/res/drawable/ic_launcher.png"
