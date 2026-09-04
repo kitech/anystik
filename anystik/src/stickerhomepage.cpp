@@ -138,12 +138,20 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     // ── Push 连接状态（Android 可见，桌面包视情况自隐藏）──
     new PushStatusBar(layout);
 
-    // ── 搜索框 ──
-    m_searchField = new QskTextField(layout);
+    // ── 搜索框 + 当前贴纸计数（同一行左右分块）──
+    auto* searchRow = new QskLinearBox(Qt::Horizontal, layout);
+    searchRow->setSpacing(8);
+
+    m_searchField = new QskTextField(searchRow);
     m_searchField->setPlaceholderText(QString::fromUtf8("搜索贴纸 / emoji..."));
     m_searchField->setPreferredHeight(44);
     m_searchField->setBoxShapeHint(QskTextField::Panel,
         QskBoxShapeMetrics(10, Qt::AbsoluteSize));
+    m_searchField->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    m_countLabel = new QskTextLabel(QStringLiteral("0 个"), searchRow);
+    m_countLabel->setPreferredWidth(72);
+    m_countLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
 
     connect(m_searchField, &QskTextField::textChanged, this,
         [this]() {            // QSkinny 新/旧版 textChanged() 签名通用（0 参 functor 兼容任意信号元数）
@@ -245,16 +253,19 @@ void StickerHomePage::loadAllStickers()
         all += StickerStore::instance()->stickers(pack.id);
     }
     m_grid->setStickers(all);
+    updateStickerCount();
 }
 
 void StickerHomePage::loadRecentStickers()
 {
     m_grid->setStickers(StickerStore::instance()->recent(60));
+    updateStickerCount();
 }
 
 void StickerHomePage::loadPackStickers(const QString& packId)
 {
     m_grid->setStickers(StickerStore::instance()->stickers(packId));
+    updateStickerCount();
 }
 
 void StickerHomePage::doSearch(const QString& keyword)
@@ -264,6 +275,15 @@ void StickerHomePage::doSearch(const QString& keyword)
         return;
     }
     m_grid->setStickers(StickerStore::instance()->search(keyword));
+    updateStickerCount();
+}
+
+void StickerHomePage::updateStickerCount()
+{
+    if (!m_countLabel || !m_grid)
+        return;
+    const int n = m_grid->stickers().size();
+    m_countLabel->setText(QStringLiteral("%1 个").arg(n));
 }
 
 // ═══════════════════════════════════════════════════════════════════

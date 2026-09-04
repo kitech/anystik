@@ -9,6 +9,7 @@
 class QskTextField;
 class QskTabBar;
 class QskPopup;
+class QskTextLabel;
 class StickerGridWidget;
 
 class StickerHomePage : public Page
@@ -28,6 +29,7 @@ private:
     void loadRecentStickers();
     void loadPackStickers(const QString& packId);
     void doSearch(const QString& keyword);
+    void updateStickerCount();
 
     void showStickerMenu(const StickerBrief& brief, const QPointF& scenePos);
     void openPreview(const StickerBrief& brief);
@@ -46,6 +48,7 @@ private:
     void showToast(const QString& text);
 
     QskTextField* m_searchField = nullptr;
+    QskTextLabel* m_countLabel = nullptr;
     QskTabBar* m_tabBar = nullptr;
     StickerGridWidget* m_grid = nullptr;
     bool m_keepScreenOn = true;
