@@ -185,7 +185,7 @@ StickerGridWidget::StickerGridWidget(QQuickItem* parent)
         [this](QEventPoint point, Qt::MouseButton) {
             int idx = indexAt(point.position());
             if (idx >= 0 && idx < m_items.size()) {
-                Q_EMIT stickerClicked(m_items[idx]);
+                Q_EMIT stickerClicked(m_items[idx], idx);
             }
         });
 
@@ -314,7 +314,14 @@ int StickerGridWidget::indexAt(const QPointF& contentPos) const
     if (m_cols <= 0) return -1;
     const int col = int(qFloor(contentPos.x() / STEP));
     const int row = int(qFloor(contentPos.y() / STEP));
+    // 点击落在瓦片间 gap（右侧/下方 10px 空白）→ 未命中任何贴纸
+    const qreal inCellX = contentPos.x() - col * STEP;
+    const qreal inCellY = contentPos.y() - row * STEP;
+    if (inCellX >= TILE_SIZE || inCellY >= TILE_SIZE)
+        return -1;
     const int idx = row * m_cols + col;
+    if (idx < 0 || idx >= m_items.size())
+        return -1;
     return idx;
 }
 

@@ -179,11 +179,18 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     m_grid->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
 
     connect(m_grid, &StickerGridWidget::stickerClicked,
-        this, [this](const StickerBrief& brief) {
+        this, [this](const StickerBrief& brief, int index) {
+            const StickerMeta meta = StickerStore::instance()->stickerMeta(brief.filePath);
+            const QString mime = meta.mime.isEmpty()
+                ? QStringLiteral("unknown") : meta.mime;
+            const qint64 size = brief.size ? qint64(brief.size) : meta.sizeBytes;
             StickerStore::instance()->touchSticker(brief.id);
             bool ok = StickerStore::instance()->copyStickerToClipboard(brief.filePath);
-            showToast(ok ? QString::fromUtf8("已复制到剪贴板")
-                         : QString::fromUtf8("复制失败"));
+            showToast(ok
+                ? QString::fromUtf8("已复制到剪贴板 index=%1 size=%2 mime=%3")
+                      .arg(index).arg(size).arg(mime)
+                : QString::fromUtf8("复制失败 index=%1 size=%2 mime=%3")
+                      .arg(index).arg(size).arg(mime));
         });
 
     connect(m_grid, &StickerGridWidget::stickerDoubleClicked,

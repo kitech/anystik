@@ -60,7 +60,7 @@ public:
     StickerBrief stickerAt(int index) const;
 
 Q_SIGNALS:
-    void stickerClicked(const StickerBrief& brief);
+    void stickerClicked(const StickerBrief& brief, int index);
     void stickerDoubleClicked(const StickerBrief& brief);
     void stickerLongPressed(const StickerBrief& brief, const QPointF& scenePos);
 
