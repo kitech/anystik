@@ -91,34 +91,50 @@ void MyScrollArea::wheelEvent(QWheelEvent* event)
         return;
     }
 
-    // 触控板像素滚动：步长小且密集，直接平滑跟随，不叠加动画层
+    // 触控板像素滚动：步长小且密集，直接平滑跟随，不叠加动画层。
+    // macOS 自然滚动方向用 inverted 归一，与事件过滤器路径保持一致。
     const QPointF pixel = event->pixelDelta();
     if (!pixel.isNull()) {
-        const QSizeF view = viewContentsRect().size();
-        const QSizeF content = scrollableSize();
-        const qreal maxX = qMax<qreal>(0, content.width() - view.width());
-        const qreal maxY = qMax<qreal>(0, content.height() - view.height());
-        const QPointF pos = scrollPos() - pixel;
-        setScrollPos(QPointF(
-            qBound<qreal>(0, pos.x(), maxX),
-            qBound<qreal>(0, pos.y(), maxY)));
+        qreal dy = event->inverted() ? -pixel.y() : pixel.y();
+        if (!qFuzzyIsNull(dy)) {
+            const QSizeF view = viewContentsRect().size();
+            const QSizeF content = scrollableSize();
+            const qreal maxX = qMax<qreal>(0, content.width() - view.width());
+            const qreal maxY = qMax<qreal>(0, content.height() - view.height());
+            const QPointF pos = scrollPos() - QPointF(0, dy);
+            setScrollPos(QPointF(
+                qBound<qreal>(0, pos.x(), maxX),
+                qBound<qreal>(0, pos.y(), maxY)));
+        }
         event->accept();
         return;
     }
 
     // 普通鼠标滚轮：Qt 原生 72px/齿，动画滑行（自持动画，可被打断）
     const qreal steps = event->angleDelta().y() / qreal(QWheelEvent::DefaultDeltasPerStep);
-    if (qFuzzyIsNull(steps))
+    if (qFuzzyIsNull(steps)) {
+        event->accept();
         return;
+    }
 
     myWheelScroll(steps * WHEEL_PIXELS_PER_NOTCH);
     event->accept();
 }
 #endif
 
-// 窗口级滚轮接管。事件位置此时仍是窗口局部坐标（==场景坐标），经
-// mapFromScene 转为本地坐标后判断是否落在本滚动区域内。仅处理纵向滚轮；
-// 含 isVisible 守卫防止 QskStackBox 隐藏页（几何与显示页重叠）误吞。
+// 窗口级滚轮接管。事件在 QCoreApplication::notify 层到达，此时 we->position()
+// 为窗口局部坐标；在部分平台/DPR 下可能仍是原生像素，先按窗口 DPR 归一化为
+// 逻辑像素（QPA 层对鼠标事件已归一，这里做幂等的保险），再经 mapFromScene 转
+// 本地坐标判断是否落在本滚动区域内。仅处理纵向滚轮；含 isVisible 守卫防止
+// QskStackBox 隐藏页（几何与显示页重叠）误吞。
+//
+// 关键语义：一旦指针命中本网格内容区且无模态 overlay 覆盖，则对**所有**滚轮帧
+// 统一 accept()+return true 接管（包括 scroll 相位中的零 delta 帧，如 macOS 的
+// ScrollBegin/ScrollEnd）。若对零 delta 帧 return false 且不 ignore()，事件会以
+// "默认 accepted" 落到 Qt Quick 投递链，被纯 QQuickItem 叶子(贴纸瓦片)抢先接受，
+// Qt Quick 的粘性 wheel target（lastWheelEventAccepted）便会把整段手势锁给该叶子，
+// 后续帧即使有 delta 也无法再由本过滤器接管 —— 这正是纯 QQuickItem 场景下滚轮
+// 被截断的根因。统一接管后叶子永不获得粘性 target，滚动恢复。
 bool MyScrollArea::eventFilter(QObject* watched, QEvent* event)
 {
     if (watched != m_filterWindow || event->type() != QEvent::Wheel)
@@ -128,41 +144,54 @@ bool MyScrollArea::eventFilter(QObject* watched, QEvent* event)
     if (!we || !isWheelEnabled() || !isVisible())
         return false;
 
+    // 归一化为逻辑像素（DPR=1 时恒等，零回归；retina/高 DPI 下修正潜在原生像素）
+    QPointF scenePos = we->position();
+    if (m_filterWindow) {
+        const qreal dpr = m_filterWindow->devicePixelRatio();
+        if (dpr > 0.0 && !qFuzzyCompare(dpr, 1.0))
+            scenePos /= dpr;
+    }
+
     // 模态弹层/预览覆盖开启中：指针下若有顶层可见覆盖项，则退还原生投递
     // （被顶层裸 item 吞掉，滚轮不会滚动底层网格；弹层关闭后自动恢复）
-    if (isCoveredByOverlay(we->position()))
+    if (isCoveredByOverlay(scenePos))
         return false;
 
-    const QPointF localPos = mapFromScene(we->position());
+    const QPointF localPos = mapFromScene(scenePos);
     if (!contentsRect().contains(localPos))
         return false;
 
-    // 触控板像素滚动：直接平滑跟随
+    // 触控板像素滚动：直接平滑跟随（macOS 自然滚动方向用 inverted 归一）
     const QPointF pixel = we->pixelDelta();
     if (!pixel.isNull()) {
-        if (qFuzzyIsNull(pixel.y()))
-            return false;
-
-        const QSizeF view = viewContentsRect().size();
-        const qreal maxY = qMax<qreal>(0, scrollableSize().height() - view.height());
-        const qreal newY = qBound<qreal>(0, scrollPos().y() - pixel.y(), maxY);
-        setScrollPos(QPointF(scrollPos().x(), newY));
+        // 方向反相：macOS 自然滚动下 inverted=true，符号需翻转才与视觉一致。
+        // 零 delta 的相位帧(ScrollBegin/End)不滚动，但仍统一接管以阻止粘性 target 绑定叶子。
+        qreal dy = we->inverted() ? -pixel.y() : pixel.y();
+        if (!qFuzzyIsNull(dy)) {
+            const QSizeF view = viewContentsRect().size();
+            const qreal maxY = qMax<qreal>(0, scrollableSize().height() - view.height());
+            const qreal newY = qBound<qreal>(0, scrollPos().y() - dy, maxY);
+            setScrollPos(QPointF(scrollPos().x(), newY));
+        }
 
         we->accept();
 
         if (!m_wheelDiagDone) {
             m_wheelDiagDone = true;
             qWarning() << "[MyScrollArea] wheel(pixel) consumed by window filter,"
-                       << "local" << localPos << "newY" << newY;
+                       << "local" << localPos << "pixel" << pixel << "phase" << int(we->phase());
         }
 
         return true;
     }
 
-    // 普通鼠标滚轮：Qt 原生 72px/齿，动画滑行（自持动画，可被打断）
+    // 普通鼠标滚轮：Qt 原生 72px/齿，动画滑行（自持动画，可被打断）。
+    // 零 delta 帧同样统一接管，避免粘性 target 绑定叶子。
     const qreal steps = we->angleDelta().y() / qreal(QWheelEvent::DefaultDeltasPerStep);
-    if (qFuzzyIsNull(steps))
-        return false;
+    if (qFuzzyIsNull(steps)) {
+        we->accept();
+        return true;
+    }
 
     myWheelScroll(steps * WHEEL_PIXELS_PER_NOTCH);
     we->accept();

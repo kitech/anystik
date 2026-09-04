@@ -370,6 +370,10 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
     {
         auto* overlay = new MenuOverlay(menu);
         connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
+        // 菜单关闭即移除铺满父页的 overlay：DeleteOnClose=false 时菜单 close()
+        // 不触发 destroyed，若不在此删除，overlay 残留可见会让
+        // MyScrollArea::isCoveredByOverlay 恒命中 → 滚轮永久失效（重启才恢复）。
+        connect(menu, &QskPopup::closed, overlay, &QObject::deleteLater);
     }
     menu->open();
 }
@@ -480,6 +484,7 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
     {
         auto* overlay = new MenuOverlay(menu);
         connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
+        connect(menu, &QskPopup::closed, overlay, &QObject::deleteLater);
     }
     menu->open();
 }
@@ -523,6 +528,7 @@ void StickerHomePage::showPackManageMenu()
             {
                 auto* overlay = new MenuOverlay(menu);
                 connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
+                connect(menu, &QskPopup::closed, overlay, &QObject::deleteLater);
             }
             menu->open();
         });
