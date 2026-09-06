@@ -482,7 +482,7 @@ int main(int argc, char* argv[]) {
     // ── 下载安装链路自检（ANYSTIK_SELFTEST=1，offscreen 冒烟用）──
     if (qEnvironmentVariableIntValue("ANYSTIK_SELFTEST") > 0) {
         const QString url = QString::fromUtf8(
-            "https://codeload.github.com/WhatsApp/stickers/zip/refs/heads/main");
+            "https://codeload.github.com/WhatsApp/stickers/zip/06144a1f6077bbb346e1230032fc4e0bce996d03");
         QTimer::singleShot(500, [url]() {
             auto* store = StickerStore::instance();
             if (!store->ensureInit()) {
