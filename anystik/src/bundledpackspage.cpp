@@ -3,6 +3,7 @@
 #include "androidutils.h"
 #include "dialogpopup.h"
 #include "toastpopup.h"
+#include "compatcore34.h"
 
 #include <QSettings>
 #include <QSet>
@@ -94,7 +95,8 @@ void BundledPacksPage::buildBody()
 
     for (unsigned i = 0; i < kBuiltinSourceCount; ++i)
         addSourceRow(m_body, QString::fromUtf8(kBuiltinSources[i].name),
-                              QString::fromUtf8(kBuiltinSources[i].url));
+                              QString::fromUtf8(kBuiltinSources[i].url),
+                              QString::fromUtf8(kBuiltinSources[i].previewUrl));
 
     // B2 清理非内置源的残留下载（.part + dlProgress 死条目）
     QStringList sourceUrls;
@@ -105,7 +107,8 @@ void BundledPacksPage::buildBody()
     rebuildDownloaded();
 }
 
-void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, const QString& url)
+void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, const QString& url,
+                                    const QString& previewUrl)
 {
     SourceRow row;
     row.url = url;
@@ -117,6 +120,14 @@ void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, con
     r1->setSpacing(8);
     auto* nameLabel = new QskTextLabel(name, r1);
     nameLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    if (!previewUrl.isEmpty()) {
+        auto* preview = new QskPushButton("预览", r1);
+        preview->setPreferredSize(64, 44);
+        connect(preview, &QskPushButton::clicked, this,
+                [previewUrl]() { qOpenUrl(previewUrl); });
+    }
+
     row.dl = new QskPushButton(StickerStore::instance()->hasPartialDownload(url) ? "继续" : "下载安装", r1);
 
     auto* r2 = new QskLinearBox(Qt::Horizontal, card);

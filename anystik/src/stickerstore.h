@@ -56,6 +56,7 @@ struct BuiltinSource {
     const char* name;
     const char* url;
     qint64 approxSize;
+    const char* previewUrl;  // 在线预览列表页；nullptr = 无预览（不显示预览按钮）
 };
 extern const BuiltinSource kBuiltinSources[];
 extern const unsigned kBuiltinSourceCount;

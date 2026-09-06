@@ -34,7 +34,8 @@ private:
     };
 
     void buildBody();
-    void addSourceRow(QskLinearBox* body, const QString& name, const QString& url);
+    void addSourceRow(QskLinearBox* body, const QString& name, const QString& url,
+                      const QString& previewUrl);
     void rebuildDownloaded();
     void addPackRow(QskLinearBox* list, const StickerPackBrief& pack, bool installed);
     void refreshButtons(const SourceRow& row);
