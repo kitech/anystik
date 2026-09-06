@@ -95,6 +95,7 @@ qt_add_executable(anystik
     ${qlcomp_dir}/compatcore34.cpp
     ${qlcomp_dir}/limelog.cpp
     ${qlcomp_dir}/md5.c
+    ${qlcomp_dir}/qcrc64.cpp
 )
 
 if(APPLE)
