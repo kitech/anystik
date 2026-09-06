@@ -2510,8 +2510,40 @@ const BuiltinSource kBuiltinSources[] = {
     { "LINE 动态 18060",
       "https://stickershop.line-scdn.net/stickershop/v1/product/18060/iphone/stickerpack@2x.zip",
       7246424L,         // 真机 HEAD 实测 content-length（≈6.9 MB）
-      "https://store.line.me/stickershop/product/18060/zh-Hans" },
-    // ── ChineseBQB 精选包（来源 zhaoolee/ChineseBQB 仓库 README 直链；本会话并行 HEAD 实测 content-length）──
+"https://store.line.me/stickershop/product/18060/zh-Hans" },
+     { "小红书表情包（社交平台合集）",
+       "https://codeload.github.com/Augenstern-O/Stickers/zip/refs/heads/main",
+       9394593L,          // 本会话实测下载（≈9.0 MB）
+       "https://github.com/Augenstern-O/Stickers" },
+     { "Twitter 官方 Emoji (Twemoji)",
+       "https://codeload.github.com/twitter/twemoji/zip/refs/heads/master",
+       33554432L,         // 指定 32M
+       "https://github.com/twitter/twemoji" },
+     { "贴吧表情全收集（滑稽等）",
+       "https://codeload.github.com/KeikoAyano/Tieba-Emoji/zip/refs/heads/main",
+       17447147L,         // API 求和（≈16.6 MB）
+       "https://github.com/KeikoAyano/Tieba-Emoji" },
+     { "抖音表情包（默认/合成全收集）",
+       "https://codeload.github.com/rento666/douyin-emoji/zip/refs/heads/main",
+       35398057L,         // API 求和（≈33.8 MB）
+       "https://github.com/rento666/douyin-emoji" },
+     { "B站/中文平台默认表情（YiJio）",
+       "https://codeload.github.com/YiJio/emoji-chinese/zip/refs/heads/main",
+       16108164L,         // API 求和（≈15.4 MB）
+       "https://github.com/YiJio/emoji-chinese" },
+     { "B站表情全归档（ccmuyuu）",
+       "https://codeload.github.com/ccmuyuu/bilibili-emotes/zip/refs/heads/master",
+       4365762560L,       // 首次预估=API size 4263440KB（≈4.07 GB）
+       "https://github.com/ccmuyuu/bilibili-emotes" },
+     { "B站贴纸存档（amtoaer）",
+       "https://codeload.github.com/amtoaer/bilibili-stickers/zip/refs/heads/main",
+       1686083L,          // API 求和（≈1.6 MB）
+       "https://github.com/amtoaer/bilibili-stickers" },
+     { "B站表情gif全图（rtransformation）",
+       "https://codeload.github.com/rtransformation/Bilibili-emoticon-collection/zip/refs/heads/main",
+       3546883L,          // API 求和（≈3.4 MB）
+       "https://github.com/rtransformation/Bilibili-emoticon-collection" },
+     // ── ChineseBQB 精选包（来源 zhaoolee/ChineseBQB 仓库 README 直链；本会话并行 HEAD 实测 content-length）──
     { "ChineseBQB 002 可爱的女孩纸👧",
       "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/master/002CuteGirl_%E5%8F%AF%E7%88%B1%E7%9A%84%E5%A5%B3%E5%AD%A9%E7%BA%B8%F0%9F%91%A7BQB.zip",
       59028547L,
