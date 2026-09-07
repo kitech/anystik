@@ -356,11 +356,14 @@ void BundledPacksPage::onProgress(const QString& url, qint64 done, qint64 total)
         text += "（大小未知）";
 
     const bool known = (total > 0);
-    it->bar->setVisible(known);
+    it->bar->setVisible(true);
     if (known) {
+        it->bar->setIndeterminate(false);
         it->bar->setValueAsRatio(done / double(total));
         if (done >= total)
             text = "下载完成，正在安装…";
+    } else {
+        it->bar->setIndeterminate(true);
     }
     it->status->setText(text);
     refreshButtons(it.value());
