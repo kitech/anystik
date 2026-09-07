@@ -2433,43 +2433,60 @@ static QString urlHex(const QString& url)
         QCryptographicHash::Md5).toHex()).left(16);
 }
 
-// codeload: /<owner>/<repo>/zip/refs/heads/<branch> 或 /<owner>/<repo>/zip/<完整40位sha>
-static bool matchCodeloadRepo(const QString& url,
-                              QString* owner, QString* repo, QString* branch,
-                              bool* isSha = nullptr)
+// 远程 GitHub 源解析（内置源统一走 gh-proxy 前缀加速，不使用 codeload.github.com）：
+//   https://gh-proxy.com/https://github.com/<owner>/<repo>/archive/<40位sha>.zip   → 整包，sha 固定
+//   https://gh-proxy.com/https://raw.githubusercontent.com/<owner>/<repo>/<sha>/<path>
+//   https://raw.githubusercontent.com/<owner>/<repo>/<sha>/<path>   （兼容无前缀直连）
+enum class RemoteKind { None, ArchiveZip, RawFile };
+static RemoteKind matchRemoteRepo(const QString& url,
+                                  QString* owner, QString* repo, QString* branch)
 {
-    const QUrl u(url);
-    if (u.host() != QLatin1String("codeload.github.com")) {
-        return false;
+    QString inner = url;
+    const QString ghp = QStringLiteral("https://gh-proxy.com/https://");
+    if (inner.startsWith(ghp)) {
+        inner = inner.mid(ghp.size());
     }
-    const QStringList parts = u.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    if (parts.size() == 6 && parts.at(2) == QLatin1String("zip")
-        && parts.at(3) == QLatin1String("refs")
-        && parts.at(4) == QLatin1String("heads")) {
-        if (owner) *owner = parts.at(0);
-        if (repo) *repo = parts.at(1);
-        if (branch) *branch = parts.at(5);
-        if (isSha) *isSha = false;
-        return true;
+    if (inner.startsWith(QLatin1String("github.com/"))) {
+        inner.remove(0, QStringLiteral("github.com/").size());
+    } else if (inner.startsWith(QLatin1String("raw.githubusercontent.com/"))) {
+        inner.remove(0, QStringLiteral("raw.githubusercontent.com/").size());
+    } else {
+        return RemoteKind::None;
     }
-    if (parts.size() == 4 && parts.at(2) == QLatin1String("zip")) {
-        const QString rev = parts.at(3);
+
+    const QStringList parts = inner.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    // <owner>/<repo>/archive/<40位sha>.zip
+    if (parts.size() == 4 && parts.at(2) == QLatin1String("archive")) {
+        QString rev = parts.at(3);
+        if (rev.endsWith(QLatin1String(".zip"))) {
+            rev = rev.left(rev.size() - 4);
+        }
         const QByteArray dec = QByteArray::fromHex(rev.toLatin1());
-        if (dec.size() == 20 && rev.size() == 40) {   // 完整 40 位 hex commit sha
+        if (dec.size() == 20 && rev.size() == 40) {
             if (owner) *owner = parts.at(0);
             if (repo) *repo = parts.at(1);
             if (branch) *branch = rev;
-            if (isSha) *isSha = true;
-            return true;
+            return RemoteKind::ArchiveZip;
         }
     }
-    return false;
+    // <owner>/<repo>/<40位sha>/<path...>
+    if (parts.size() >= 4) {
+        const QString rev = parts.at(2);
+        const QByteArray dec = QByteArray::fromHex(rev.toLatin1());
+        if (dec.size() == 20 && rev.size() == 40) {
+            if (owner) *owner = parts.at(0);
+            if (repo) *repo = parts.at(1);
+            if (branch) *branch = rev;
+            return RemoteKind::RawFile;
+        }
+    }
+    return RemoteKind::None;
 }
 
 static QString urlDisplayName(const QString& url)
 {
     QString owner, repo, branch;
-    if (matchCodeloadRepo(url, &owner, &repo, &branch, nullptr)) {
+    if (matchRemoteRepo(url, &owner, &repo, &branch) != RemoteKind::None) {
         return repo;
     }
     QUrl u(url);
@@ -2501,19 +2518,19 @@ static void setDlHint(const QString& url, const QVariantMap& hint)
 // 如暂未获取到approxSize则-1
 const BuiltinSource kBuiltinSources[] = {
     { "WhatsApp 官方示例贴纸 (SDK)",
-      "https://codeload.github.com/WhatsApp/stickers/zip/06144a1f6077bbb346e1230032fc4e0bce996d03",
+      "https://gh-proxy.com/https://github.com/WhatsApp/stickers/archive/06144a1f6077bbb346e1230032fc4e0bce996d03.zip",
       13163057L,   // 8/30 selftest5 整包实测（约值，随 commit 变化）
       "https://github.com/WhatsApp/stickers" },
     { "Animals (Telegram)",
-      "https://raw.githubusercontent.com/kanelai/stickerapp/b84a74ab09db90e33bd6eaee7135bf96a00fb5dd/Animals.stickerpack",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/kanelai/stickerapp/b84a74ab09db90e33bd6eaee7135bf96a00fb5dd/Animals.stickerpack",
       1088205L,    // 本会话 Range 206 实测 content-range: bytes 0-0/1088205
       "https://github.com/kanelai/stickerapp" },
     { "LINE 贴纸包 (GitHub 镜像)",
-      "https://raw.githubusercontent.com/porridgebrother/line-stickers/8480a02a3b74914d70b8763cef77c2a9a86769a5/stickers.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/porridgebrother/line-stickers/8480a02a3b74914d70b8763cef77c2a9a86769a5/stickers.zip",
       1490697L,   // 本会话 Range 实测 content-range: bytes 0-0/1490697（raw 偶发超时,重试即可）
       "https://github.com/porridgebrother/line-stickers" },
     { "ChineseBQB 梗图包",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/001Funny_%E6%BB%91%E7%A8%BD%E5%A4%A7%E4%BD%AC%F0%9F%98%8FBQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/001Funny_%E6%BB%91%E7%A8%BD%E5%A4%A7%E4%BD%AC%F0%9F%98%8FBQB.zip",
       4691509L,
       "https://v2fy.com/p/001Funny_%E6%BB%91%E7%A8%BD%E5%A4%A7%E4%BD%AC%F0%9F%98%8FBQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },   // 本会话 Range 实测 content-range: bytes 0-0/4691509（raw 源偶发超时,重试即可）
     { "LINE 贴纸 2938",
@@ -2525,144 +2542,144 @@ const BuiltinSource kBuiltinSources[] = {
       7246424L,         // 真机 HEAD 实测 content-length（≈6.9 MB）
 "https://store.line.me/stickershop/product/18060/zh-Hans" },
      { "小红书表情包（社交平台合集）",
-       "https://codeload.github.com/Augenstern-O/Stickers/zip/92767d783cc80d3e729217b5897752035da75fc9",
-       9394593L,          // 本会话实测下载（≈9.0 MB）
+       "https://gh-proxy.com/https://github.com/Augenstern-O/Stickers/archive/92767d783cc80d3e729217b5897752035da75fc9.zip",
+       320394593L,          // 本会话实测下载（≈320.0 MB）
        "https://github.com/Augenstern-O/Stickers" },
      { "Twitter 官方 Emoji (Twemoji)",
-       "https://codeload.github.com/twitter/twemoji/zip/bad3bceeafc901ace42a3dfe0421db6388daafb9",
+       "https://gh-proxy.com/https://github.com/twitter/twemoji/archive/bad3bceeafc901ace42a3dfe0421db6388daafb9.zip",
        33554432L,         // 指定 32M
        "https://github.com/twitter/twemoji" },
      { "贴吧表情全收集（滑稽等）",
-       "https://codeload.github.com/KeikoAyano/Tieba-Emoji/zip/aabbbbfaa2ccd6540cb5f13bc09b0cd1c64089c5",
+       "https://gh-proxy.com/https://github.com/KeikoAyano/Tieba-Emoji/archive/aabbbbfaa2ccd6540cb5f13bc09b0cd1c64089c5.zip",
        17447147L,         // API 求和（≈16.6 MB）
        "https://github.com/KeikoAyano/Tieba-Emoji" },
      { "抖音表情包（默认/合成全收集）",
-       "https://codeload.github.com/rento666/douyin-emoji/zip/46f5cba582a70206d79f492908cf8509d8784398",
+       "https://gh-proxy.com/https://github.com/rento666/douyin-emoji/archive/46f5cba582a70206d79f492908cf8509d8784398.zip",
        35398057L,         // API 求和（≈33.8 MB）
        "https://github.com/rento666/douyin-emoji" },
      { "B站/中文平台默认表情（YiJio）",
-       "https://codeload.github.com/YiJio/emoji-chinese/zip/79c2292b778cf93cb5850f70c3168bcbfe39aeeb",
+       "https://gh-proxy.com/https://github.com/YiJio/emoji-chinese/archive/79c2292b778cf93cb5850f70c3168bcbfe39aeeb.zip",
        16108164L,         // API 求和（≈15.4 MB）
        "https://github.com/YiJio/emoji-chinese" },
      { "B站表情全归档（ccmuyuu）",
-       "https://codeload.github.com/ccmuyuu/bilibili-emotes/zip/db3972317ee029f5acf28ba7bbe971cbbc4fd4e9",
+       "https://gh-proxy.com/https://github.com/ccmuyuu/bilibili-emotes/archive/db3972317ee029f5acf28ba7bbe971cbbc4fd4e9.zip",
        4365762560L,       // 首次预估=API size 4263440KB（≈4.07 GB）
        "https://github.com/ccmuyuu/bilibili-emotes" },
      { "B站贴纸存档（amtoaer）",
-       "https://codeload.github.com/amtoaer/bilibili-stickers/zip/abab458b399659f4ae6d91f3633c3a8365b147ac",
+       "https://gh-proxy.com/https://github.com/amtoaer/bilibili-stickers/archive/abab458b399659f4ae6d91f3633c3a8365b147ac.zip",
        1686083L,          // API 求和（≈1.6 MB）
        "https://github.com/amtoaer/bilibili-stickers" },
      { "B站表情gif全图（rtransformation）",
-       "https://codeload.github.com/rtransformation/Bilibili-emoticon-collection/zip/a2f0c55a04f689a23382a594791957d8b01aff70",
+       "https://gh-proxy.com/https://github.com/rtransformation/Bilibili-emoticon-collection/archive/a2f0c55a04f689a23382a594791957d8b01aff70.zip",
        3546883L,          // API 求和（≈3.4 MB）
        "https://github.com/rtransformation/Bilibili-emoticon-collection" },
      // ── ChineseBQB 精选包（来源 zhaoolee/ChineseBQB 仓库 README 直链；本会话并行 HEAD 实测 content-length）──
     { "ChineseBQB 002 可爱的女孩纸👧",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/002CuteGirl_%E5%8F%AF%E7%88%B1%E7%9A%84%E5%A5%B3%E5%AD%A9%E7%BA%B8%F0%9F%91%A7BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/002CuteGirl_%E5%8F%AF%E7%88%B1%E7%9A%84%E5%A5%B3%E5%AD%A9%E7%BA%B8%F0%9F%91%A7BQB.zip",
       59028547L,
       "https://v2fy.com/p/002CuteGirl_%E5%8F%AF%E7%88%B1%E7%9A%84%E5%A5%B3%E5%AD%A9%E7%BA%B8%F0%9F%91%A7BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 003 可爱男孩纸👶",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/003CuteBoy_%E5%8F%AF%E7%88%B1%E7%94%B7%E5%AD%A9%E7%BA%B8%F0%9F%91%B6BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/003CuteBoy_%E5%8F%AF%E7%88%B1%E7%94%B7%E5%AD%A9%E7%BA%B8%F0%9F%91%B6BQB.zip",
       10535808L,
       "https://v2fy.com/p/003CuteBoy_%E5%8F%AF%E7%88%B1%E7%94%B7%E5%AD%A9%E7%BA%B8%F0%9F%91%B6BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 006 仓鼠🐹",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/006Hamster_%E4%BB%93%E9%BC%A0%F0%9F%90%B9BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/006Hamster_%E4%BB%93%E9%BC%A0%F0%9F%90%B9BQB.zip",
       1984744L,
       "https://v2fy.com/p/006Hamster_%E4%BB%93%E9%BC%A0%F0%9F%90%B9BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 007 胖虎🐯",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/007Tiger_%E8%83%96%E8%99%8E%F0%9F%90%AFBQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/007Tiger_%E8%83%96%E8%99%8E%F0%9F%90%AFBQB.zip",
       443084L,
       "https://v2fy.com/p/007Tiger_%E8%83%96%E8%99%8E%F0%9F%90%AFBQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 009 熊本熊🐻",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/009KumamotoBear_%E7%86%8A%E6%9C%AC%E7%86%8A%F0%9F%90%BBBQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/009KumamotoBear_%E7%86%8A%E6%9C%AC%E7%86%8A%F0%9F%90%BBBQB.zip",
       4822035L,
       "https://v2fy.com/p/009KumamotoBear_%E7%86%8A%E6%9C%AC%E7%86%8A%F0%9F%90%BBBQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 010 是喵星人啦🐱",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/010Cat_%E6%98%AF%E5%96%B5%E6%98%9F%E4%BA%BA%E5%95%A6%F0%9F%90%B1BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/010Cat_%E6%98%AF%E5%96%B5%E6%98%9F%E4%BA%BA%E5%95%A6%F0%9F%90%B1BQB.zip",
       24245100L,
       "https://v2fy.com/p/010Cat_%E6%98%AF%E5%96%B5%E6%98%9F%E4%BA%BA%E5%95%A6%F0%9F%90%B1BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 011 狗🐶",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/011Dog_%E7%8B%97%F0%9F%90%B6BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/011Dog_%E7%8B%97%F0%9F%90%B6BQB.zip",
       19551423L,
       "https://v2fy.com/p/011Dog_%E7%8B%97%F0%9F%90%B6BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 013 小猪佩奇👑",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/013PigPecs_%E5%B0%8F%E7%8C%AA%E4%BD%A9%E5%A5%87%F0%9F%91%91BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/013PigPecs_%E5%B0%8F%E7%8C%AA%E4%BD%A9%E5%A5%87%F0%9F%91%91BQB.zip",
       3866090L,
       "https://v2fy.com/p/013PigPecs_%E5%B0%8F%E7%8C%AA%E4%BD%A9%E5%A5%87%F0%9F%91%91BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 026 小黄鸡🐔",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/026Chicken_%E5%B0%8F%E5%B9%BA%E9%B8%A1%F0%9F%90%94BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/026Chicken_%E5%B0%8F%E5%B9%BA%E9%B8%A1%F0%9F%90%94BQB.zip",
       943786L,
       "https://v2fy.com/p/026Chicken_%E5%B0%8F%E5%B9%BA%E9%B8%A1%F0%9F%90%94BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 031 沙雕企鹅🐧",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/031Penguin_%E6%B2%99%E9%9B%95%E4%BC%81%E9%B9%85%F0%9F%90%A7BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/031Penguin_%E6%B2%99%E9%9B%95%E4%BC%81%E9%B9%85%F0%9F%90%A7BQB.zip",
       1645177L,
       "https://v2fy.com/p/031Penguin_%E6%B2%99%E9%9B%95%E4%BC%81%E9%B9%85%F0%9F%90%A7BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 035 猫和老鼠",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/035TomAndJerry_%E7%8C%AB%E5%92%8C%E8%80%81%E9%BC%A0BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/035TomAndJerry_%E7%8C%AB%E5%92%8C%E8%80%81%E9%BC%A0BQB.zip",
       40770934L,
       "https://v2fy.com/p/035TomAndJerry_%E7%8C%AB%E5%92%8C%E8%80%81%E9%BC%A0BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 036 皮卡丘",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/036Pikachu_%E7%9A%AE%E5%8D%A1%E4%B8%98BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/036Pikachu_%E7%9A%AE%E5%8D%A1%E4%B8%98BQB.zip",
       31541L,
       "https://v2fy.com/p/036Pikachu_%E7%9A%AE%E5%8D%A1%E4%B8%98BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 039 姚明（三巨头）",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/039YaoMing%E8%A1%A8%E6%83%85%E5%8C%85%E4%B8%89%E5%B7%A8%E5%A4%B4_%E5%A7%9A%E6%98%8EBQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/039YaoMing%E8%A1%A8%E6%83%85%E5%8C%85%E4%B8%89%E5%B7%A8%E5%A4%B4_%E5%A7%9A%E6%98%8EBQB.zip",
       70017L,
       "https://v2fy.com/p/039YaoMing%E8%A1%A8%E6%83%85%E5%8C%85%E4%B8%89%E5%B7%A8%E5%A4%B4_%E5%A7%9A%E6%98%8EBQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 040 花泽香菜（三巨头）",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/040HanazawaKana%E8%A1%A8%E6%83%85%E5%8C%85%E4%B8%89%E5%B7%A8%E5%A4%B4_%E8%8A%B1%E6%B3%BD%E9%A6%99%E8%8F%9CBQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/040HanazawaKana%E8%A1%A8%E6%83%85%E5%8C%85%E4%B8%89%E5%B7%A8%E5%A4%B4_%E8%8A%B1%E6%B3%BD%E9%A6%99%E8%8F%9CBQB.zip",
       24276L,
       "https://v2fy.com/p/040HanazawaKana%E8%A1%A8%E6%83%85%E5%8C%85%E4%B8%89%E5%B7%A8%E5%A4%B4_%E8%8A%B1%E6%B3%BD%E9%A6%99%E8%8F%9CBQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 048 海绵宝宝",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/048SpongeBob_%E6%B5%B7%E7%BB%B5%E5%AE%9D%E5%AE%9DBQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/048SpongeBob_%E6%B5%B7%E7%BB%B5%E5%AE%9D%E5%AE%9DBQB.zip",
       217974L,
       "https://v2fy.com/p/048SpongeBob_%E6%B5%B7%E7%BB%B5%E5%AE%9D%E5%AE%9DBQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 052 杰尼龟",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/052Squirtle_%E6%9D%B0%E5%B0%BC%E9%BE%9FBQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/052Squirtle_%E6%9D%B0%E5%B0%BC%E9%BE%9FBQB.zip",
       2775654L,
       "https://v2fy.com/p/052Squirtle_%E6%9D%B0%E5%B0%BC%E9%BE%9FBQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 056 哆啦A梦",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/056Doraemon_%E5%93%86%E5%95%A6A%E6%A2%A6BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/056Doraemon_%E5%93%86%E5%95%A6A%E6%A2%A6BQB.zip",
       6476953L,
       "https://v2fy.com/p/056Doraemon_%E5%93%86%E5%95%A6A%E6%A2%A6BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 060 Mur猫😺",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/060MurCat_Mur%E7%8C%AB%F0%9F%98%BABQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/060MurCat_Mur%E7%8C%AB%F0%9F%98%BABQB.zip",
       2761270L,
       "https://v2fy.com/p/060MurCat_Mur%E7%8C%AB%F0%9F%98%BABQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 062 蔡徐坤🏀",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/062CaiXvKun_%E8%94%A1%E5%BE%90%E5%9D%A4%F0%9F%8F%80BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/062CaiXvKun_%E8%94%A1%E5%BE%90%E5%9D%A4%F0%9F%8F%80BQB.zip",
       3759098L,
       "https://v2fy.com/p/062CaiXvKun_%E8%94%A1%E5%BE%90%E5%9D%A4%F0%9F%8F%80BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 064 特朗普",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/064Trump_%E7%89%B9%E6%9C%97%E6%99%AEBQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/064Trump_%E7%89%B9%E6%9C%97%E6%99%AEBQB.zip",
       561200L,
       "https://v2fy.com/p/064Trump_%E7%89%B9%E6%9C%97%E6%99%AEBQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 065 旅行青蛙🐸",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/065TravelFrog_%E6%97%85%E8%A1%8C%E9%9D%92%E8%9B%99%F0%9F%90%B8BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/065TravelFrog_%E6%97%85%E8%A1%8C%E9%9D%92%E8%9B%99%F0%9F%90%B8BQB.zip",
       320710L,
       "https://v2fy.com/p/065TravelFrog_%E6%97%85%E8%A1%8C%E9%9D%92%E8%9B%99%F0%9F%90%B8BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 070 JOJO的奇妙冒险",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/070JOJO%E7%9A%84%E5%A5%87%E5%A6%99%E5%86%92%E9%99%A9BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/070JOJO%E7%9A%84%E5%A5%87%E5%A6%99%E5%86%92%E9%99%A9BQB.zip",
       223508L,
       "https://v2fy.com/p/070JOJO%E7%9A%84%E5%A5%87%E5%A6%99%E5%86%92%E9%99%A9BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 089 饮茶哥",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/089TeaBoy_%E9%A5%AE%E8%8C%B6%E5%93%A5_BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/089TeaBoy_%E9%A5%AE%E8%8C%B6%E5%93%A5_BQB.zip",
       1774698L,
       "https://v2fy.com/p/089TeaBoy_%E9%A5%AE%E8%8C%B6%E5%93%A5_BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 095 原神",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/095GenShin_%E5%8E%9F%E7%A5%9E_BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/095GenShin_%E5%8E%9F%E7%A5%9E_BQB.zip",
       16702253L,
       "https://v2fy.com/p/095GenShin_%E5%8E%9F%E7%A5%9E_BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 101 电锯人",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/101ChainsawMan_%E7%94%B5%E9%94%AF%E4%BA%BA_BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/101ChainsawMan_%E7%94%B5%E9%94%AF%E4%BA%BA_BQB.zip",
       846057L,
       "https://v2fy.com/p/101ChainsawMan_%E7%94%B5%E9%94%AF%E4%BA%BA_BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 105 黑神话悟空🐒",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/105_BlackMythWuKong_%E9%BB%91%E7%A5%9E%E8%AF%9D%E6%82%9F%E7%A9%BA%F0%9F%90%92_BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/105_BlackMythWuKong_%E9%BB%91%E7%A5%9E%E8%AF%9D%E6%82%9F%E7%A9%BA%F0%9F%90%92_BQB.zip",
       1180957L,
       "https://v2fy.com/p/105_BlackMythWuKong_%E9%BB%91%E7%A5%9E%E8%AF%9D%E6%82%9F%E7%A9%BA%F0%9F%90%92_BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
     { "ChineseBQB 106 芙莉莲🪄",
-      "https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/106_Frieren_%E8%8A%99%E8%8E%89%E8%8E%B2%F0%9F%AA%84_BQB.zip",
+      "https://gh-proxy.com/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/106_Frieren_%E8%8A%99%E8%8E%89%E8%8E%B2%F0%9F%AA%84_BQB.zip",
       6236255L,
       "https://v2fy.com/p/106_Frieren_%E8%8A%99%E8%8E%89%E8%8E%B2%F0%9F%AA%84_BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb" },
 };
@@ -2716,48 +2733,20 @@ void StickerStore::probeRemote(const QString& url)
     }
     ensureNam();
 
-    QString owner, repo, branch;
-    bool urlIsSha = false;
-    if (matchCodeloadRepo(url, &owner, &repo, &branch, &urlIsSha)) {
-        if (urlIsSha) {
-            // URL 已固定到具体 commit；版本即该 sha，无需再请求 API。
-            const QString ver = QStringLiteral("commit ") + branch.left(7);
-            auto hint = dlHint(url);
-            hint.insert("version", ver);
-            hint.insert("versionRaw", branch);
-            setDlHint(url, hint);
-            emit probeDone(url, -1, ver, branch, true, QString());
-            return;
-        }
-        // codeload zip 无 Content-Length，大小未知(以下载实计)；
-        // 版本 = 分支最新 commit sha。
-        const QString api = "https://api.github.com/repos/" + owner + "/"
-                            + repo + "/commits/" + branch;
-        auto* reply = m_nam->get(makeRequest(QUrl(api)));
-        connect(reply, &QNetworkReply::finished, this, [this, reply, url]() {
-            QString sha, err;
-            bool ok = (reply->error() == QNetworkReply::NoError);
-            if (ok) {
-                const QJsonDocument doc =
-                    QJsonDocument::fromJson(reply->readAll());
-                sha = doc.object().value("sha").toString();
-            } else {
-                err = reply->errorString();
-            }
-            const QString ver = sha.isEmpty() ? QStringLiteral("未知")
-                                              : QStringLiteral("commit ") + sha.left(7);
-            auto hint = dlHint(url);
-            hint.insert("version", ver);
-            hint.insert("versionRaw", sha);
-            setDlHint(url, hint);
-            reply->deleteLater();
-            emit probeDone(url, -1, ver, sha, ok, err);
-        });
+    QString branch;
+    if (matchRemoteRepo(url, nullptr, nullptr, &branch) == RemoteKind::ArchiveZip) {
+        // 整包已固定到具体 commit；版本即该 sha，无需请求网络。
+        const QString ver = QStringLiteral("commit ") + branch.left(7);
+        auto hint = dlHint(url);
+        hint.insert("version", ver);
+        hint.insert("versionRaw", branch);
+        setDlHint(url, hint);
+        emit probeDone(url, -1, ver, branch, true, QString());
         return;
     }
 
     auto* reply = m_nam->head(makeRequest(QUrl(url)));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, url]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, url, branch]() {
         const bool ok = (reply->error() == QNetworkReply::NoError);
         QString err;
         qint64 size = -1;
@@ -2766,15 +2755,20 @@ void StickerStore::probeRemote(const QString& url)
             if (reply->hasRawHeader("Content-Length")) {
                 size = reply->rawHeader("Content-Length").toLongLong();
             }
-            raw = QString::fromLatin1(
-                reply->rawHeader("ETag")).remove(QLatin1Char('"'));
-            if (raw.isEmpty()) {
-                raw = QString::fromLatin1(reply->rawHeader("Last-Modified"));
+            if (branch.size() == 40) {
+                raw = branch;                   // raw/文件源：已知 commit sha 作版本
+                ver = QStringLiteral("commit ") + branch.left(7);
+            } else {
+                raw = QString::fromLatin1(
+                    reply->rawHeader("ETag")).remove(QLatin1Char('"'));
+                if (raw.isEmpty()) {
+                    raw = QString::fromLatin1(reply->rawHeader("Last-Modified"));
+                }
+                ver = raw.isEmpty() ? QStringLiteral("未知") : raw;
             }
         } else {
             err = reply->errorString();
         }
-        ver = raw.isEmpty() ? QStringLiteral("未知") : raw;
         auto hint = dlHint(url);
         hint.insert("version", ver);
         hint.insert("versionRaw", raw);

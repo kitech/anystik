@@ -149,7 +149,7 @@ Q_SIGNALS:
                            const QString& current);
     // 迁移结束（GUI 线程发出）。ok=false 时 detail 为失败原因。
     void migrationFinished(bool ok, const QString& detail);
-    // size: -1 = 未知(如 codeload zip 无 Content-Length)
+    // size: -1 = 未知(如 zip 整包源无 Content-Length)
     // version/versionRaw: commit sha / ETag / Last-Modified / 未知
     void probeDone(const QString& url, qint64 size, const QString& version,
                    const QString& versionRaw, bool ok, const QString& error);
