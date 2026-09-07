@@ -2422,11 +2422,13 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
 
 static QString sanitizeToken(const QString& in)
 {
+    // 仅替换文件系统危险字符与换行，保留中文/空格/括号/大小写，
+    // 保证安装后分组名与源显示名一致可读。
     QString out = in;
+    const QString dangerous = QStringLiteral("\\/:*?\"<>|");
     for (QChar& c : out) {
-        const QChar ch = c;
-        if (!(ch.isLetterOrNumber() || ch == QLatin1Char('.')
-              || ch == QLatin1Char('_') || ch == QLatin1Char('-'))) {
+        if (c == QLatin1Char('\n') || c == QLatin1Char('\r')
+            || dangerous.contains(c)) {
             c = QLatin1Char('_');
         }
     }
@@ -2859,7 +2861,15 @@ void StickerStore::startDownload(const QString& url, bool noRange)
     }
     task->name = hint.value("name").toString();
     if (task->name.isEmpty()) {
-        task->name = urlDisplayName(url);
+        // 内置源优先其展示名，保证「待安装列表 ↔ 安装后分组」一一对应
+        QString builtinName;
+        for (unsigned i = 0; i < kBuiltinSourceCount; ++i) {
+            if (url == QString::fromUtf8(kBuiltinSources[i].url)) {
+                builtinName = QString::fromUtf8(kBuiltinSources[i].name);
+                break;
+            }
+        }
+        task->name = builtinName.isEmpty() ? urlDisplayName(url) : builtinName;
     }
 
     QDir().mkpath(QFileInfo(partPath).absolutePath());
@@ -3125,7 +3135,9 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
         }
     }
 
-    // 标题 = zip 顶层唯一目录名，否则 URL-derived 名
+    // 标题优先「源显示名」（内置源 = 列表展示名，自定义 = URL 派生名），
+    // 保证「待安装列表 ↔ 安装后分组」一一对应；非内置且 zip 有唯一顶层目录
+    // 时才回退使用目录名。
     QStringList tops;
     for (const auto& fi : infoList) {
         if (!fi.isValid()) continue;
@@ -3134,12 +3146,15 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
             ? fi.filePath : fi.filePath.left(slash);
         if (!tops.contains(first)) tops.append(first);
     }
-    QString title = (tops.size() == 1) ? tops.first() : QString();
-    if (title.endsWith(QLatin1Char('/'))) {
-        title.chop(1);
+    QString title = task->name;
+    if (title.isEmpty()) {
+        title = (tops.size() == 1) ? tops.first() : QString();
+        if (title.endsWith(QLatin1Char('/'))) {
+            title.chop(1);
+        }
     }
     if (title.isEmpty()) {
-        title = task->name;
+        title = urlDisplayName(url);
     }
     title = sanitizeToken(title);
 

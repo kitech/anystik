@@ -181,6 +181,17 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     m_packCombo->setPlaceholderText(QString::fromUtf8("更多分组…"));
     connect(m_packCombo, &QskComboBox::currentIndexChanged,
         this, &StickerHomePage::onPackComboChanged);
+    // QskComboBox 弹菜单偶发失败对策（见 QskComboBox.cpp）：
+    // A) window()==nullptr 时 setPopupOpen(true) 静默失败；
+    // B) 关闭 fade 未结束前重开，openPopup 被残留 menu 拦截且 PopupOpen 态卡牢。
+    // 每次按下先复位，再于下一事件循环兜底重开；setPopupOpen 幂等，不影响正常路径。
+    connect(m_packCombo, &QskComboBox::pressed, this, [this]() {
+        m_packCombo->setPopupOpen(false);
+        QTimer::singleShot(0, this, [this]() {
+            if (m_packCombo->window())
+                m_packCombo->setPopupOpen(true);
+        });
+    });
 
     // ── 贴纸网格 ──
     m_grid = new StickerGridWidget(layout);
