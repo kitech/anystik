@@ -387,7 +387,31 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
     const int idxCopyMeta = menu->addOption(QskLabelData(QString::fromUtf8("复制元信息")));
     const int idxShare = menu->addOption(QskLabelData(QString::fromUtf8("分享")));
     const int idxDelete = menu->addOption(QskLabelData(QString::fromUtf8("删除")));
-    menu->setOrigin(scenePos);
+
+    // 菜单无边界翻转逻辑（QskMenu.cpp 仅 setPosition(origin)）——origin 靠近
+    // 视图底部时剩余高度不足，菜单会被窗口裁剪。按实际尺寸向上翻转并钳制顶部。
+    QPointF origin = scenePos;
+    const qreal menuH = menu->sizeConstraint().height();
+    if (menuH > 0) {
+        const QRectF bounds = window() ? window()->contentItem()->boundingRect()
+                                       : QRectF();
+        if (bounds.isValid() && origin.y() + menuH > bounds.bottom()) {
+            origin.setY(qMax(bounds.top(), origin.y() - menuH));
+        }
+    }
+    menu->setOrigin(origin);
+
+    // 兜底：打开后实测底部越界再校准一次（估算误差场景）
+    connect(menu, &QskPopup::opened, this, [this, menu]() {
+        if (!menu->window() || menu->height() <= 0)
+            return;
+        const QRectF bounds = menu->window()->contentItem()->boundingRect();
+        const qreal bottom = menu->mapToScene(QPointF(0, menu->height())).y();
+        if (bottom > bounds.bottom()) {
+            menu->setPosition(menu->x(),
+                              qMax(bounds.top(), bottom - menu->height()));
+        }
+    });
 
     // 菜单宽由 skinlet 按最长文本自动测量；补 strut 下限防被皮肤压缩
     {
