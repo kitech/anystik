@@ -298,6 +298,16 @@ void StickerHomePage::reloadActive()
     } else if (m_activeTab.isEmpty()) {
         loadAllStickers();
     } else {
+        // 兜底：分组已被卸载/停用 → 回退「全部」，避免网格空白
+        bool stillExists = false;
+        for (const auto& p : m_packs) {
+            if (p.id == m_activeTab) { stillExists = true; break; }
+        }
+        if (!stillExists) {
+            m_activeTab = QStringLiteral("");
+            loadAllStickers();
+            return;
+        }
         loadPackStickers(m_activeTab);
     }
 }

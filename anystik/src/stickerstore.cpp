@@ -1517,6 +1517,18 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
         // 相对源根的相对子路径，保持目录层级复制到目标
         const QString rel = QDir(rootAbs).relativeFilePath(file);
         const QString dst = targetDir + QLatin1Char('/') + rel;
+
+        // 解码预检：svg 例外（canRead 依赖平台 qsvg 插件，保持旧行为）；
+        // 其它格式解析不出尺寸（损坏/截断/不支持）→ 跳过，不复制不入库。
+        const bool svgOk = QFileInfo(file).suffix().toLower()
+                           == QLatin1String("svg");
+        QImageReader probe(file);
+        probe.setAutoTransform(true);
+        if (!svgOk && !probe.size().isValid()) {
+            continue;
+        }
+        const QSizeF imgSize = probe.size();   // 预检通过的尺寸，直接入库
+
         if (!QFile::exists(dst)) {
             if (!QDir().mkpath(QFileInfo(dst).absolutePath())) {
                 if (errorOut) *errorOut = QStringLiteral("无法创建包子目录");
@@ -1530,9 +1542,6 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
         }
 
         QFileInfo fi(dst);
-        QImageReader reader(dst);
-        reader.setAutoTransform(true);
-        const QSizeF imgSize = reader.size();
         const qint64 fileBytes = fi.size();
 
         StickerRow row;
