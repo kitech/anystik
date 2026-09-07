@@ -14,6 +14,7 @@
 #include <QskTextField.h>
 #include <QskTabBar.h>
 #include <QskTabButton.h>
+#include <QskComboBox.h>
 #include <QskMenu.h>
 #include <QskLabelData.h>
 #include <QskDialog.h>
@@ -174,6 +175,13 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     connect(m_tabBar, &QskTabBar::currentIndexChanged,
         this, &StickerHomePage::onTabChanged);
 
+    m_packCombo = new QskComboBox(tabBarBox);
+    m_packCombo->setPreferredWidth(150);
+    m_packCombo->setSizePolicy(QskSizePolicy::Preferred, QskSizePolicy::Expanding);
+    m_packCombo->setPlaceholderText(QString::fromUtf8("更多分组…"));
+    connect(m_packCombo, &QskComboBox::currentIndexChanged,
+        this, &StickerHomePage::onPackComboChanged);
+
     // ── 贴纸网格 ──
     m_grid = new StickerGridWidget(layout);
     m_grid->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
@@ -201,7 +209,7 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
 
     // ── 数据 ──
     connect(StickerStore::instance(), &StickerStore::dataChanged,
-        this, [this]() { refreshTabBar(); onTabChanged(m_tabBar->currentIndex()); });
+        this, [this]() { refreshTabBar(); reloadActive(); });
 
     refreshTabBar();
     m_tabBar->setCurrentIndex(0);
@@ -216,20 +224,41 @@ void StickerHomePage::refreshTabBar()
 {
     m_packs = StickerStore::instance()->packs();
 
+    // 分离「粘贴板」与其余分组
+    m_comboPacks.clear();
+    m_pastePackId.clear();
+    for (const auto& pack : m_packs) {
+        if (pack.title == QString::fromUtf8("粘贴板")) {
+            m_pastePackId = pack.id;
+        } else {
+            m_comboPacks.append(pack);
+        }
+    }
+
+    // 固定 tabs：全部 / 最近 / 粘贴板（存在时）
     const int current = m_tabBar->currentIndex();
     m_tabBar->clear(true);
-
     m_tabBar->addTab(QString::fromUtf8("全部"));
     m_tabBar->addTab(QString::fromUtf8("最近"));
-    for (const auto& pack : m_packs) {
-        m_tabBar->addTab(pack.title);
+    if (!m_pastePackId.isEmpty()) {
+        m_tabBar->addTab(QString::fromUtf8("粘贴板"));
     }
+    m_tabBar->setCurrentIndex(qMin(current, m_tabBar->count() - 1));
 
-    if (current < m_tabBar->count()) {
-        m_tabBar->setCurrentIndex(current);
-    } else {
-        m_tabBar->setCurrentIndex(0);
+    // 其余包 → 下拉：清空重建，恢复当前选择（-1 即占位符态）
+    m_packCombo->clear();
+    for (const auto& pack : m_comboPacks) {
+        m_packCombo->addOption(pack.title);
     }
+    int comboIdx = -1;
+    for (int i = 0; i < m_comboPacks.size(); ++i) {
+        if (m_comboPacks[i].id == m_activeTab) {
+            comboIdx = i;
+            break;
+        }
+    }
+    m_packCombo->setCurrentIndex(comboIdx);
+    m_packCombo->setVisible(!m_comboPacks.isEmpty());
 }
 
 void StickerHomePage::onTabChanged(int index)
@@ -244,12 +273,32 @@ void StickerHomePage::onTabChanged(int index)
     } else if (index == 1) {
         m_activeTab = QStringLiteral("__recent");
         loadRecentStickers();
+    } else if (index == 2 && !m_pastePackId.isEmpty()) {
+        m_activeTab = m_pastePackId;
+        loadPackStickers(m_pastePackId);
+    }
+}
+
+void StickerHomePage::onPackComboChanged(int index)
+{
+    if (!m_searchField->text().trimmed().isEmpty()) {
+        return; // 搜索状态优先
+    }
+    if (index < 0 || index >= m_comboPacks.size()) {
+        return;
+    }
+    m_activeTab = m_comboPacks[index].id;
+    loadPackStickers(m_activeTab);
+}
+
+void StickerHomePage::reloadActive()
+{
+    if (m_activeTab == QStringLiteral("__recent")) {
+        loadRecentStickers();
+    } else if (m_activeTab.isEmpty()) {
+        loadAllStickers();
     } else {
-        int packIdx = index - 2;
-        if (packIdx >= 0 && packIdx < m_packs.size()) {
-            m_activeTab = m_packs[packIdx].id;
-            loadPackStickers(m_activeTab);
-        }
+        loadPackStickers(m_activeTab);
     }
 }
 
@@ -407,7 +456,7 @@ void StickerHomePage::confirmDeleteSticker(const StickerBrief& brief)
                 showToast(QString::fromUtf8("已删除"));
                 for (auto* o : findChildren<StickerPreviewOverlay*>())
                     o->deleteLater();
-                onTabChanged(m_tabBar->currentIndex());
+                reloadActive();
             } else {
                 showToast(QString::fromUtf8("删除失败"));
             }

@@ -8,6 +8,7 @@
 
 class QskTextField;
 class QskTabBar;
+class QskComboBox;
 class QskPopup;
 class QskTextLabel;
 class StickerGridWidget;
@@ -25,6 +26,8 @@ protected:
 private:
     void refreshTabBar();
     void onTabChanged(int index);
+    void onPackComboChanged(int index);
+    void reloadActive();
     void loadAllStickers();
     void loadRecentStickers();
     void loadPackStickers(const QString& packId);
@@ -50,14 +53,17 @@ private:
     QskTextField* m_searchField = nullptr;
     QskTextLabel* m_countLabel = nullptr;
     QskTabBar* m_tabBar = nullptr;
+    QskComboBox* m_packCombo = nullptr;
     StickerGridWidget* m_grid = nullptr;
     bool m_keepScreenOn = true;
 
     QTimer m_searchDebounce;
     QVector<StickerPackBrief> m_packs;
+    QVector<StickerPackBrief> m_comboPacks;  // 与下拉项顺序一一对应（除「粘贴板」外）
+    QString m_pastePackId;                   // 识别到的「粘贴板」pack id，无则空
     StickerBrief m_ctxBrief;      // 长按的贴纸上下文
     StickerPackBrief m_ctxPack;   // 分组管理上下文
-    QString m_activeTab;          // "" = 全部, "__recent" = 最近, 否则 packId
+    QString m_activeTab;          // "" = 全部, "__recent" = 最近, 否则 packId（含粘贴板）
 };
 
 #endif // STICKER_HOME_PAGE_H
