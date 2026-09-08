@@ -241,6 +241,34 @@ void MyScrollArea::stopWheelAnim()
         m_wheelAnimLast = scrollPos().y();
 }
 
+// 平滑滚动到绝对目标 y：复用 m_wheelAnim 动画基建（自持、可打断、允许 retarget）。
+// 目标受内容总高与视口高裁剪；与滚轮动画共用同一动画，运行中再调用则重设目标。
+void MyScrollArea::scrollToY(qreal targetY, int durationMs)
+{
+    const qreal maxY = qMax<qreal>(0,
+        scrollableSize().height() - viewContentsRect().height());
+    const qreal to = qBound<qreal>(0, targetY, maxY);
+    const qreal from = scrollPos().y();
+    if (qFuzzyCompare(from, to))
+        return;
+
+    if (m_wheelAnim)
+        m_wheelAnim->stop();
+    m_wheelAnimActive = true;
+    m_wheelAnimFrom = from;
+    m_wheelAnimTo = to;
+    m_wheelAnimLast = from;
+    if (m_wheelAnim) {
+        m_wheelAnim->setDuration(durationMs);
+        m_wheelAnim->setStartValue(from);
+        m_wheelAnim->setEndValue(to);
+        m_wheelAnim->start();
+    } else {
+        setScrollPos(QPointF(scrollPos().x(), to));
+        m_wheelAnimActive = false;
+    }
+}
+
 // 模态弹层/预览覆盖检测：从本项的父项起逐层向上，扫描每一层里“非自身祖先链”的
 // 可见子项；若指针落在其几何内，判定该点被上层覆盖。可捕获 StickerPreviewOverlay、
 // MenuOverlay（挂在页面层的裸 QQuickItem）与 QskPopup 自动生成的 QskPopupOverlay。

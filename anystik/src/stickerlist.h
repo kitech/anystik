@@ -13,6 +13,7 @@
 
 class StickerTileItem;
 class QTimer;
+class QskPushButton;
 
 class StickerTileNode : public QskPaintedNode
 {
@@ -72,12 +73,16 @@ private:
     void clearTiles();
     int indexAt(const QPointF& contentPos) const;
     void relayoutContent();
+    void layoutScrollButtons();
 
     QQuickItem* m_contentView = nullptr;
     QVector<StickerBrief> m_items;
     QMap<int, StickerTileItem*> m_visibleTiles;
     int m_cols = 4;
     int m_rows = 0;
+
+    QskPushButton* m_toTopBtn = nullptr;
+    QskPushButton* m_toBottomBtn = nullptr;
 };
 
 #endif // STICKER_LIST_H

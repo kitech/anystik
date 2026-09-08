@@ -19,6 +19,9 @@ class MyScrollArea : public QskScrollArea
 public:
     explicit MyScrollArea(QQuickItem* parent = nullptr);
 
+    // 平滑滚动到目标 y 坐标（受最大滚动距离约束）
+    void scrollToY(qreal targetY, int durationMs = 400);
+
     // 上一次触摸事件的场景坐标（供外部获取长按时的触摸位置）
     QPointF lastTouchScenePos() const { return m_touchScenePos; }
 

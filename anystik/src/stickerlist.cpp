@@ -6,6 +6,9 @@
 #include <QTimer>
 #include <QtMath>
 #include <QskEvent.h>
+#include <QskPushButton.h>
+#include <QskBoxShapeMetrics.h>
+#include <QskBoxBorderMetrics.h>
 #include <private/qquicktaphandler_p.h>
 #include <private/qquicksinglepointhandler_p.h>
 #include <functional>
@@ -178,6 +181,22 @@ StickerGridWidget::StickerGridWidget(QQuickItem* parent)
     m_contentView = new QQuickItem(this);
     setScrolledItem(m_contentView);
 
+    // ── 滚动到顶部/底部浮动按钮（叠加在网格之上，不随内容滚动）──
+    m_toTopBtn = new QskPushButton(QStringLiteral("↑"), this);
+    m_toBottomBtn = new QskPushButton(QStringLiteral("↓"), this);
+    for (auto* btn : { m_toTopBtn, m_toBottomBtn }) {
+        btn->setZ(200);
+        btn->setBoxShapeHint(QskPushButton::Panel, QskBoxShapeMetrics(18, Qt::AbsoluteSize));
+        btn->setBoxBorderMetricsHint(QskPushButton::Panel, QskBoxBorderMetrics(1, Qt::AbsoluteSize));
+        btn->setGeometry(0, 0, 36, 36);
+    }
+    connect(m_toTopBtn, &QskPushButton::clicked, this, [this]() {
+        scrollToY(0);
+    });
+    connect(m_toBottomBtn, &QskPushButton::clicked, this, [this]() {
+        scrollToY(scrollableSize().height());
+    });
+
     // ── 单击：复制 ──
     auto* tapHandler = new QQuickTapHandler(m_contentView);
     tapHandler->setGesturePolicy(QQuickTapHandler::DragThreshold);
@@ -260,6 +279,7 @@ void StickerGridWidget::relayoutContent()
     m_contentView->setSize(QSizeF(viewW, m_rows * STEP));
     update();
     updateVisibleRows();
+    layoutScrollButtons();
 }
 
 void StickerGridWidget::updateVisibleRows()
@@ -331,6 +351,28 @@ void StickerGridWidget::geometryChangeEvent(QskGeometryChangeEvent* event)
     if (event->isResized() && m_contentView) {
         m_cols = qMax(1, int(viewContentsRect().width()) / int(STEP + 0.5));
         relayoutContent();
+    }
+    layoutScrollButtons();
+}
+
+void StickerGridWidget::layoutScrollButtons()
+{
+    if (!m_toTopBtn || !m_toBottomBtn)
+        return;
+
+    const qreal w = width();
+    const qreal h = height();
+    constexpr qreal MARGIN = 12;
+    constexpr qreal SPACING = 6;
+    constexpr qreal BTN = 36;
+
+    if (m_toTopBtn) {
+        m_toTopBtn->setGeometry(w - MARGIN - BTN, h - MARGIN - BTN * 2 - SPACING, BTN, BTN);
+        m_toTopBtn->setVisible(m_rows > 1);
+    }
+    if (m_toBottomBtn) {
+        m_toBottomBtn->setGeometry(w - MARGIN - BTN, h - MARGIN - BTN, BTN, BTN);
+        m_toBottomBtn->setVisible(m_rows > 1);
     }
 }
 
