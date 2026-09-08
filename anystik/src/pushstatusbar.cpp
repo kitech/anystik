@@ -40,11 +40,11 @@ void PushStatusBar::updateStatus()
 
     QString status;
     if (PushHandler::isConnected()) {
-        status = QStringLiteral("Push: %1 (已连接)").arg(backend);
+        status = tr("Push: %1 (已连接)").arg(backend);
     } else if (PushHandler::isRegistering()) {
-        status = QStringLiteral("Push: %1 (等待中)").arg(backend);
+        status = tr("Push: %1 (等待中)").arg(backend);
     } else {
-        status = QStringLiteral("Push: 未连接");
+        status = tr("Push: 未连接");
     }
 
     m_statusLabel->setText(status);

@@ -102,7 +102,7 @@ QImage StickerPreviewOverlay::renderContent() const
 
     painter.setPen(QColor(110, 190, 255));
     painter.drawText(QRectF(0, barY, rw * (1.0 / 3.0), ACTION_H),
-        Qt::AlignCenter, QString::fromUtf8("复制"));
+        Qt::AlignCenter, tr("复制"));
 
     if (!m_emoji.isEmpty()) {
         painter.drawText(QRectF(rw * (1.0 / 3.0), barY, rw * (1.0 / 3.0), ACTION_H),
@@ -111,7 +111,7 @@ QImage StickerPreviewOverlay::renderContent() const
 
     painter.setPen(QColor(230, 110, 110));
     painter.drawText(QRectF(rw * (2.0 / 3.0), barY, rw * (1.0 / 3.0), ACTION_H),
-        Qt::AlignCenter, QString::fromUtf8("删除"));
+        Qt::AlignCenter, tr("删除"));
 
     return img;
 }
@@ -290,7 +290,7 @@ void StickerPreviewOverlay::touchEvent(QTouchEvent* event)
         const QPointF lp = mapFromScene(event->points().first().scenePosition());
         if (metaRegionContains(lp)) {
             QGuiApplication::clipboard()->setText(m_metaText);
-            ToastPopup::show(this, QString::fromUtf8("已复制元信息"));
+            ToastPopup::show(this, tr("已复制元信息"));
             event->accept();
             return;
         }
@@ -306,7 +306,7 @@ void StickerPreviewOverlay::mousePressEvent(QMouseEvent* event)
     const QPointF lp = mapFromScene(event->scenePosition());
     if (metaRegionContains(lp)) {
         QGuiApplication::clipboard()->setText(m_metaText);
-        ToastPopup::show(this, QString::fromUtf8("已复制元信息"));
+        ToastPopup::show(this, tr("已复制元信息"));
         event->accept();
         return;
     }
@@ -358,8 +358,8 @@ void StickerPreviewOverlay::handlePress(const QPointF& scenePos)
         if (localPos.x() < w * (1.0 / 3.0)) {
             StickerStore::instance()->touchSticker(m_brief.id);
             bool ok = StickerStore::instance()->copyStickerToClipboard(m_brief.filePath);
-            ToastPopup::show(this, ok ? QString::fromUtf8("已复制到剪贴板")
-                                      : QString::fromUtf8("复制失败"));
+            ToastPopup::show(this, ok ? tr("已复制到剪贴板")
+                                      : tr("复制失败"));
         } else if (localPos.x() > w * (2.0 / 3.0)) {
             Q_EMIT deleteRequested(m_brief);
         }

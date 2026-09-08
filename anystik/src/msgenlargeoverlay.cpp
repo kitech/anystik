@@ -173,8 +173,8 @@ void MsgEnlargeOverlayNode::paint(QPainter* painter, const QSize& size, const vo
         painter->drawText(rect, Qt::AlignCenter, text);
     };
 
-    paintBtn(layout.copyBtn, QString::fromUtf8("复制"));
-    paintBtn(layout.favBtn, QString::fromUtf8("收藏"));
+    paintBtn(layout.copyBtn, tr("复制"));
+    paintBtn(layout.favBtn, tr("收藏"));
 
     // Size buttons
     for (int i = 0; i < 4; i++) {
@@ -389,10 +389,10 @@ void MsgEnlargeOverlay::handlePress(const QPointF& scenePos)
         return;
     case MsgEnlargeOverlayNode::BTN_COPY:
         QGuiApplication::clipboard()->setText(m_item.content);
-        ToastPopup::show(this, QString::fromUtf8("已复制"));
+        ToastPopup::show(this, tr("已复制"));
         return;
     case MsgEnlargeOverlayNode::BTN_FAV:
-        ToastPopup::show(this, QString::fromUtf8("收藏功能暂未实现"));
+        ToastPopup::show(this, tr("收藏功能暂未实现"));
         return;
     case MsgEnlargeOverlayNode::BTN_TEXT:
         return;

@@ -33,6 +33,7 @@ public:
     QskComboBox* skinCombo() const { return m_skinCombo; }
     QskSwitchButton* darkModeSwitch() const { return m_darkSwitch; }
     QskComboBox* fontScaleCombo() const { return m_fontScaleCombo; }
+    QskComboBox* langCombo() const { return m_langCombo; }
 
     static void changeFontScale(int delta);
     ~SettingsPage();
@@ -55,6 +56,7 @@ private:
     bool m_signalsConnected = false;
     int m_currentAnimatorIdx = 3;
     QskComboBox* m_transitionCombo = nullptr;
+    QskComboBox* m_langCombo = nullptr;
     QskComboBox* m_skinCombo = nullptr;
     QskSwitchButton* m_darkSwitch = nullptr;
     QskComboBox* m_fontScaleCombo = nullptr;

@@ -9,6 +9,11 @@ if [ ! -d "$QTDIR" ]; then
 fi
 export LD_LIBRARY_PATH=$QTDIR/lib
 
+# ── i18n：lrelease .ts → .qm（.qrc 引用的 qm 必须先于 configure 存在） ──
+( cd i18n && for f in anystik_en anystik_zh_CN anystik_zh_TW; do
+    "$QTDIR/bin/lrelease" "$f.ts" -qm "$f.qm"
+  done )
+
 # ── 编译 Go 共享库 (CGO_ENABLED=1) ──
 
 mkdir -p build-x64 && cd build-x64

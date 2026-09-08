@@ -181,7 +181,7 @@ SelectPopup::SelectPopup(const QString& title, const QStringList& items,
 
     if (canCancel)
     {
-        auto* cancel = new QskPushButton(QString::fromUtf8("取消"), m_layout);
+        auto* cancel = new QskPushButton(tr("取消"), m_layout);
         cancel->setBoxShapeHint(QskPushButton::Panel,
             QskBoxShapeMetrics(8, Qt::AbsoluteSize));
         connect(cancel, &QskPushButton::clicked, this,

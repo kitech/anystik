@@ -56,16 +56,16 @@ MigrationDialog::MigrationDialog(const QString& fromRoot, const QString& toRoot,
     m_layout->setSizePolicy(
         QskSizePolicy::MinimumExpanding, QskSizePolicy::Constrained);
 
-    m_titleLabel = new QskTextLabel(QString::fromUtf8("迁移存储位置"), m_layout);
+    m_titleLabel = new QskTextLabel(tr("迁移存储位置"), m_layout);
     m_titleLabel->setWrapMode(QskTextOptions::WordWrap);
     m_titleLabel->setAlignment(Qt::AlignCenter);
 
     m_fromLabel = new QskTextLabel(
-        QString::fromUtf8("从：") + fromRoot, m_layout);
+        tr("从：") + fromRoot, m_layout);
     m_fromLabel->setWrapMode(QskTextOptions::WordWrap);
 
     m_toLabel = new QskTextLabel(
-        QString::fromUtf8("到：") + toRoot, m_layout);
+        tr("到：") + toRoot, m_layout);
     m_toLabel->setWrapMode(QskTextOptions::WordWrap);
 
     // 进度按「文件数」计算（done/total）；字节数另行列示、不参与进度
@@ -73,15 +73,15 @@ MigrationDialog::MigrationDialog(const QString& fromRoot, const QString& toRoot,
     m_progress->setMaximum(1.0);
     m_progress->setValue(0.0);
 
-    m_bytesLabel = new QskTextLabel(QString::fromUtf8("已拷贝：0 字节"), m_layout);
+    m_bytesLabel = new QskTextLabel(tr("已拷贝：0 字节"), m_layout);
     m_bytesLabel->setWrapMode(QskTextOptions::WordWrap);
     m_bytesLabel->setAlignment(Qt::AlignCenter);
 
     auto* buttons = new QskLinearBox(Qt::Horizontal, m_layout);
     buttons->setSpacing(14);
 
-    m_pauseButton = new QskPushButton(QString::fromUtf8("暂停"), buttons);
-    m_cancelButton = new QskPushButton(QString::fromUtf8("取消"), buttons);
+    m_pauseButton = new QskPushButton(tr("暂停"), buttons);
+    m_cancelButton = new QskPushButton(tr("取消"), buttons);
     m_pauseButton->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     m_cancelButton->setBoxShapeHint(QskPushButton::Panel,
@@ -144,7 +144,7 @@ void MigrationDialog::onProgress(int done, int total, qint64 copiedBytes,
 
     const double mb = double(copiedBytes) / (1024.0 * 1024.0);
     m_bytesLabel->setText(
-        QString::fromUtf8("已拷贝：%1 MB (%2 实际拷贝 / %3 跳过)")
+        tr("已拷贝：%1 MB (%2 实际拷贝 / %3 跳过)")
             .arg(mb, 0, 'f', 1)
             .arg(copiedFiles).arg(skippedFiles));
 }
@@ -155,8 +155,8 @@ void MigrationDialog::onFinished(bool ok, const QString& detail)
     const qint64 ms = m_timer.elapsed();
     const double sec = double(ms) / 1000.0;
     const QString dur = (ms < 1000)
-        ? QString::number(ms) + QStringLiteral(" 毫秒")
-        : QString::number(sec, 'f', 1) + QStringLiteral(" 秒");
+        ? QString::number(ms) + tr(" 毫秒")
+        : QString::number(sec, 'f', 1) + tr(" 秒");
 
     const double mb = double(m_lastBytes) / (1024.0 * 1024.0);
     const QString files = (m_lastTotal > 0 && m_lastDone != m_lastTotal)
@@ -175,9 +175,9 @@ void MigrationDialog::onFinished(bool ok, const QString& detail)
 
     // 无论成败都弹 toast（Android 走原生系统 toast）
     const QString text = ok
-        ? QString::fromUtf8("迁移完成：拷贝 %1 个（%2 MB），跳过 %3 个，用时 %4")
+        ? tr("迁移完成：拷贝 %1 个（%2 MB），跳过 %3 个，用时 %4")
               .arg(m_lastCopied).arg(mb, 0, 'f', 1).arg(m_lastSkipped).arg(dur)
-        : QString::fromUtf8("迁移失败：已迁移 %1 个，用时 %2；%3")
+        : tr("迁移失败：已迁移 %1 个，用时 %2；%3")
               .arg(files).arg(dur).arg(detail);
     ToastPopup::show(parentItem(), text);
 

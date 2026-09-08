@@ -11,6 +11,11 @@ QT_HOST=/opt/qt/6.7.3/gcc_64
 BUILD_DIR=build-android
 # rm -rf "$BUILD_DIR"  # 保留 cmake 缓存以支持增量编译
 
+# ── i18n：lrelease .ts → .qm（.qrc 引用的 qm 必须先于 configure 存在） ──
+( cd i18n && for f in anystik_en anystik_zh_CN anystik_zh_TW; do
+    "$QT_HOST/bin/lrelease" "$f.ts" -qm "$f.qm"
+  done )
+
 # 1. cmake configure via qt-cmake
 "$QT_ANDROID/bin/qt-cmake" -S . -B "$BUILD_DIR" \
     -DANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" \

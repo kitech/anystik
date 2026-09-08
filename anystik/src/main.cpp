@@ -28,6 +28,7 @@
 #include "loginpage.h"
 #include "settingspage.h"
 #include "aboutpage.h"
+#include "myi18n.h"
 #include "logpage.h"
 #include "keepalive.h"
 #include "networkmonitor.h"
@@ -155,6 +156,9 @@ int main(int argc, char* argv[]) {
 
     // 预告填入：把内置源 approxSize(含 -1) 一次性写入 dlProgress 元数据（零网络）
     StickerStore::instance()->seedBuiltinApproxSizes();
+
+    // ── i18n：按保存/系统语言安装翻译，重译分发由 Lang 单例负责 ──
+    Lang::instance();
 
 #ifdef Q_OS_ANDROID
     // C：启动即打印 TLS 后端实际状态
@@ -413,7 +417,7 @@ int main(int argc, char* argv[]) {
             }
             auto* contentItem = window.contentItem();
             if (!contentItem) return;
-            SelectPopup::show(contentItem, QString::fromUtf8("选择推送服务"),
+            SelectPopup::show(contentItem, T("Main", "选择推送服务"),
                 displayNames,
                 [distributors, displayNames](const QString& selected) {
                     if (!selected.isEmpty()) {
@@ -431,16 +435,16 @@ int main(int argc, char* argv[]) {
         [](const QString& reason) {
             QString toastMsg;
             if (reason.contains(QString::fromUtf8("未安装")) || reason.contains("not installed")) {
-                toastMsg = QString::fromUtf8("⚠️ %1\n请安装后重新打开应用").arg(reason);
+                toastMsg = T("Main", "⚠️ %1\n请安装后重新打开应用").arg(reason);
             } else if (reason.contains(QString::fromUtf8("未找到")) || reason.contains("no distributor")
                        || reason.contains("getDistributors")) {
-                toastMsg = QString::fromUtf8("⚠️ 未检测到推送服务\n请安装 ntfy (UnifiedPush) 后重试");
+                toastMsg = T("Main", "⚠️ 未检测到推送服务\n请安装 ntfy (UnifiedPush) 后重试");
             } else if (reason.contains(QString::fromUtf8("超时"))) {
-                toastMsg = QString::fromUtf8("⚠️ %1\n请打开 ntfy 后重试").arg(reason);
+                toastMsg = T("Main", "⚠️ %1\n请打开 ntfy 后重试").arg(reason);
             } else if (reason.contains(QString::fromUtf8("启动失败")) || reason.contains("FAILED")) {
-                toastMsg = QString::fromUtf8("⚠️ 推送服务启动失败\n请检查 ntfy 是否在后台运行");
+                toastMsg = T("Main", "⚠️ 推送服务启动失败\n请检查 ntfy 是否在后台运行");
             } else {
-                toastMsg = QString::fromUtf8("⚠️ Push 注册失败: %1").arg(reason);
+                toastMsg = T("Main", "⚠️ Push 注册失败: %1").arg(reason);
             }
             showAndroidToast(toastMsg);
         });
@@ -457,7 +461,7 @@ int main(int argc, char* argv[]) {
             QString preview = QString::fromUtf8(message).left(200);
             qDebug() << "[PushHandler] push received, size:" << message.size()
                      << "content:" << preview;
-            showAndroidToast(QStringLiteral("推送: %1").arg(preview));
+            showAndroidToast(T("Main", "推送: %1").arg(preview));
         });
 
     // 触发注册流程

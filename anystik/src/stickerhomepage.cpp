@@ -109,18 +109,18 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     topBar->setPreferredHeight(56);
     topBar->setSpacing(8);
 
-    auto* title = new QskTextLabel(QString::fromUtf8("表情包"), topBar);
+    auto* title = new QskTextLabel(tr("表情包"), topBar);
     title->setAlignment(Qt::AlignCenter);
     title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
 
-    auto* pasteBtn = new QskPushButton(QString::fromUtf8("粘贴"), topBar);
+    auto* pasteBtn = new QskPushButton(tr("粘贴"), topBar);
     pasteBtn->setPreferredWidth(68);
     pasteBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     connect(pasteBtn, &QskAbstractButton::clicked,
         this, &StickerHomePage::requestPasteSticker);
 
-    auto* importBtn = new QskPushButton(QString::fromUtf8("导入"), topBar);
+    auto* importBtn = new QskPushButton(tr("导入"), topBar);
     importBtn->setPreferredWidth(68);
     importBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
@@ -144,13 +144,13 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     searchRow->setSpacing(8);
 
     m_searchField = new QskTextField(searchRow);
-    m_searchField->setPlaceholderText(QString::fromUtf8("搜索贴纸 / emoji..."));
+    m_searchField->setPlaceholderText(tr("搜索贴纸 / emoji..."));
     m_searchField->setPreferredHeight(44);
     m_searchField->setBoxShapeHint(QskTextField::Panel,
         QskBoxShapeMetrics(10, Qt::AbsoluteSize));
     m_searchField->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
 
-    m_countLabel = new QskTextLabel(QStringLiteral("0 个"), searchRow);
+    m_countLabel = new QskTextLabel(tr("0 个"), searchRow);
     m_countLabel->setPreferredWidth(72);
     m_countLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
 
@@ -178,7 +178,7 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     m_packCombo = new QskComboBox(tabBarBox);
     m_packCombo->setPreferredWidth(150);
     m_packCombo->setSizePolicy(QskSizePolicy::Preferred, QskSizePolicy::Expanding);
-    m_packCombo->setPlaceholderText(QString::fromUtf8("更多分组…"));
+    m_packCombo->setPlaceholderText(tr("更多分组…"));
     connect(m_packCombo, &QskComboBox::currentIndexChanged,
         this, &StickerHomePage::onPackComboChanged);
     // QskComboBox 弹菜单偶发失败对策（见 QskComboBox.cpp）：
@@ -206,9 +206,9 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
             StickerStore::instance()->touchSticker(brief.id);
             bool ok = StickerStore::instance()->copyStickerToClipboard(brief.filePath);
             showToast(ok
-                ? QString::fromUtf8("已复制到剪贴板 index=%1 size=%2 mime=%3")
+                ? tr("已复制到剪贴板 index=%1 size=%2 mime=%3")
                       .arg(index).arg(size).arg(mime)
-                : QString::fromUtf8("复制失败 index=%1 size=%2 mime=%3")
+                : tr("复制失败 index=%1 size=%2 mime=%3")
                       .arg(index).arg(size).arg(mime));
         });
 
@@ -249,10 +249,10 @@ void StickerHomePage::refreshTabBar()
     // 固定 tabs：全部 / 最近 / 粘贴板（存在时）
     const int current = m_tabBar->currentIndex();
     m_tabBar->clear(true);
-    m_tabBar->addTab(QString::fromUtf8("全部"));
-    m_tabBar->addTab(QString::fromUtf8("最近"));
+    m_tabBar->addTab(tr("全部"));
+    m_tabBar->addTab(tr("最近"));
     if (!m_pastePackId.isEmpty()) {
-        m_tabBar->addTab(QString::fromUtf8("粘贴板"));
+        m_tabBar->addTab(tr("粘贴板"));
     }
     m_tabBar->setCurrentIndex(qMin(current, m_tabBar->count() - 1));
 
@@ -360,7 +360,7 @@ void StickerHomePage::updateStickerCount()
     if (!m_countLabel || !m_grid)
         return;
     const int n = m_grid->stickers().size();
-    m_countLabel->setText(QStringLiteral("%1 个").arg(n));
+    m_countLabel->setText(tr("%1 个").arg(n));
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -380,15 +380,15 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
     auto* menu = new QskMenu(this);
     menu->setModal(true);
     menu->setPopupFlag(QskPopup::DeleteOnClose, false);
-    const int idxCopy = menu->addOption(QskLabelData(QString::fromUtf8("复制")));
-    const int idxCopy01 = menu->addOption(QskLabelData(QString::fromUtf8("复制x0.1")));
-    const int idxCopy025 = menu->addOption(QskLabelData(QString::fromUtf8("复制x0.25")));
-    const int idxCopy05 = menu->addOption(QskLabelData(QString::fromUtf8("复制x0.5")));
-    const int idxCopy20 = menu->addOption(QskLabelData(QString::fromUtf8("复制x2.0")));
-    const int idxPreview = menu->addOption(QskLabelData(QString::fromUtf8("预览")));
-    const int idxCopyMeta = menu->addOption(QskLabelData(QString::fromUtf8("复制元信息")));
-    const int idxShare = menu->addOption(QskLabelData(QString::fromUtf8("分享")));
-    const int idxDelete = menu->addOption(QskLabelData(QString::fromUtf8("删除")));
+    const int idxCopy = menu->addOption(QskLabelData(tr("复制")));
+    const int idxCopy01 = menu->addOption(QskLabelData(tr("复制x0.1")));
+    const int idxCopy025 = menu->addOption(QskLabelData(tr("复制x0.25")));
+    const int idxCopy05 = menu->addOption(QskLabelData(tr("复制x0.5")));
+    const int idxCopy20 = menu->addOption(QskLabelData(tr("复制x2.0")));
+    const int idxPreview = menu->addOption(QskLabelData(tr("预览")));
+    const int idxCopyMeta = menu->addOption(QskLabelData(tr("复制元信息")));
+    const int idxShare = menu->addOption(QskLabelData(tr("分享")));
+    const int idxDelete = menu->addOption(QskLabelData(tr("删除")));
 
     // 菜单无边界翻转逻辑（QskMenu.cpp 仅 setPosition(origin)）——origin 靠近
     // 视图底部时剩余高度不足，菜单会被窗口裁剪。按实际尺寸向上翻转并钳制顶部。
@@ -430,38 +430,38 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
         if (index == idxCopy) {
             StickerStore::instance()->touchSticker(m_ctxBrief.id);
             bool ok = StickerStore::instance()->copyStickerToClipboard(m_ctxBrief.filePath);
-            showToast(ok ? QString::fromUtf8("已复制")
-                         : QString::fromUtf8("复制失败"));
+            showToast(ok ? tr("已复制")
+                         : tr("复制失败"));
         } else if (index == idxCopy01) {
             StickerStore::instance()->touchSticker(m_ctxBrief.id);
             bool ok = StickerStore::instance()->copyStickerScaledToClipboard(m_ctxBrief.filePath, 0.1);
-            showToast(ok ? QString::fromUtf8("已复制x0.1")
-                         : QString::fromUtf8("复制失败"));
+            showToast(ok ? tr("已复制x0.1")
+                         : tr("复制失败"));
         } else if (index == idxCopy025) {
             StickerStore::instance()->touchSticker(m_ctxBrief.id);
             bool ok = StickerStore::instance()->copyStickerScaledToClipboard(m_ctxBrief.filePath, 0.25);
-            showToast(ok ? QString::fromUtf8("已复制x0.25")
-                         : QString::fromUtf8("复制失败"));
+            showToast(ok ? tr("已复制x0.25")
+                         : tr("复制失败"));
         } else if (index == idxCopy05) {
             StickerStore::instance()->touchSticker(m_ctxBrief.id);
             bool ok = StickerStore::instance()->copyStickerScaledToClipboard(m_ctxBrief.filePath, 0.5);
-            showToast(ok ? QString::fromUtf8("已复制x0.5")
-                         : QString::fromUtf8("复制失败"));
+            showToast(ok ? tr("已复制x0.5")
+                         : tr("复制失败"));
         } else if (index == idxCopy20) {
             StickerStore::instance()->touchSticker(m_ctxBrief.id);
             bool ok = StickerStore::instance()->copyStickerScaledToClipboard(m_ctxBrief.filePath, 2.0);
-            showToast(ok ? QString::fromUtf8("已复制x2.0")
-                         : QString::fromUtf8("复制失败"));
+            showToast(ok ? tr("已复制x2.0")
+                         : tr("复制失败"));
         } else if (index == idxPreview) {
             openPreview(m_ctxBrief);
         } else if (index == idxCopyMeta) {
             const StickerMeta meta =
                 StickerStore::instance()->stickerMeta(m_ctxBrief.filePath);
             QGuiApplication::clipboard()->setText(formatStickerMeta(meta));
-            showToast(QString::fromUtf8("已复制元信息"));
+            showToast(tr("已复制元信息"));
         } else if (index == idxShare) {
             if (!StickerStore::instance()->shareStickerFile(m_ctxBrief.filePath)) {
-                showToast(QString::fromUtf8("桌面暂不支持分享"));
+                showToast(tr("桌面暂不支持分享"));
             }
         } else if (index == idxDelete) {
             const StickerBrief brief = m_ctxBrief;
@@ -502,20 +502,20 @@ void StickerHomePage::openPreview(const StickerBrief& brief)
 // 通用删除（软删除：DB 置 deleted=1，文件保留）——网格长按菜单与预览页共用
 void StickerHomePage::confirmDeleteSticker(const StickerBrief& brief)
 {
-    ConfirmPopup::show(this, QString::fromUtf8("删除贴纸"),
-        QString::fromUtf8("确定删除这张贴纸？"),
-        QString::fromUtf8("删除"), QString::fromUtf8("取消"),
+    ConfirmPopup::show(this, tr("删除贴纸"),
+        tr("确定删除这张贴纸？"),
+        tr("删除"), tr("取消"),
         [this, brief](bool accepted) {
             if (!accepted) {
                 return;
             }
             if (StickerStore::instance()->deleteSticker(brief.id)) {
-                showToast(QString::fromUtf8("已删除"));
+                showToast(tr("已删除"));
                 for (auto* o : findChildren<StickerPreviewOverlay*>())
                     o->deleteLater();
                 reloadActive();
             } else {
-                showToast(QString::fromUtf8("删除失败"));
+                showToast(tr("删除失败"));
             }
         });
 }
@@ -540,22 +540,22 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
     int idxPaste = 2;
     int idxOpenFolder = 3;
     int idxManage = -1;
-    menu->addOption(QskLabelData(QString::fromUtf8("导入表情包文件夹")));
-    menu->addOption(QskLabelData(QString::fromUtf8("表情包目录")));
-    menu->addOption(QskLabelData(QString::fromUtf8("粘贴添加")));
-    menu->addOption(QskLabelData(QString::fromUtf8("打开目录")));
+    menu->addOption(QskLabelData(tr("导入表情包文件夹")));
+    menu->addOption(QskLabelData(tr("表情包目录")));
+    menu->addOption(QskLabelData(tr("粘贴添加")));
+    menu->addOption(QskLabelData(tr("打开目录")));
     if (!m_packs.isEmpty()) {
         idxManage = 4;
-        menu->addOption(QskLabelData(QString::fromUtf8("分组管理")));
+        menu->addOption(QskLabelData(tr("分组管理")));
     }
     menu->addSeparator();
-    const int idxLog = menu->addOption(QskLabelData(QString::fromUtf8("App Log")));
-    const int idxSettings = menu->addOption(QskLabelData(QString::fromUtf8("Settings")));
-    const int idxAbout = menu->addOption(QskLabelData(QString::fromUtf8("About")));
+    const int idxLog = menu->addOption(QskLabelData(tr("App Log")));
+    const int idxSettings = menu->addOption(QskLabelData(tr("Settings")));
+    const int idxAbout = menu->addOption(QskLabelData(tr("About")));
     menu->addSeparator();
     const int idxKeep = menu->addOption(QskLabelData(
-        m_keepScreenOn ? QString::fromUtf8("✓ Keep Screen On")
-                       : QString("  Keep Screen On")));
+        m_keepScreenOn ? tr("✓ Keep Screen On")
+                       : tr("  Keep Screen On")));
     menu->setOrigin(origin);
 
     connect(menu, &QskMenu::triggered, this, [this, idxBundled, idxImport, idxPaste, idxOpenFolder,
@@ -602,7 +602,7 @@ void StickerHomePage::showPackManageMenu()
         names.append(pack.title);
     }
 
-    SelectPopup::show(this, QString::fromUtf8("选择分组"), names,
+    SelectPopup::show(this, tr("选择分组"), names,
         [this, names](const QString& selected) {
             if (selected.isEmpty()) {
                 return;
@@ -616,8 +616,8 @@ void StickerHomePage::showPackManageMenu()
             auto* menu = new QskMenu(this);
             menu->setModal(true);
             menu->setPopupFlag(QskPopup::DeleteOnClose, false);
-            menu->addOption(QskLabelData(QString::fromUtf8("重命名")));
-            menu->addOption(QskLabelData(QString::fromUtf8("删除分组")));
+            menu->addOption(QskLabelData(tr("重命名")));
+            menu->addOption(QskLabelData(tr("删除分组")));
             const QPointF center(this->width() / 2, this->height() / 2);
             menu->setOrigin(center);
 
@@ -652,11 +652,11 @@ void StickerHomePage::showRenameDialog(const StickerPackBrief& pack)
     box->setPreferredHeight(150);
     box->setSpacing(10);
 
-    auto* label = new QskTextLabel(QString::fromUtf8("重命名分组"), box);
+    auto* label = new QskTextLabel(tr("重命名分组"), box);
     label->setAlignment(Qt::AlignCenter);
 
     auto* field = new QskTextField(pack.title, box);
-    field->setPlaceholderText(QString::fromUtf8("分组名称"));
+    field->setPlaceholderText(tr("分组名称"));
     field->setPreferredWidth(240);
     field->setBoxShapeHint(QskTextField::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
@@ -664,19 +664,19 @@ void StickerHomePage::showRenameDialog(const StickerPackBrief& pack)
     auto* btnBox = new QskLinearBox(Qt::Horizontal, box);
     btnBox->setSpacing(10);
 
-    auto* cancelBtn = new QskPushButton(QString::fromUtf8("取消"), btnBox);
+    auto* cancelBtn = new QskPushButton(tr("取消"), btnBox);
     cancelBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     connect(cancelBtn, &QskAbstractButton::clicked, popup, &QskPopup::close);
 
-    auto* okBtn = new QskPushButton(QString::fromUtf8("确定"), btnBox);
+    auto* okBtn = new QskPushButton(tr("确定"), btnBox);
     okBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     connect(okBtn, &QskAbstractButton::clicked, popup, [this, field, popup]() {
         if (StickerStore::instance()->renamePack(m_ctxPack.id, field->text())) {
-            showToast(QString::fromUtf8("已重命名"));
+            showToast(tr("已重命名"));
         } else {
-            showToast(QString::fromUtf8("重命名失败"));
+            showToast(tr("重命名失败"));
         }
         popup->close();
     });
@@ -689,13 +689,13 @@ void StickerHomePage::showRenameDialog(const StickerPackBrief& pack)
 
 void StickerHomePage::removePack(const StickerPackBrief& pack)
 {
-    ConfirmPopup::show(this, QString::fromUtf8("删除分组"),
-        QString::fromUtf8("确定删除「%1」及其全部贴纸？\n文件不会被删除。").arg(pack.title),
-        QString::fromUtf8("删除"), QString::fromUtf8("取消"),
+    ConfirmPopup::show(this, tr("删除分组"),
+        tr("确定删除「%1」及其全部贴纸？\n文件不会被删除。").arg(pack.title),
+        tr("删除"), tr("取消"),
         [this, pack](bool accepted) {
             if (accepted) {
                 if (StickerStore::instance()->deletePack(pack.id)) {
-                    showToast(QString::fromUtf8("已删除分组"));
+                    showToast(tr("已删除分组"));
                 }
             }
         });
@@ -708,7 +708,7 @@ void StickerHomePage::removePack(const StickerPackBrief& pack)
 void StickerHomePage::requestImportFolder()
 {
 #ifdef Q_OS_ANDROID
-    showToast(QString::fromUtf8("Android 请通过「分享到 anystik」导入图片"));
+    showToast(tr("Android 请通过「分享到 anystik」导入图片"));
 #else
     showDirPicker();
 #endif
@@ -718,9 +718,9 @@ void StickerHomePage::requestPasteSticker()
 {
     QString err;
     if (StickerStore::instance()->pasteFromClipboard(&err)) {
-        showToast(QString::fromUtf8("已粘贴到「粘贴板」"));
+        showToast(tr("已粘贴到「粘贴板」"));
     } else {
-        showToast(err.isEmpty() ? QString::fromUtf8("粘贴失败") : err);
+        showToast(err.isEmpty() ? tr("粘贴失败") : err);
     }
 }
 
@@ -747,15 +747,15 @@ void StickerHomePage::showDirPicker()
     auto* btnBox = new QskLinearBox(Qt::Horizontal, box);
     btnBox->setSpacing(10);
 
-    auto* upBtn = new QskPushButton(QString::fromUtf8("↑ 上级"), btnBox);
+    auto* upBtn = new QskPushButton(tr("↑ 上级"), btnBox);
     upBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
 
-    auto* cancelBtn = new QskPushButton(QString::fromUtf8("取消"), btnBox);
+    auto* cancelBtn = new QskPushButton(tr("取消"), btnBox);
     cancelBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
 
-    auto* okBtn = new QskPushButton(QString::fromUtf8("导入此目录"), btnBox);
+    auto* okBtn = new QskPushButton(tr("导入此目录"), btnBox);
     okBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     okBtn->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
@@ -799,9 +799,9 @@ void StickerHomePage::showDirPicker()
             QString err;
             if (StickerStore::instance()->importDirectory(
                     currentDir->absolutePath(), &err)) {
-                showToast(QString::fromUtf8("导入成功"));
+                showToast(tr("导入成功"));
             } else {
-                showToast(err.isEmpty() ? QString::fromUtf8("导入失败")
+                showToast(err.isEmpty() ? tr("导入失败")
                                         : err);
             }
             picker->close();
@@ -827,13 +827,13 @@ void StickerHomePage::openStickerFolder()
 {
     const QString baseDir = StickerStore::instance()->currentStickerBaseDir();
     if (baseDir.isEmpty()) {
-        showToast(QString::fromUtf8("无法获取目录路径"));
+        showToast(tr("无法获取目录路径"));
         return;
     }
 
 #ifdef Q_OS_ANDROID
     if (!jOpenDir(baseDir))
-        showToast(QString::fromUtf8("无法打开贴纸目录"));
+        showToast(tr("无法打开贴纸目录"));
 #else
     QDesktopServices::openUrl(QUrl::fromLocalFile(baseDir));
 #endif

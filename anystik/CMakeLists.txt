@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Quick Network Concurrent)
+find_package(QT NAMES Qt6 REQUIRED COMPONENTS LinguistTools)
 find_package(QSkinny REQUIRED)
 
 if(ANDROID)
@@ -80,6 +81,8 @@ qt_add_executable(anystik
     src/migrationdialog.cpp
     src/toastpopup.h
     src/toastpopup.cpp
+    src/myi18n.h
+    src/myi18n.cpp
     src/davobfus.h
     src/davobfus.cpp
     ${qlapp_dir}/cJSON.c
@@ -213,3 +216,6 @@ elseif(UNIX)
     find_package(SQLite3 REQUIRED)
     target_link_libraries(anystik PRIVATE SQLite::SQLite3)
 endif()
+
+# ── i18n：.qm 经 .qrc 内嵌（先跑 build 脚本里的 lrelease） ──
+qt6_add_resources(anystik "i18n/anystik.qrc")
