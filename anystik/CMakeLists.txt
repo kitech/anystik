@@ -218,4 +218,5 @@ elseif(UNIX)
 endif()
 
 # ── i18n：.qm 经 .qrc 内嵌（先跑 build 脚本里的 lrelease） ──
-qt6_add_resources(anystik "i18n/anystik.qrc")
+qt6_add_resources(anystik_resources "i18n/anystik.qrc")
+target_sources(anystik PRIVATE ${anystik_resources})
