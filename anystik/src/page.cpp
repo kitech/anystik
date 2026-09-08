@@ -3,10 +3,12 @@
 Page::Page(QQuickItem* parent)
     : QskControl(parent)
 {
+    Lang::instance().registerRetranslatable(this);
 }
 
 Page::~Page()
 {
+    Lang::instance().unregister(this);
 }
 
 void Page::onCreate(const QVariantMap&, const QVariantMap&) {}

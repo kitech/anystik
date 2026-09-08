@@ -5,6 +5,7 @@
 #include <QVariantMap>
 #include <QString>
 #include <memory>
+#include "myi18n.h"
 
 // ── 页的生命周期状态，与 Android Activity/Fragment 对应 ──
 // None:    初始状态，onCreate 尚未调用
@@ -62,6 +63,7 @@ public:
     // 参数说明:
     //   launchArgs: open() 时传入的参数（类比 Intent extras）
     //   savedState: 进程死亡恢复时，QSettings 中保存的之前的状态
+    Q_INVOKABLE virtual void retranslateUi() {}  // 语言切换时由 Lang 广播调用（默认空实现）
     virtual void onCreate(const QVariantMap& launchArgs,
                           const QVariantMap& savedState);
     virtual void onStart();

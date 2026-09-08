@@ -21,10 +21,12 @@ class BundledPacksPage : public Page
     Q_OBJECT
 public:
     BundledPacksPage(QQuickItem* parent = nullptr);
+    Q_INVOKABLE void retranslateUi() override;
 
 private:
     struct SourceRow {
         QString url;
+        QskPushButton* preview = nullptr;
         QskTextLabel* status = nullptr;
         QskPushButton* fetch = nullptr;
         QskPushButton* dl = nullptr;
@@ -36,6 +38,7 @@ private:
     void buildBody();
     void addSourceRow(QskLinearBox* body, const QString& name, const QString& url,
                       const QString& previewUrl);
+    void refreshSourceTexts();
     void rebuildDownloaded();
     void addPackRow(QskLinearBox* list, const StickerPackBrief& pack, bool installed);
     void refreshButtons(const SourceRow& row);
@@ -53,6 +56,9 @@ private:
     QskLinearBox* m_downloadedBox = nullptr;
     QHash<QString, SourceRow> m_rows;
     QString m_busyUrl;   // 正在下载的 url（并发门闩，仅允许同时下载一个）
+    QskTextLabel* m_title = nullptr;
+    QskTextLabel* m_aTitle = nullptr;
+    QskTextLabel* m_bTitle = nullptr;
 };
 
 #endif

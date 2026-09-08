@@ -109,22 +109,22 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     topBar->setPreferredHeight(56);
     topBar->setSpacing(8);
 
-    auto* title = new QskTextLabel(tr("表情包"), topBar);
-    title->setAlignment(Qt::AlignCenter);
-    title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_title = new QskTextLabel(tr("表情包"), topBar);
+    m_title->setAlignment(Qt::AlignCenter);
+    m_title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
 
-    auto* pasteBtn = new QskPushButton(tr("粘贴"), topBar);
-    pasteBtn->setPreferredWidth(68);
-    pasteBtn->setBoxShapeHint(QskPushButton::Panel,
+    m_pasteBtn = new QskPushButton(tr("粘贴"), topBar);
+    m_pasteBtn->setPreferredWidth(68);
+    m_pasteBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
-    connect(pasteBtn, &QskAbstractButton::clicked,
+    connect(m_pasteBtn, &QskAbstractButton::clicked,
         this, &StickerHomePage::requestPasteSticker);
 
-    auto* importBtn = new QskPushButton(tr("导入"), topBar);
-    importBtn->setPreferredWidth(68);
-    importBtn->setBoxShapeHint(QskPushButton::Panel,
+    m_importBtn = new QskPushButton(tr("导入"), topBar);
+    m_importBtn->setPreferredWidth(68);
+    m_importBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
-    connect(importBtn, &QskAbstractButton::clicked,
+    connect(m_importBtn, &QskAbstractButton::clicked,
         this, &StickerHomePage::requestImportFolder);
 
     auto* moreBtn = new QskPushButton(QString::fromUtf8("⋯"), topBar);
@@ -230,6 +230,20 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
 // ═══════════════════════════════════════════════════════════════════
 // 数据加载与 Tab 切换
 // ═══════════════════════════════════════════════════════════════════
+
+void StickerHomePage::retranslateUi()
+{
+    if (!m_title)
+        return;
+
+    m_title->setText(tr("表情包"));
+    m_pasteBtn->setText(tr("粘贴"));
+    m_importBtn->setText(tr("导入"));
+    m_searchField->setPlaceholderText(tr("搜索贴纸 / emoji..."));
+    m_packCombo->setPlaceholderText(tr("更多分组…"));
+    refreshTabBar();
+    updateStickerCount();
+}
 
 void StickerHomePage::refreshTabBar()
 {

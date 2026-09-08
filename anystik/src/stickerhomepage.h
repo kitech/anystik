@@ -11,6 +11,7 @@ class QskTabBar;
 class QskComboBox;
 class QskPopup;
 class QskTextLabel;
+class QskPushButton;
 class StickerGridWidget;
 
 class StickerHomePage : public Page
@@ -24,6 +25,7 @@ protected:
                   const QVariantMap& savedState) override;
 
 private:
+    Q_INVOKABLE void retranslateUi() override;
     void refreshTabBar();
     void onTabChanged(int index);
     void onPackComboChanged(int index);
@@ -52,6 +54,9 @@ private:
 
     QskTextField* m_searchField = nullptr;
     QskTextLabel* m_countLabel = nullptr;
+    QskTextLabel* m_title = nullptr;
+    QskPushButton* m_pasteBtn = nullptr;
+    QskPushButton* m_importBtn = nullptr;
     QskTabBar* m_tabBar = nullptr;
     QskComboBox* m_packCombo = nullptr;
     StickerGridWidget* m_grid = nullptr;

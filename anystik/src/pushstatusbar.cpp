@@ -6,6 +6,8 @@
 PushStatusBar::PushStatusBar(QQuickItem* parent)
     : QskLinearBox(Qt::Horizontal, parent)
 {
+    Lang::instance().registerRetranslatable(this);
+
     setPreferredHeight(28);
     setPanel(true);
     setSpacing(4);
@@ -24,6 +26,16 @@ PushStatusBar::PushStatusBar(QQuickItem* parent)
     }
     updateStatus();
 #endif
+}
+
+PushStatusBar::~PushStatusBar()
+{
+    Lang::instance().unregister(this);
+}
+
+void PushStatusBar::retranslateUi()
+{
+    updateStatus();
 }
 
 void PushStatusBar::updateStatus()

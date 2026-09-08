@@ -61,9 +61,9 @@ void BundledPacksPage::buildBody()
     back->setPreferredSize(44, 44);
     connect(back, &QskPushButton::clicked, this, [this]() { finish(); });
 
-    auto* title = new QskTextLabel(tr("表情包目录"), topBar);
-    title->setAlignment(Qt::AlignCenter);
-    title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_title = new QskTextLabel(tr("表情包目录"), topBar);
+    m_title->setAlignment(Qt::AlignCenter);
+    m_title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
     topBar->addSpacer(44, 0); // 与返回键对称
 
     // ── 滚动主体 ──
@@ -78,14 +78,14 @@ void BundledPacksPage::buildBody()
     m_scroll->setScrolledItem(m_body);
 
     // ── A 区：已下载 ──
-    auto* aTitle = new QskTextLabel(tr("已下载"), m_body);
-    aTitle->setFontRole(QskFontRole::Title);
+    m_aTitle = new QskTextLabel(tr("已下载"), m_body);
+    m_aTitle->setFontRole(QskFontRole::Title);
     m_downloadedBox = new QskLinearBox(Qt::Vertical, m_body);
     m_downloadedBox->setSpacing(8);
 
     // ── B 区：下载源 ──
-    auto* bTitle = new QskTextLabel(tr("下载源"), m_body);
-    bTitle->setFontRole(QskFontRole::Title);
+    m_bTitle = new QskTextLabel(tr("下载源"), m_body);
+    m_bTitle->setFontRole(QskFontRole::Title);
 
     auto* store = StickerStore::instance();
     connect(store, &StickerStore::probeDone, this, &BundledPacksPage::onProbeDone);
@@ -122,9 +122,9 @@ void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, con
     nameLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
 
     if (!previewUrl.isEmpty()) {
-        auto* preview = new QskPushButton(tr("预览"), r1);
-        preview->setPreferredSize(64, 44);
-        connect(preview, &QskPushButton::clicked, this,
+        row.preview = new QskPushButton(tr("预览"), r1);
+        row.preview->setPreferredSize(64, 44);
+        connect(row.preview, &QskPushButton::clicked, this,
                 [previewUrl]() { qOpenUrl(previewUrl); });
     }
 
@@ -177,6 +177,35 @@ void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, con
 
     m_rows.insert(url, row);
     refreshButtons(row);
+}
+
+void BundledPacksPage::retranslateUi()
+{
+    if (!m_title)
+        return;
+
+    m_title->setText(tr("表情包目录"));
+    m_aTitle->setText(tr("已下载"));
+    m_bTitle->setText(tr("下载源"));
+    refreshSourceTexts();
+    rebuildDownloaded();
+}
+
+void BundledPacksPage::refreshSourceTexts()
+{
+    auto* store = StickerStore::instance();
+    for (auto it = m_rows.begin(); it != m_rows.end(); ++it) {
+        const SourceRow& row = it.value();
+        if (row.preview)
+            row.preview->setText(tr("预览"));
+        row.fetch->setText(tr("获取"));
+        row.cancel->setText(tr("取消"));
+        const qint64 approx = store->cachedApproxSize(row.url);
+        row.status->setText(approx > 0
+            ? tr("大小 约 %1").arg(formatSize(approx))
+            : tr("大小未知"));
+        refreshButtons(row);
+    }
 }
 
 void BundledPacksPage::rebuildDownloaded()

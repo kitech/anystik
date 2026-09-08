@@ -36,6 +36,8 @@ public:
     QskComboBox* fontScaleCombo() const { return m_fontScaleCombo; }
     QskComboBox* langCombo() const { return m_langCombo; }
 
+    Q_INVOKABLE void retranslateUi() override;
+
     static void changeFontScale(int delta);
     ~SettingsPage();
 
@@ -48,6 +50,7 @@ protected:
                   const QVariantMap& savedState) override;
 
 private:
+    void rebuildTranslatedCombos();
     void updateGotifyVisibility(int backendIndex);
     void rebuildBackendLabels(const QStringList& installed);
     void refreshStorageRows();
@@ -79,6 +82,23 @@ private:
     QskPushButton* m_migratePicsButton = nullptr;
     QskTextLabel* m_targetPrivateValue = nullptr;
     QskPushButton* m_migratePrivateButton = nullptr;
+
+    QskTextLabel* m_title = nullptr;
+    QskTextLabel* m_langLabel = nullptr;
+    QskTextLabel* m_transitionLabel = nullptr;
+    QskTextLabel* m_themeLabel = nullptr;
+    QskTextLabel* m_schemeLabel = nullptr;
+    QskTextLabel* m_schemeVal = nullptr;
+    QskTextLabel* m_fontLabel = nullptr;
+    QskTextLabel* m_debugLabel = nullptr;
+    QskTextLabel* m_phoneLabel = nullptr;
+    QskTextLabel* m_pushNotifyLabel = nullptr;
+    QskTextLabel* m_backendLabel = nullptr;
+    QskTextLabel* m_gotifyUrlLabel = nullptr;
+    QskTextLabel* m_gotifyTokenLabel = nullptr;
+    QskTextLabel* m_curRootLabel = nullptr;
+    QskTextLabel* m_targetRootLabel = nullptr;
+    QskTextLabel* m_targetPrivateLabel = nullptr;
 
     static QPointer<SettingsPage> s_instance;
 };

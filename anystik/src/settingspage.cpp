@@ -49,9 +49,9 @@ SettingsPage::SettingsPage(QQuickItem* parent)
 
     auto* backBtn = new QskPushButton(QString::fromUtf8("←"), topBar);
     backBtn->setPreferredSize(44, 44);
-    auto* title = new QskTextLabel(tr("Settings"), topBar);
-    title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
-    title->setAlignment(Qt::AlignCenter);
+    m_title = new QskTextLabel(tr("Settings"), topBar);
+    m_title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_title->setAlignment(Qt::AlignCenter);
 
     connect(backBtn, &QskAbstractButton::clicked, this, [this]() {
         finish();
@@ -62,8 +62,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 0: Language ──
     auto* row0 = new QskLinearBox(Qt::Horizontal, layout);
     row0->setSpacing(12);
-    auto* langLabel = new QskTextLabel(tr("Language"), row0);
-    langLabel->setPreferredWidth(160);
+    m_langLabel = new QskTextLabel(tr("Language"), row0);
+    m_langLabel->setPreferredWidth(160);
     m_langCombo = new QskComboBox(row0);
     m_langCombo->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
     m_langCombo->addOption(QskLabelData(tr("简体中文")));
@@ -84,8 +84,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 1: Page Transition ──
     auto* row1 = new QskLinearBox(Qt::Horizontal, layout);
     row1->setSpacing(12);
-    auto* transitionLabel = new QskTextLabel(tr("Page Transition"), row1);
-    transitionLabel->setPreferredWidth(160);
+    m_transitionLabel = new QskTextLabel(tr("Page Transition"), row1);
+    m_transitionLabel->setPreferredWidth(160);
     m_transitionCombo = new QskComboBox(row1);
     m_transitionCombo->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
     m_transitionCombo->addOption(QskLabelData(tr("Slide")));
@@ -99,8 +99,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 2: Theme ──
     auto* row2 = new QskLinearBox(Qt::Horizontal, layout);
     row2->setSpacing(12);
-    auto* themeLabel = new QskTextLabel(tr("Theme"), row2);
-    themeLabel->setPreferredWidth(160);
+    m_themeLabel = new QskTextLabel(tr("Theme"), row2);
+    m_themeLabel->setPreferredWidth(160);
     m_skinCombo = new QskComboBox(row2);
     m_skinCombo->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
     m_skinCombo->addOption(QskLabelData("Fusion"));
@@ -113,14 +113,14 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 3: Color Scheme ──
     auto* row3 = new QskLinearBox(Qt::Horizontal, layout);
     row3->setSpacing(12);
-    auto* schemeLabel = new QskTextLabel(tr("Color Scheme"), row3);
-    schemeLabel->setPreferredWidth(160);
+    m_schemeLabel = new QskTextLabel(tr("Color Scheme"), row3);
+    m_schemeLabel->setPreferredWidth(160);
     m_darkSwitch = new QskSwitchButton(row3);
-    auto* schemeVal = new QskTextLabel(tr("Light"), row3);
-    schemeVal->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_schemeVal = new QskTextLabel(tr("Light"), row3);
+    m_schemeVal->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
     connect(m_darkSwitch, &QskAbstractButton::toggled,
-        [schemeVal](bool checked) {
-            schemeVal->setText(checked ? tr("Dark") : tr("Light"));
+        [this](bool checked) {
+            m_schemeVal->setText(checked ? tr("Dark") : tr("Light"));
         });
 
     new QskSeparator(Qt::Horizontal, layout);
@@ -129,8 +129,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     auto* row4 = new QskLinearBox(Qt::Horizontal, layout);
     row4->setPreferredHeight(48);
     row4->setSpacing(12);
-    auto* fontLabel = new QskTextLabel(tr("Font Size"), row4);
-    fontLabel->setPreferredWidth(160);
+    m_fontLabel = new QskTextLabel(tr("Font Size"), row4);
+    m_fontLabel->setPreferredWidth(160);
     m_fontScaleCombo = new QskComboBox(row4);
     m_fontScaleCombo->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
     m_fontScaleCombo->addOption(QskLabelData(tr("Small")));
@@ -144,8 +144,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 5: Debug Background ──
     auto* row5 = new QskLinearBox(Qt::Horizontal, layout);
     row5->setSpacing(12);
-    auto* debugLabel = new QskTextLabel(tr("Debug Background"), row5);
-    debugLabel->setPreferredWidth(160);
+    m_debugLabel = new QskTextLabel(tr("Debug Background"), row5);
+    m_debugLabel->setPreferredWidth(160);
     m_debugBgSwitch = new QskSwitchButton(row5);
 
     new QskSeparator(Qt::Horizontal, layout);
@@ -153,8 +153,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 6: Phone Answer ──
     auto* row6 = new QskLinearBox(Qt::Horizontal, layout);
     row6->setSpacing(12);
-    auto* phoneLabel = new QskTextLabel(tr("Phone Answer"), row6);
-    phoneLabel->setPreferredWidth(160);
+    m_phoneLabel = new QskTextLabel(tr("Phone Answer"), row6);
+    m_phoneLabel->setPreferredWidth(160);
     m_phoneAnswerCombo = new QskComboBox(row6);
     m_phoneAnswerCombo->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
     m_phoneAnswerCombo->addOption(QskLabelData(tr("Disabled")));
@@ -167,8 +167,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 7: Push Notification ──
     auto* row7 = new QskLinearBox(Qt::Horizontal, layout);
     row7->setSpacing(12);
-    auto* pushNotifyLabel = new QskTextLabel(tr("Push Notification"), row7);
-    pushNotifyLabel->setPreferredWidth(160);
+    m_pushNotifyLabel = new QskTextLabel(tr("Push Notification"), row7);
+    m_pushNotifyLabel->setPreferredWidth(160);
     m_pushNotifySwitch = new QskSwitchButton(row7);
 
     new QskSeparator(Qt::Horizontal, layout);
@@ -176,8 +176,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 8: Push Backend (merged provider + distributor) ──
     auto* row8 = new QskLinearBox(Qt::Horizontal, layout);
     row8->setSpacing(12);
-    auto* backendLabel = new QskTextLabel(tr("Push Backend"), row8);
-    backendLabel->setPreferredWidth(160);
+    m_backendLabel = new QskTextLabel(tr("Push Backend"), row8);
+    m_backendLabel->setPreferredWidth(160);
     m_backendCombo = new QskComboBox(row8);
     m_backendCombo->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
     m_backendCombo->addOption(QskLabelData(tr("Auto (system default)")));
@@ -194,8 +194,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 9: Gotify Server (visible when Gotify direct selected) ──
     m_gotifyRow = new QskLinearBox(Qt::Horizontal, layout);
     m_gotifyRow->setSpacing(12);
-    auto* gotifyUrlLabel = new QskTextLabel(tr("Gotify URL"), m_gotifyRow);
-    gotifyUrlLabel->setPreferredWidth(160);
+    m_gotifyUrlLabel = new QskTextLabel(tr("Gotify URL"), m_gotifyRow);
+    m_gotifyUrlLabel->setPreferredWidth(160);
     m_gotifyUrlEdit = new QskTextField(m_gotifyRow);
     m_gotifyUrlEdit->setPlaceholderText("https://push.example.com");
     m_gotifyUrlEdit->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
@@ -206,8 +206,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 10: Gotify Token ──
     m_gotifyRow2 = new QskLinearBox(Qt::Horizontal, layout);
     m_gotifyRow2->setSpacing(12);
-    auto* gotifyTokenLabel = new QskTextLabel(tr("Gotify Token"), m_gotifyRow2);
-    gotifyTokenLabel->setPreferredWidth(160);
+    m_gotifyTokenLabel = new QskTextLabel(tr("Gotify Token"), m_gotifyRow2);
+    m_gotifyTokenLabel->setPreferredWidth(160);
     m_gotifyTokenEdit = new QskTextField(m_gotifyRow2);
     m_gotifyTokenEdit->setPlaceholderText(tr("client token"));
     m_gotifyTokenEdit->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
@@ -222,8 +222,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 11: 贴纸存储位置（当前 base 目录，只读） ──
     auto* row11 = new QskLinearBox(Qt::Horizontal, layout);
     row11->setSpacing(12);
-    auto* curRootLabel = new QskTextLabel(tr("当前存储"), row11);
-    curRootLabel->setPreferredWidth(160);
+    m_curRootLabel = new QskTextLabel(tr("当前存储"), row11);
+    m_curRootLabel->setPreferredWidth(160);
     m_currentRootValue = new QskTextLabel(QString(), row11);
     m_currentRootValue->setWrapMode(QskTextOptions::WordWrap);
     m_currentRootValue->setSizePolicy(
@@ -234,8 +234,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 12: 迁移到相册（目标目录 + 迁移按钮） ──
     auto* row12 = new QskLinearBox(Qt::Horizontal, layout);
     row12->setSpacing(12);
-    auto* targetRootLabel = new QskTextLabel(tr("迁移到相册"), row12);
-    targetRootLabel->setPreferredWidth(160);
+    m_targetRootLabel = new QskTextLabel(tr("迁移到相册"), row12);
+    m_targetRootLabel->setPreferredWidth(160);
     m_targetPicsValue = new QskTextLabel(QString(), row12);
     m_targetPicsValue->setWrapMode(QskTextOptions::WordWrap);
     m_targetPicsValue->setSizePolicy(
@@ -253,8 +253,8 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     // ── Row 13: 迁移回私用（目标 AppLocalDataLocation + 迁移按钮） ──
     auto* row13 = new QskLinearBox(Qt::Horizontal, layout);
     row13->setSpacing(12);
-    auto* targetPrivateLabel = new QskTextLabel(tr("迁移回私用"), row13);
-    targetPrivateLabel->setPreferredWidth(160);
+    m_targetPrivateLabel = new QskTextLabel(tr("迁移回私用"), row13);
+    m_targetPrivateLabel->setPreferredWidth(160);
     m_targetPrivateValue = new QskTextLabel(QString(), row13);
     m_targetPrivateValue->setWrapMode(QskTextOptions::WordWrap);
     m_targetPrivateValue->setSizePolicy(
@@ -300,6 +300,64 @@ void SettingsPage::changeFontScale(int delta)
         s_instance->m_fontScaleCombo->setCurrentIndex(idx);
         s_instance->m_fontScaleCombo->blockSignals(false);
     }
+}
+
+void SettingsPage::rebuildTranslatedCombos()
+{
+    const auto rebuild = [](QskComboBox* combo, const QVector<QskLabelData>& opts) {
+        const int saved = combo->currentIndex();
+        combo->blockSignals(true);
+        combo->clear();
+        for (const auto& o : opts)
+            combo->addOption(o);
+        combo->setCurrentIndex(qMin(saved, opts.size() - 1));
+        combo->blockSignals(false);
+    };
+
+    rebuild(m_langCombo, { QskLabelData(tr("简体中文")),
+                           QskLabelData("English"),
+                           QskLabelData("繁體中文") });
+    rebuild(m_transitionCombo, { QskLabelData(tr("Slide")),
+                                 QskLabelData(tr("2D")),
+                                 QskLabelData(tr("3D")),
+                                 QskLabelData("Perspective") });
+    rebuild(m_fontScaleCombo, { QskLabelData(tr("Small")),
+                                QskLabelData(tr("Medium")),
+                                QskLabelData(tr("Large")),
+                                QskLabelData(tr("Extra Large")) });
+    rebuild(m_phoneAnswerCombo, { QskLabelData(tr("Disabled")),
+                                  QskLabelData(tr("Manual")),
+                                  QskLabelData("Auto") });
+    // m_skinCombo：Fusion/Fluent2/Material3 为产品名，不翻译
+}
+
+void SettingsPage::retranslateUi()
+{
+    if (!m_title)
+        return;
+
+    m_title->setText(tr("Settings"));
+    m_langLabel->setText(tr("Language"));
+    m_transitionLabel->setText(tr("Page Transition"));
+    m_themeLabel->setText(tr("Theme"));
+    m_schemeLabel->setText(tr("Color Scheme"));
+    m_fontLabel->setText(tr("Font Size"));
+    m_debugLabel->setText(tr("Debug Background"));
+    m_phoneLabel->setText(tr("Phone Answer"));
+    m_pushNotifyLabel->setText(tr("Push Notification"));
+    m_backendLabel->setText(tr("Push Backend"));
+    m_gotifyUrlLabel->setText(tr("Gotify URL"));
+    m_gotifyTokenLabel->setText(tr("Gotify Token"));
+    m_curRootLabel->setText(tr("当前存储"));
+    m_targetRootLabel->setText(tr("迁移到相册"));
+    m_targetPrivateLabel->setText(tr("迁移回私用"));
+
+    m_schemeVal->setText(m_darkSwitch->isChecked() ? tr("Dark") : tr("Light"));
+
+    rebuildTranslatedCombos();
+    m_gotifyTokenEdit->setPlaceholderText(tr("client token"));
+    rebuildBackendLabels(PushHandler::installedDistributors());
+    refreshStorageRows();
 }
 
 void SettingsPage::updateGotifyVisibility(int backendIndex)
