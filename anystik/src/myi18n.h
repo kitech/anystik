@@ -9,9 +9,8 @@
 
 // 无 Q_OBJECT 类（stickerlist/myscrollarea/dialogpopup…）的翻译入口：
 // context 显式指定，source 为中文原文；zh 缺失时原样回退。
-inline QString T(const char* ctx, const QString& src) {
-    return QCoreApplication::translate(ctx, src.toUtf8().constData());
-}
+// 注意：源码中此类调用统一写成 QCoreApplication::translate("Ctx", "原文")，
+// 以便 lupdate 能直接提取；本 helper 仅供历史兼容，勿在新代码中使用。
 
 // 语言单例：安装/切换 QTranslator，广播即时重译。
 class Lang : public QObject {

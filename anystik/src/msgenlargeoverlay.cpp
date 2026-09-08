@@ -3,6 +3,7 @@
 #include "toastpopup.h"
 
 #include <QGuiApplication>
+#include <QCoreApplication>
 #include <QClipboard>
 #include <QFont>
 #include <QFontMetrics>
@@ -173,8 +174,8 @@ void MsgEnlargeOverlayNode::paint(QPainter* painter, const QSize& size, const vo
         painter->drawText(rect, Qt::AlignCenter, text);
     };
 
-    paintBtn(layout.copyBtn, tr("复制"));
-    paintBtn(layout.favBtn, tr("收藏"));
+    paintBtn(layout.copyBtn, QCoreApplication::translate("MsgEnlargeOverlay", "复制"));
+    paintBtn(layout.favBtn, QCoreApplication::translate("MsgEnlargeOverlay", "收藏"));
 
     // Size buttons
     for (int i = 0; i < 4; i++) {

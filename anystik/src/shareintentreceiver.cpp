@@ -52,15 +52,15 @@ void processOne(const PendingShare& item)
     if (item.type == PendingShare::Image) {
         QString err;
         if (StickerStore::instance()->importImageBytes(item.bytes, &err)) {
-            showAndroidToast(T("ShareIntentReceiver", "已导入到「粘贴板」"));
+            showAndroidToast(QCoreApplication::translate("ShareIntentReceiver", "已导入到「粘贴板」"));
             auto nav = s_navigator;
             if (nav) nav();
         } else {
-            showAndroidToast(err.isEmpty() ? T("ShareIntentReceiver", "导入失败") : err);
+            showAndroidToast(err.isEmpty() ? QCoreApplication::translate("ShareIntentReceiver", "导入失败") : err);
         }
     } else {
         showAndroidToast(item.text.isEmpty()
-            ? T("ShareIntentReceiver", "共享内容已收到") : item.text);
+            ? QCoreApplication::translate("ShareIntentReceiver", "共享内容已收到") : item.text);
     }
 }
 
@@ -92,8 +92,8 @@ void importPendingShares(const PendingShareMeta& meta)
             || m == "text/gif"
             || m == "text/gif!";
         showAndroidToast(imageIntent
-            ? T("ShareIntentReceiver", "分享内容未能读取")
-            : T("ShareIntentReceiver", "暂不支持文本导入"));
+            ? QCoreApplication::translate("ShareIntentReceiver", "分享内容未能读取")
+            : QCoreApplication::translate("ShareIntentReceiver", "暂不支持文本导入"));
         return;
     }
 
@@ -131,11 +131,11 @@ void importPendingShares(const PendingShareMeta& meta)
             auto nav = s_navigator;
             if (nav) nav();           // 跳 stickerhome（dataChanged 已自动刷新「粘贴板」）
             if (okCount > 0)
-                showAndroidToast(T("ShareIntentReceiver", "已导入 %1 张贴纸到「粘贴板」").arg(okCount));
+                showAndroidToast(QCoreApplication::translate("ShareIntentReceiver", "已导入 %1 张贴纸到「粘贴板」").arg(okCount));
             if (failCount > 0)
                 showAndroidToast(firstErr.isEmpty()
-                    ? T("ShareIntentReceiver", "有 %1 张导入失败").arg(failCount)
-                    : T("ShareIntentReceiver", "导入失败：%1").arg(firstErr));
+                    ? QCoreApplication::translate("ShareIntentReceiver", "有 %1 张导入失败").arg(failCount)
+                    : QCoreApplication::translate("ShareIntentReceiver", "导入失败：%1").arg(firstErr));
         });
     });
 }
@@ -191,21 +191,21 @@ void drainPendingShareIntents()
                     return QStringLiteral("%1 GB").arg(n / (1024.0 * 1024 * 1024), 0, 'f', 2);
                 };
 
-                QString title = T("ShareIntentReceiver", "导入分享");
+                QString title = QCoreApplication::translate("ShareIntentReceiver", "导入分享");
                 QStringList lines;
                 QString kind = meta.action.contains(QStringLiteral("SEND_MULTIPLE"))
-                    ? T("ShareIntentReceiver", "多文件")
-                    : T("ShareIntentReceiver", "文件");
-                lines << T("ShareIntentReceiver", "收到 %1 张%2").arg(meta.imageCount).arg(kind);
+                    ? QCoreApplication::translate("ShareIntentReceiver", "多文件")
+                    : QCoreApplication::translate("ShareIntentReceiver", "文件");
+                lines << QCoreApplication::translate("ShareIntentReceiver", "收到 %1 张%2").arg(meta.imageCount).arg(kind);
                 if (meta.totalBytes > 0)
-                    lines << T("ShareIntentReceiver", "大小：%1").arg(fmtBytes(meta.totalBytes));
+                    lines << QCoreApplication::translate("ShareIntentReceiver", "大小：%1").arg(fmtBytes(meta.totalBytes));
                 if (!meta.mime.isEmpty())
-                    lines << T("ShareIntentReceiver", "类型：%1").arg(meta.mime);
-                lines << T("ShareIntentReceiver", "来自：%1").arg(meta.sourceApp);
+                    lines << QCoreApplication::translate("ShareIntentReceiver", "类型：%1").arg(meta.mime);
+                lines << QCoreApplication::translate("ShareIntentReceiver", "来自：%1").arg(meta.sourceApp);
                 if (!meta.displayName.isEmpty())
-                    lines << T("ShareIntentReceiver", "文件名：%1").arg(meta.displayName);
+                    lines << QCoreApplication::translate("ShareIntentReceiver", "文件名：%1").arg(meta.displayName);
                 if (meta.receivedAt > 0)
-                    lines << T("ShareIntentReceiver", "时间：%1").arg(
+                    lines << QCoreApplication::translate("ShareIntentReceiver", "时间：%1").arg(
                         QDateTime::fromMSecsSinceEpoch(meta.receivedAt)
                             .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
 
@@ -223,25 +223,25 @@ void drainPendingShareIntents()
                 const bool lcVisible = QJniObject::callStaticMethod<jboolean>(
                     "io/fedlet/mobutil/AnystikApplication",
                     "isMainActivityVisible", "()Z");
-                lines << T("ShareIntentReceiver", "[Qt内部] 实例%1 已启动%2")
-                           .arg(qtValid ? T("ShareIntentReceiver", "存活") : T("ShareIntentReceiver", "无"))
+                lines << QCoreApplication::translate("ShareIntentReceiver", "[Qt内部] 实例%1 已启动%2")
+                           .arg(qtValid ? QCoreApplication::translate("ShareIntentReceiver", "存活") : QCoreApplication::translate("ShareIntentReceiver", "无"))
                            .arg(qtStarted ? QStringLiteral("✓") : QStringLiteral("✗"));
-                lines << T("ShareIntentReceiver", "[生命周期] %1 %2")
-                           .arg(lcRunning ? T("ShareIntentReceiver", "运行")
-                                          : T("ShareIntentReceiver", "未运行"))
-                           .arg(lcVisible ? T("ShareIntentReceiver", "可见")
-                                          : T("ShareIntentReceiver", "后台"));
+                lines << QCoreApplication::translate("ShareIntentReceiver", "[生命周期] %1 %2")
+                           .arg(lcRunning ? QCoreApplication::translate("ShareIntentReceiver", "运行")
+                                          : QCoreApplication::translate("ShareIntentReceiver", "未运行"))
+                           .arg(lcVisible ? QCoreApplication::translate("ShareIntentReceiver", "可见")
+                                          : QCoreApplication::translate("ShareIntentReceiver", "后台"));
 #endif
 
                 ConfirmPopup::show(host, title, lines.join(QStringLiteral("\n")),
-                    T("ShareIntentReceiver", "继续处理"),
-                    T("ShareIntentReceiver", "取消"),
+                    QCoreApplication::translate("ShareIntentReceiver", "继续处理"),
+                    QCoreApplication::translate("ShareIntentReceiver", "取消"),
                     [meta](bool accepted) {
                         if (accepted) {
-                            showAndroidToast(T("ShareIntentReceiver", "处理中…"));
+                            showAndroidToast(QCoreApplication::translate("ShareIntentReceiver", "处理中…"));
                             importPendingShares(meta);
                         } else {
-                            showAndroidToast(T("ShareIntentReceiver", "已取消"));
+                            showAndroidToast(QCoreApplication::translate("ShareIntentReceiver", "已取消"));
                         }
                     });
             });
@@ -324,7 +324,7 @@ void scanPendingShareDir()
         const QString n = v.toString();
         if (!n.isEmpty()) meta.files << n;
     }
-    if (meta.sourceApp.isEmpty()) meta.sourceApp = T("ShareIntentReceiver", "未知来源");
+    if (meta.sourceApp.isEmpty()) meta.sourceApp = QCoreApplication::translate("ShareIntentReceiver", "未知来源");
 
     {
         QMutexLocker lock(&s_mutex);
@@ -392,7 +392,7 @@ Java_io_fedlet_mobutil_ShareActivity_onShareIntentReceived(
         PendingShare item;
         item.type = PendingShare::Generic;
         item.mime = mimeType;
-        item.text = T("ShareIntentReceiver", "收到 %1 个共享文件").arg(count);
+        item.text = QCoreApplication::translate("ShareIntentReceiver", "收到 %1 个共享文件").arg(count);
         enqueueAndDrain(item);
     } else if (!text.isEmpty()) {
         PendingShare item;
@@ -404,7 +404,7 @@ Java_io_fedlet_mobutil_ShareActivity_onShareIntentReceived(
         PendingShare item;
         item.type = PendingShare::Generic;
         item.mime = mimeType;
-        item.text = T("ShareIntentReceiver", "共享: %1").arg(mimeType);
+        item.text = QCoreApplication::translate("ShareIntentReceiver", "共享: %1").arg(mimeType);
         enqueueAndDrain(item);
     }
 }

@@ -234,7 +234,7 @@ void PushHandler::registerDevice()
                 QMetaObject::invokeMethod(s_instance, []() {
                     s_instance->setConnected(false);
                     s_instance->setRegistering(false);
-                    emit s_instance->registrationFailed(T("PushHandler", "register 方法签名错误"));
+                    emit s_instance->registrationFailed(QCoreApplication::translate("PushHandler", "register 方法签名错误"));
                     emit s_instance->statusChanged();
                 }, Qt::QueuedConnection);
                 return;
@@ -260,7 +260,7 @@ void PushHandler::registerDevice()
                 QMetaObject::invokeMethod(s_instance, []() {
                     s_instance->setConnected(false);
                     s_instance->setRegistering(false);
-                    emit s_instance->registrationFailed(T("PushHandler", "distributor 状态异常"));
+                    emit s_instance->registrationFailed(QCoreApplication::translate("PushHandler", "distributor 状态异常"));
                     emit s_instance->statusChanged();
                 }, Qt::QueuedConnection);
                 return;
@@ -289,7 +289,7 @@ void PushHandler::registerDevice()
             QMetaObject::invokeMethod(s_instance, []() {
                 s_instance->setConnected(false);
                 s_instance->setRegistering(false);
-                emit s_instance->registrationFailed(T("PushHandler", "getDistributors 调用失败"));
+                emit s_instance->registrationFailed(QCoreApplication::translate("PushHandler", "getDistributors 调用失败"));
                 emit s_instance->statusChanged();
             }, Qt::QueuedConnection);
             return;
@@ -312,7 +312,7 @@ void PushHandler::registerDevice()
                 qWarning() << "[PushHandler] no distributors found";
                 s_instance->setConnected(false);
                 s_instance->setRegistering(false);
-                emit s_instance->registrationFailed(T("PushHandler", "未找到 UnifiedPush 分发器，请安装 ntfy/Sunup 等"));
+                emit s_instance->registrationFailed(QCoreApplication::translate("PushHandler", "未找到 UnifiedPush 分发器，请安装 ntfy/Sunup 等"));
                 emit s_instance->statusChanged();
                 return;
             }
@@ -341,7 +341,7 @@ void PushHandler::selectDistributor(const QString& distributor)
             QMetaObject::invokeMethod(s_instance, []() {
                 s_instance->setConnected(false);
                 s_instance->setRegistering(false);
-                emit s_instance->registrationFailed(T("PushHandler", "saveDistributor 方法不存在"));
+                emit s_instance->registrationFailed(QCoreApplication::translate("PushHandler", "saveDistributor 方法不存在"));
                 emit s_instance->statusChanged();
             }, Qt::QueuedConnection);
             return;
@@ -351,7 +351,7 @@ void PushHandler::selectDistributor(const QString& distributor)
             QMetaObject::invokeMethod(s_instance, []() {
                 s_instance->setConnected(false);
                 s_instance->setRegistering(false);
-                emit s_instance->registrationFailed(T("PushHandler", "register 方法不存在"));
+                emit s_instance->registrationFailed(QCoreApplication::translate("PushHandler", "register 方法不存在"));
                 emit s_instance->statusChanged();
             }, Qt::QueuedConnection);
             return;
@@ -623,7 +623,7 @@ void PushHandler::timerEvent(QTimerEvent* event)
         setConnected(false);
         setRegistering(false);
         qWarning() << "[PushHandler] registration timeout - distributor not responding";
-        emit registrationFailed(T("PushHandler", "推送注册超时，请检查 ntfy 是否在运行, 安装: %1").arg(ntfyshPushInstalled));
+        emit registrationFailed(QCoreApplication::translate("PushHandler", "推送注册超时，请检查 ntfy 是否在运行, 安装: %1").arg(ntfyshPushInstalled));
         emit statusChanged();
     }
 }

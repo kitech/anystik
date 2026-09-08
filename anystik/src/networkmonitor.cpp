@@ -19,9 +19,9 @@ Java_io_fedlet_mobutil_NetworkMonitor_onNetworkChanged(
 
     QString msg;
     if (isConnected) {
-        msg = T("NetworkMonitor", "网络已连接: %1").arg(networkType);
+        msg = QCoreApplication::translate("NetworkMonitor", "网络已连接: %1").arg(networkType);
     } else {
-        msg = T("NetworkMonitor", "网络已断开");
+        msg = QCoreApplication::translate("NetworkMonitor", "网络已断开");
     }
     qDebug() << "[NetworkMonitor]" << msg;
     showAndroidToast(msg);
@@ -88,11 +88,11 @@ void NetworkMonitor::start()
         [](QNetworkInformation::Reachability r) {
             QString msg;
             if (r == QNetworkInformation::Reachability::Online) {
-                msg = T("NetworkMonitor", "网络已连接");
+                msg = QCoreApplication::translate("NetworkMonitor", "网络已连接");
             } else if (r == QNetworkInformation::Reachability::Disconnected) {
-                msg = T("NetworkMonitor", "网络已断开");
+                msg = QCoreApplication::translate("NetworkMonitor", "网络已断开");
             } else {
-                msg = T("NetworkMonitor", "网络状态未知");
+                msg = QCoreApplication::translate("NetworkMonitor", "网络状态未知");
             }
             qDebug() << "[NetworkMonitor]" << msg;
             showDesktopNotification("anystik", msg);
@@ -140,11 +140,11 @@ void NetworkMonitor::start()
         [](QNetworkInformation::Reachability r) {
             QString msg;
             if (r == QNetworkInformation::Reachability::Online) {
-                msg = T("NetworkMonitor", "网络已连接");
+                msg = QCoreApplication::translate("NetworkMonitor", "网络已连接");
             } else if (r == QNetworkInformation::Reachability::Disconnected) {
-                msg = T("NetworkMonitor", "网络已断开");
+                msg = QCoreApplication::translate("NetworkMonitor", "网络已断开");
             } else {
-                msg = T("NetworkMonitor", "网络状态未知");
+                msg = QCoreApplication::translate("NetworkMonitor", "网络状态未知");
             }
             qDebug() << "[NetworkMonitor]" << msg;
             showDesktopNotification("anystik", msg);
@@ -185,11 +185,11 @@ void NetworkMonitor::start()
         [](QNetworkInformation::Reachability r) {
             QString msg;
             if (r == QNetworkInformation::Reachability::Online) {
-                msg = T("NetworkMonitor", "网络已连接");
+                msg = QCoreApplication::translate("NetworkMonitor", "网络已连接");
             } else if (r == QNetworkInformation::Reachability::Disconnected) {
-                msg = T("NetworkMonitor", "网络已断开");
+                msg = QCoreApplication::translate("NetworkMonitor", "网络已断开");
             } else {
-                msg = T("NetworkMonitor", "网络状态未知");
+                msg = QCoreApplication::translate("NetworkMonitor", "网络状态未知");
             }
             qDebug() << "[NetworkMonitor]" << msg;
             showDesktopNotification("anystik", msg);

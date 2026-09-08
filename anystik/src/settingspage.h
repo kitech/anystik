@@ -21,6 +21,7 @@ struct FontSizes {
 
 class SettingsPage : public Page
 {
+    Q_OBJECT
 public:
     SettingsPage(QQuickItem* parent = nullptr);
 

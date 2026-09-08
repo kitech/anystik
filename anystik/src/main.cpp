@@ -417,7 +417,7 @@ int main(int argc, char* argv[]) {
             }
             auto* contentItem = window.contentItem();
             if (!contentItem) return;
-            SelectPopup::show(contentItem, T("Main", "选择推送服务"),
+            SelectPopup::show(contentItem, QCoreApplication::translate("Main", "选择推送服务"),
                 displayNames,
                 [distributors, displayNames](const QString& selected) {
                     if (!selected.isEmpty()) {
@@ -435,16 +435,16 @@ int main(int argc, char* argv[]) {
         [](const QString& reason) {
             QString toastMsg;
             if (reason.contains(QString::fromUtf8("未安装")) || reason.contains("not installed")) {
-                toastMsg = T("Main", "⚠️ %1\n请安装后重新打开应用").arg(reason);
+                toastMsg = QCoreApplication::translate("Main", "⚠️ %1\n请安装后重新打开应用").arg(reason);
             } else if (reason.contains(QString::fromUtf8("未找到")) || reason.contains("no distributor")
                        || reason.contains("getDistributors")) {
-                toastMsg = T("Main", "⚠️ 未检测到推送服务\n请安装 ntfy (UnifiedPush) 后重试");
+                toastMsg = QCoreApplication::translate("Main", "⚠️ 未检测到推送服务\n请安装 ntfy (UnifiedPush) 后重试");
             } else if (reason.contains(QString::fromUtf8("超时"))) {
-                toastMsg = T("Main", "⚠️ %1\n请打开 ntfy 后重试").arg(reason);
+                toastMsg = QCoreApplication::translate("Main", "⚠️ %1\n请打开 ntfy 后重试").arg(reason);
             } else if (reason.contains(QString::fromUtf8("启动失败")) || reason.contains("FAILED")) {
-                toastMsg = T("Main", "⚠️ 推送服务启动失败\n请检查 ntfy 是否在后台运行");
+                toastMsg = QCoreApplication::translate("Main", "⚠️ 推送服务启动失败\n请检查 ntfy 是否在后台运行");
             } else {
-                toastMsg = T("Main", "⚠️ Push 注册失败: %1").arg(reason);
+                toastMsg = QCoreApplication::translate("Main", "⚠️ Push 注册失败: %1").arg(reason);
             }
             showAndroidToast(toastMsg);
         });
@@ -461,7 +461,7 @@ int main(int argc, char* argv[]) {
             QString preview = QString::fromUtf8(message).left(200);
             qDebug() << "[PushHandler] push received, size:" << message.size()
                      << "content:" << preview;
-            showAndroidToast(T("Main", "推送: %1").arg(preview));
+            showAndroidToast(QCoreApplication::translate("Main", "推送: %1").arg(preview));
         });
 
     // 触发注册流程
