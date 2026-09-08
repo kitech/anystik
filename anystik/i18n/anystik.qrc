@@ -1,0 +1,7 @@
+<RCC>
+  <qresource prefix="/i18n">
+    <file alias="anystik_en.qm">anystik_en.qm</file>
+    <file alias="anystik_zh_CN.qm">anystik_zh_CN.qm</file>
+    <file alias="anystik_zh_TW.qm">anystik_zh_TW.qm</file>
+  </qresource>
+</RCC>
