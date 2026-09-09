@@ -27,6 +27,7 @@
 #include <QskSwitchButton.h>
 #include "loginpage.h"
 #include "settingspage.h"
+#include "stickergenpage.h"
 #include "aboutpage.h"
 #include "myi18n.h"
 #include "logpage.h"
@@ -341,6 +342,10 @@ int main(int argc, char* argv[]) {
     pageManager->registerPage("bundledpacks", []() -> Page* {
         return new BundledPacksPage();
     }, {CachePolicy::Transient, LaunchMode::Standard});
+
+    pageManager->registerPage("stikergen", []() -> Page* {
+        return new StickerGenPage();
+    }, {CachePolicy::Permanent, LaunchMode::SingleInstance});
 
     // ── Window ──
     QskWindow window;

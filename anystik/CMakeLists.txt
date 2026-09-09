@@ -73,6 +73,8 @@ qt_add_executable(anystik
     src/stickerlist.cpp
     src/stickerhomepage.h
     src/stickerhomepage.cpp
+    src/stickergenpage.h
+    src/stickergenpage.cpp
     src/stickerpreviewoverlay.h
     src/stickerpreviewoverlay.cpp
     src/dialogpopup.h

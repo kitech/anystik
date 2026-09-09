@@ -218,6 +218,33 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     connect(m_grid, &StickerGridWidget::stickerLongPressed,
         this, &StickerHomePage::showStickerMenu);
 
+    // ── 底部导航栏：首页 / 生成表情 / 设置 ──
+    m_bottomBar = new QskLinearBox(Qt::Horizontal, layout);
+    m_bottomBar->setPanel(true);
+    m_bottomBar->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
+    m_bottomBar->setFixedHeight(38);
+    m_bottomBar->setSpacing(4);
+
+    m_bottomHome = new QskPushButton(tr("首页"), m_bottomBar);
+    m_bottomHome->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    connect(m_bottomHome, &QskAbstractButton::clicked, this, []() {
+        // 首页即本页，占位无操作
+    });
+
+    m_bottomGen = new QskPushButton(tr("生成表情"), m_bottomBar);
+    m_bottomGen->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    connect(m_bottomGen, &QskAbstractButton::clicked, this, [this]() {
+        if (pageManager())
+            pageManager()->open("stikergen");
+    });
+
+    m_bottomSettings = new QskPushButton(tr("设置"), m_bottomBar);
+    m_bottomSettings->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    connect(m_bottomSettings, &QskAbstractButton::clicked, this, [this]() {
+        if (pageManager())
+            pageManager()->open("settings");
+    });
+
     // ── 数据 ──
     connect(StickerStore::instance(), &StickerStore::dataChanged,
         this, [this]() { refreshTabBar(); reloadActive(); });
@@ -241,6 +268,9 @@ void StickerHomePage::retranslateUi()
     m_importBtn->setText(tr("导入"));
     m_searchField->setPlaceholderText(tr("搜索贴纸 / emoji..."));
     m_packCombo->setPlaceholderText(tr("更多分组…"));
+    m_bottomHome->setText(tr("首页"));
+    m_bottomGen->setText(tr("生成表情"));
+    m_bottomSettings->setText(tr("设置"));
     refreshTabBar();
     updateStickerCount();
 }

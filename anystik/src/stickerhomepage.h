@@ -12,6 +12,7 @@ class QskComboBox;
 class QskPopup;
 class QskTextLabel;
 class QskPushButton;
+class QskLinearBox;
 class StickerGridWidget;
 
 class StickerHomePage : public Page
@@ -61,6 +62,12 @@ private:
     QskComboBox* m_packCombo = nullptr;
     StickerGridWidget* m_grid = nullptr;
     bool m_keepScreenOn = true;
+
+    // ── 底部导航栏：首页 / 生成表情 / 设置 ──
+    QskLinearBox* m_bottomBar = nullptr;
+    QskPushButton* m_bottomHome = nullptr;
+    QskPushButton* m_bottomGen = nullptr;
+    QskPushButton* m_bottomSettings = nullptr;
 
     QTimer m_searchDebounce;
     QVector<StickerPackBrief> m_packs;
