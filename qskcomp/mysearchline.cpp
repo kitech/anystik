@@ -75,7 +75,7 @@ MySearchLine::MySearchLine(QQuickItem* parent)
         m_field->setEditing(true);
     });
 
-    connect(m_field, &QskTextField::textChanged, this,
+    connect(m_field, &QskTextField::textEdited, this,
         [this](const QString& text) {
             updateClearButton();
             Q_EMIT textChanged(text);
