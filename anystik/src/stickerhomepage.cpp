@@ -169,7 +169,8 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     tabBarBox->setPreferredHeight(48);
 
     m_tabBar = new QskTabBar(Qt::TopEdge, tabBarBox);
-    m_tabBar->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
+    m_tabBar->setSizePolicy(QskSizePolicy::Fixed, QskSizePolicy::Expanding);
+    m_tabBar->setPreferredWidth(150);
     m_tabBar->setAutoFitTabs(true);
 
     connect(m_tabBar, &QskTabBar::currentIndexChanged,
@@ -222,7 +223,7 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     m_bottomBar = new QskLinearBox(Qt::Horizontal, layout);
     m_bottomBar->setPanel(true);
     m_bottomBar->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
-    m_bottomBar->setFixedHeight(38);
+    m_bottomBar->setFixedHeight(36);
     m_bottomBar->setSpacing(4);
 
     m_bottomHome = new QskPushButton(tr("首页"), m_bottomBar);
