@@ -12,6 +12,7 @@
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
 #include <QskTextField.h>
+#include <QskGradient.h>
 #include <QskTabBar.h>
 #include <QskTabButton.h>
 #include <QskComboBox.h>
@@ -19,6 +20,7 @@
 #include <QskLabelData.h>
 #include <QskDialog.h>
 #include <QskBoxShapeMetrics.h>
+#include <QskBox.h>
 #include <QskPopup.h>
 #include <QskSimpleListBox.h>
 #include <QskFunctions.h>
@@ -143,19 +145,40 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     auto* searchRow = new QskLinearBox(Qt::Horizontal, layout);
     searchRow->setSpacing(8);
 
-    m_searchField = new QskTextField(searchRow);
-    m_searchField->setPlaceholderText(tr("搜索贴纸 / emoji..."));
-    m_searchField->setPreferredHeight(44);
-    m_searchField->setBoxShapeHint(QskTextField::Panel,
+    auto* searchBox = new QskLinearBox(Qt::Horizontal, searchRow);
+    searchBox->setPanel(true);
+    searchBox->setSpacing(4);
+    searchBox->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
+    searchBox->setFixedHeight(44);
+    searchBox->setBoxShapeHint(QskBox::Panel,
         QskBoxShapeMetrics(10, Qt::AbsoluteSize));
-    m_searchField->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    m_searchIconLabel = new QskTextLabel(QString::fromUtf8("🔍"), searchBox);
+    m_searchIconLabel->setSizePolicy(QskSizePolicy::Fixed, QskSizePolicy::Expanding);
+    m_searchIconLabel->setAlignment(Qt::AlignCenter);
+    m_searchIconLabel->setFixedWidth(28);
+
+    m_searchField = new QskTextField(searchBox);
+    m_searchField->setPlaceholderText(tr("搜索贴纸 / emoji..."));
+    m_searchField->setGradientHint(QskTextField::Panel, QskGradient(Qt::transparent));
+    m_searchField->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
+
+    m_clearBtn = new QskPushButton(QString::fromUtf8("✕"), searchBox);
+    m_clearBtn->setSizePolicy(QskSizePolicy::Fixed, QskSizePolicy::Expanding);
+    m_clearBtn->setFixedWidth(28);
+    m_clearBtn->setVisible(false);
+    connect(m_clearBtn, &QskPushButton::clicked, this, [this]() {
+        m_searchField->setText(QString());
+        m_searchField->setEditing(true);
+    });
 
     m_countLabel = new QskTextLabel(tr("0 个"), searchRow);
     m_countLabel->setPreferredWidth(72);
     m_countLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
 
     connect(m_searchField, &QskTextField::textChanged, this,
-        [this]() {            // QSkinny 新/旧版 textChanged() 签名通用（0 参 functor 兼容任意信号元数）
+        [this](const QString& text) {            // QSkinny 新/旧版 textChanged() 签名通用（0 参 functor 兼容任意信号元数）
+            m_clearBtn->setVisible(!text.isEmpty());
             m_searchDebounce.start(350);
         });
 

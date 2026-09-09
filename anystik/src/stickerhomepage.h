@@ -54,6 +54,8 @@ private:
     void showToast(const QString& text);
 
     QskTextField* m_searchField = nullptr;
+    QskTextLabel* m_searchIconLabel = nullptr;
+    QskPushButton* m_clearBtn = nullptr;
     QskTextLabel* m_countLabel = nullptr;
     QskTextLabel* m_title = nullptr;
     QskPushButton* m_pasteBtn = nullptr;
