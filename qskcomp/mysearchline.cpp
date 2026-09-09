@@ -2,6 +2,8 @@
 #include <QskAspect.h>
 #include <QskSkinManager.h>
 #include <QskBox.h>
+#include <QskBoxBorderColors.h>
+#include <QskFocusIndicator.h>
 #include <QskTextInput.h>
 #include <QskBoxShapeMetrics.h>
 #include <QskBoxBorderMetrics.h>
@@ -18,6 +20,8 @@ namespace
     constexpr qreal EDGE_GAP = 6.0;          // 悬浮图标距胶囊左右内边
     constexpr qreal ICON_GAP = 8.0;         // 悬浮图标与文本区的间距（左侧）
     constexpr int CLEAR_FADE_MS = 140;
+    constexpr qreal CAPSULE_BORDER_WIDTH = 1.0;
+    const QColor ANYSTIK_ACCENT("8ab4f8");   // 回退: Anystik 主题强调色
 }
 
 MySearchLine::MySearchLine(QQuickItem* parent)
@@ -41,14 +45,16 @@ MySearchLine::MySearchLine(QQuickItem* parent)
     m_capsule->setBoxShapeHint(QskBox::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     updateCapsuleColor();
-    m_capsule->setBoxBorderMetricsHint(QskBox::Panel,
-        QskBoxBorderMetrics(0));
+    updateCapsuleBorder(false);
     m_capsule->setZ(-1);
 
     connect(qskSkinManager, &QskSkinManager::colorSchemeChanged,
         this, [this](QskSkin::ColorScheme) { updateCapsuleColor(); });
     connect(qskSkinManager, &QskSkinManager::skinChanged,
         this, [this](QskSkin*) { updateCapsuleColor(); });
+
+    connect(m_field, &QQuickItem::activeFocusChanged,
+        this, [this](bool focused) { updateCapsuleBorder(focused); });
 
     m_iconLabel = new QskTextLabel(QString::fromUtf8("🔍"), this);
     m_iconLabel->setSizePolicy(QskSizePolicy::Fixed, QskSizePolicy::Fixed);
@@ -111,6 +117,23 @@ void MySearchLine::updateCapsuleColor()
     if (status.isValid())
         color = color.lighter(108);      // 仅比皮肤背景亮 8%
     m_capsule->setGradientHint(QskBox::Panel, QskGradient(color));
+}
+
+void MySearchLine::updateCapsuleBorder(bool focused)
+{
+    QskSkinHintStatus status;
+    auto accent = m_capsule->boxBorderColorsHint(
+        QskFocusIndicator::Panel, &status);
+    if (!status.isValid())
+        accent = QskBoxBorderColors(ANYSTIK_ACCENT);
+
+    const auto bg = m_capsule->color(QskBox::Panel);
+    const auto rest = QskBoxBorderColors(bg.darker(112));
+
+    m_capsule->setBoxBorderMetricsHint(QskBox::Panel,
+        QskBoxBorderMetrics(CAPSULE_BORDER_WIDTH));
+    m_capsule->setBoxBorderColorsHint(QskBox::Panel,
+        focused ? accent : rest);
 }
 
 void MySearchLine::updateLayout()

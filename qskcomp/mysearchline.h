@@ -29,6 +29,7 @@ protected:
 
 private:
     void updateCapsuleColor();
+    void updateCapsuleBorder(bool focused);
     void updateFieldPadding();
     void updateClearButton();
 
