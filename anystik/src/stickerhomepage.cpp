@@ -163,8 +163,7 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     tabBarBox->setPreferredHeight(48);
 
     m_tabBar = new QskTabBar(Qt::TopEdge, tabBarBox);
-    m_tabBar->setSizePolicy(QskSizePolicy::Fixed, QskSizePolicy::Expanding);
-    m_tabBar->setPreferredWidth(150);
+    m_tabBar->setSizePolicy(QskSizePolicy::MinimumExpanding, QskSizePolicy::Expanding);
     m_tabBar->setAutoFitTabs(true);
 
     connect(m_tabBar, &QskTabBar::currentIndexChanged,

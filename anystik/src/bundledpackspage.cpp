@@ -8,15 +8,25 @@
 #include <QSettings>
 #include <QSet>
 #include <QDebug>
+#include <QObject>
 
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
 #include <QskProgressBar.h>
 #include <QskDialog.h>
+#include <QskSeparator.h>
 #include <QskFontRole.h>
 #include <QskTextOptions.h>
 #include <QskSizePolicy.h>
+#include <QskGradient.h>
+#include <QskAspect.h>
+#include <QskBox.h>
+#include <QskBoxShapeMetrics.h>
+#include <QskBoxBorderMetrics.h>
+#include <QskBoxBorderColors.h>
+#include <QskSkinManager.h>
+#include <QskSkin.h>
 
 namespace {
 
@@ -33,7 +43,43 @@ QskTextLabel* makeInfoLabel(QskLinearBox* parent)
     auto* label = new QskTextLabel(parent);
     label->setFontRole(QskFontRole::Caption);
     label->setWrapMode(QskTextOptions::WrapAnywhere);
+    // 声明 height-for-width：多行 wrap 按宽度重算高度；用 Constrained（无 Shrink）
+    // 避免行高被布局压缩归零导致 status 行消失
+    label->setSizePolicy(QskSizePolicy::MinimumExpanding, QskSizePolicy::Constrained);
     return label;
+}
+
+void styleCard(QskBox* card)
+{
+    card->setPanel(true);
+    card->setBoxShapeHint(QskBox::Panel, QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+
+    // 底色/边框与皮肤背景联动（同 MySearchLine 胶囊风格）
+    QskSkinHintStatus status;
+    auto bg = card->color(QskBox::Panel, &status);
+    if (status.isValid()) {
+        card->setGradientHint(QskBox::Panel, QskGradient(bg.lighter(104)));
+        card->setBoxBorderColorsHint(QskBox::Panel,
+            QskBoxBorderColors(bg.darker(108)));
+    }
+    card->setBoxBorderMetricsHint(QskBox::Panel, QskBoxBorderMetrics(1));
+    card->setPaddingHint(QskBox::Panel, QMarginsF(10, 8, 10, 8));
+}
+
+void styleSeparator(QskSeparator* sep)
+{
+    // 独立的高对比线条色（皮肤无关）：深色主题冷白、浅色主题发丝黑，
+    // 深浅色切换时即时刷新（同 MySearchLine 胶囊联动写法）
+    auto applyLine = [sep]() {
+        const bool dark =
+            qskSkinManager->skin()->colorScheme() == QskSkin::DarkScheme;
+        QColor line = dark ? QColor(255, 255, 255, 60) : QColor(0, 0, 0, 45);
+        sep->setGradientHint(QskSeparator::Panel, QskGradient(line));
+    };
+
+    applyLine();
+    QObject::connect(qskSkinManager, &QskSkinManager::colorSchemeChanged,
+        sep, [applyLine](QskSkin::ColorScheme) { applyLine(); });
 }
 
 } // namespace
@@ -115,29 +161,29 @@ void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, con
 
     auto* card = new QskLinearBox(Qt::Vertical, body);
     card->setSpacing(6);
+    card->setSizePolicy(Qt::Vertical, QskSizePolicy::Constrained);
+    styleCard(card);
 
-    auto* r1 = new QskLinearBox(Qt::Horizontal, card);
-    r1->setSpacing(8);
-    auto* nameLabel = new QskTextLabel(name, r1);
+    auto* rTop = new QskLinearBox(Qt::Horizontal, card);
+    rTop->setSpacing(8);
+    auto* nameLabel = new QskTextLabel(name, rTop);
     nameLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
 
     if (!previewUrl.isEmpty()) {
-        row.preview = new QskPushButton(tr("预览"), r1);
-        row.preview->setPreferredSize(64, 44);
+        row.preview = new QskPushButton(tr("预览"), rTop);
+        // row.preview->setPreferredSize(64, 44);
         connect(row.preview, &QskPushButton::clicked, this,
                 [previewUrl]() { qOpenUrl(previewUrl); });
     }
 
-    row.dl = new QskPushButton(StickerStore::instance()->hasPartialDownload(url) ? tr("继续") : tr("下载安装"), r1);
-
-    auto* r2 = new QskLinearBox(Qt::Horizontal, card);
-    r2->setSpacing(8);
-    auto* urlLabel = makeInfoLabel(r2);
-    urlLabel->setText(url);
-    urlLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
-    row.fetch = new QskPushButton(tr("获取"), r2);
-    row.cancel = new QskPushButton(tr("取消"), r2);
+    row.fetch = new QskPushButton(tr("获取"), rTop);
+    row.dl = new QskPushButton(StickerStore::instance()->hasPartialDownload(url) ? tr("继续") : tr("下载安装"), rTop);
+    row.cancel = new QskPushButton(tr("取消"), rTop);
     row.cancel->setVisible(false);
+
+    auto* urlLabel = makeInfoLabel(card);
+    urlLabel->setSizePolicy(Qt::Horizontal, QskSizePolicy::Preferred);
+    urlLabel->setText(url);
 
     row.status = makeInfoLabel(card);
     const qint64 approx =
@@ -148,6 +194,10 @@ void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, con
 
     row.bar = new QskProgressBar(0.0, 1.0, card);
     row.bar->setVisible(false);
+
+    auto* sep = new QskSeparator(Qt::Horizontal, card);
+    sep->setExtent(2);
+    styleSeparator(sep);
 
     connect(row.fetch, &QskPushButton::clicked, this, [this, url]() {
         auto it = m_rows.find(url);
@@ -241,6 +291,7 @@ void BundledPacksPage::addPackRow(QskLinearBox* list, const StickerPackBrief& pa
 {
     auto* card = new QskLinearBox(Qt::Vertical, list);
     card->setSpacing(6);
+    styleCard(card);
 
     auto* top = new QskLinearBox(Qt::Horizontal, card);
     top->setSpacing(8);
@@ -265,6 +316,10 @@ void BundledPacksPage::addPackRow(QskLinearBox* list, const StickerPackBrief& pa
     btns->setSpacing(8);
     auto* uninstallBtn = new QskPushButton(tr("卸载"), btns);
     auto* wipeBtn = new QskPushButton(tr("彻底删除"), btns);
+
+    auto* sep = new QskSeparator(Qt::Horizontal, card);
+    sep->setExtent(2);
+    styleSeparator(sep);
 
     connect(toggle, &QskPushButton::clicked, this,
             [this, store, id = pack.id, installed]() {
