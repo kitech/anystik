@@ -6,7 +6,7 @@
 #include <QPointer>
 #include <QTimer>
 
-class QskTextField;
+class MySearchLine;
 class QskTabBar;
 class QskComboBox;
 class QskPopup;
@@ -53,15 +53,13 @@ private:
 
     void showToast(const QString& text);
 
-    QskTextField* m_searchField = nullptr;
-    QskTextLabel* m_searchIconLabel = nullptr;
-    QskPushButton* m_clearBtn = nullptr;
     QskTextLabel* m_countLabel = nullptr;
     QskTextLabel* m_title = nullptr;
     QskPushButton* m_pasteBtn = nullptr;
     QskPushButton* m_importBtn = nullptr;
     QskTabBar* m_tabBar = nullptr;
     QskComboBox* m_packCombo = nullptr;
+    MySearchLine* m_searchLine = nullptr;
     StickerGridWidget* m_grid = nullptr;
     bool m_keepScreenOn = true;
 

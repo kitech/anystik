@@ -7,12 +7,12 @@
 #include "pushstatusbar.h"
 #include "androidutils.h"
 #include "pagemanager.h"
+#include "mysearchline.h"
 
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
 #include <QskTextField.h>
-#include <QskGradient.h>
 #include <QskTabBar.h>
 #include <QskTabButton.h>
 #include <QskComboBox.h>
@@ -20,7 +20,6 @@
 #include <QskLabelData.h>
 #include <QskDialog.h>
 #include <QskBoxShapeMetrics.h>
-#include <QskBox.h>
 #include <QskPopup.h>
 #include <QskSimpleListBox.h>
 #include <QskFunctions.h>
@@ -145,46 +144,18 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     auto* searchRow = new QskLinearBox(Qt::Horizontal, layout);
     searchRow->setSpacing(8);
 
-    auto* searchBox = new QskLinearBox(Qt::Horizontal, searchRow);
-    searchBox->setPanel(true);
-    searchBox->setSpacing(4);
-    searchBox->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
-    searchBox->setFixedHeight(44);
-    searchBox->setBoxShapeHint(QskBox::Panel,
-        QskBoxShapeMetrics(10, Qt::AbsoluteSize));
-
-    m_searchIconLabel = new QskTextLabel(QString::fromUtf8("🔍"), searchBox);
-    m_searchIconLabel->setSizePolicy(QskSizePolicy::Fixed, QskSizePolicy::Expanding);
-    m_searchIconLabel->setAlignment(Qt::AlignCenter);
-    m_searchIconLabel->setFixedWidth(28);
-
-    m_searchField = new QskTextField(searchBox);
-    m_searchField->setPlaceholderText(tr("搜索贴纸 / emoji..."));
-    m_searchField->setGradientHint(QskTextField::Panel, QskGradient(Qt::transparent));
-    m_searchField->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
-
-    m_clearBtn = new QskPushButton(QString::fromUtf8("✕"), searchBox);
-    m_clearBtn->setSizePolicy(QskSizePolicy::Fixed, QskSizePolicy::Expanding);
-    m_clearBtn->setFixedWidth(28);
-    m_clearBtn->setVisible(false);
-    connect(m_clearBtn, &QskPushButton::clicked, this, [this]() {
-        m_searchField->setText(QString());
-        m_searchField->setEditing(true);
-    });
+    m_searchLine = new MySearchLine(searchRow);
+    m_searchLine->setPlaceholderText(tr("搜索贴纸 / emoji..."));
 
     m_countLabel = new QskTextLabel(tr("0 个"), searchRow);
     m_countLabel->setPreferredWidth(72);
     m_countLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
 
-    connect(m_searchField, &QskTextField::textChanged, this,
-        [this](const QString& text) {            // QSkinny 新/旧版 textChanged() 签名通用（0 参 functor 兼容任意信号元数）
-            m_clearBtn->setVisible(!text.isEmpty());
-            m_searchDebounce.start(350);
-        });
-
     m_searchDebounce.setSingleShot(true);
+    connect(m_searchLine, &MySearchLine::textChanged, this,
+        [this]() { m_searchDebounce.start(350); });
     connect(&m_searchDebounce, &QTimer::timeout, this,
-        [this]() { doSearch(m_searchField->text().trimmed()); });
+        [this]() { doSearch(m_searchLine->text().trimmed()); });
 
     // ── 分组 Tab ──
     auto* tabBarBox = new QskLinearBox(Qt::Horizontal, layout);
@@ -290,7 +261,7 @@ void StickerHomePage::retranslateUi()
     m_title->setText(tr("表情包"));
     m_pasteBtn->setText(tr("粘贴"));
     m_importBtn->setText(tr("导入"));
-    m_searchField->setPlaceholderText(tr("搜索贴纸 / emoji..."));
+    m_searchLine->setPlaceholderText(tr("搜索贴纸 / emoji..."));
     m_packCombo->setPlaceholderText(tr("更多分组…"));
     m_bottomHome->setText(tr("首页"));
     m_bottomGen->setText(tr("生成表情"));
@@ -342,7 +313,7 @@ void StickerHomePage::refreshTabBar()
 
 void StickerHomePage::onTabChanged(int index)
 {
-    if (!m_searchField->text().trimmed().isEmpty()) {
+    if (!m_searchLine->text().trimmed().isEmpty()) {
         return; // 搜索状态优先
     }
 
@@ -360,7 +331,7 @@ void StickerHomePage::onTabChanged(int index)
 
 void StickerHomePage::onPackComboChanged(int index)
 {
-    if (!m_searchField->text().trimmed().isEmpty()) {
+    if (!m_searchLine->text().trimmed().isEmpty()) {
         return; // 搜索状态优先
     }
     if (index < 0 || index >= m_comboPacks.size()) {

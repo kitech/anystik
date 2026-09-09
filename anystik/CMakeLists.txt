@@ -24,6 +24,7 @@ endif()
 
 set(qlapp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qldox)
 set(qlcomp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../qskcomp/qskcomp.cmake)
 
 qt_add_executable(anystik
     src/main.cpp
@@ -101,6 +102,7 @@ qt_add_executable(anystik
     ${qlcomp_dir}/limelog.cpp
     ${qlcomp_dir}/md5.c
     ${qlcomp_dir}/qcrc64.cpp
+    ${QSKCOMP_SOURCES}
 )
 
 if(APPLE)
@@ -122,6 +124,7 @@ target_include_directories(anystik PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/include
     ${qlapp_dir}
     ${qlcomp_dir}
+    ${QSKCOMP_INCLUDE_DIRS}
 )
 
 target_link_libraries(anystik PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::CorePrivate Qt6::Concurrent)
