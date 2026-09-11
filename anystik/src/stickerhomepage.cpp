@@ -110,7 +110,7 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     topBar->setPreferredHeight(56);
     topBar->setSpacing(8);
 
-    m_title = new QskTextLabel(tr("表情包"), topBar);
+    m_title = new QskTextLabel(tr("😐 表情包"), topBar);
     m_title->setAlignment(Qt::AlignCenter);
     m_title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
 
@@ -127,6 +127,21 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     connect(m_importBtn, &QskAbstractButton::clicked,
         this, &StickerHomePage::requestImportFolder);
+
+    m_syncBtn = new QskPushButton(tr("同步"), topBar);
+    m_syncBtn->setPreferredWidth(68);
+    m_syncBtn->setBoxShapeHint(QskPushButton::Panel,
+        QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+    connect(m_syncBtn, &QskAbstractButton::clicked, this, [this]() {
+        const QSettings dav;
+        const QString davUrl  = dav.value("davUrl").toString();
+        const QString davUser = dav.value("davUser").toString();
+        const QString davPass = dav.value("davPass").toString();
+        Q_UNUSED(davUrl)
+        Q_UNUSED(davUser)
+        Q_UNUSED(davPass)
+        showToast(tr("未实现"));
+    });
 
     auto* moreBtn = new QskPushButton(QString::fromUtf8("⋯"), topBar);
     moreBtn->setPreferredSize(44, 44);
@@ -257,9 +272,10 @@ void StickerHomePage::retranslateUi()
     if (!m_title)
         return;
 
-    m_title->setText(tr("表情包"));
+    m_title->setText(tr("😐 表情包"));
     m_pasteBtn->setText(tr("粘贴"));
     m_importBtn->setText(tr("导入"));
+    m_syncBtn->setText(tr("同步"));
     m_searchLine->setPlaceholderText(tr("搜索贴纸 / emoji..."));
     m_packCombo->setPlaceholderText(tr("更多分组…"));
     m_bottomHome->setText(tr("首页"));

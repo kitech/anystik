@@ -57,6 +57,7 @@ private:
     QskTextLabel* m_title = nullptr;
     QskPushButton* m_pasteBtn = nullptr;
     QskPushButton* m_importBtn = nullptr;
+    QskPushButton* m_syncBtn = nullptr;
     QskTabBar* m_tabBar = nullptr;
     QskComboBox* m_packCombo = nullptr;
     MySearchLine* m_searchLine = nullptr;

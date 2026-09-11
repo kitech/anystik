@@ -4,6 +4,8 @@ set(QSKCOMP_DIR ${CMAKE_CURRENT_LIST_DIR})
 set(QSKCOMP_SOURCES
     ${QSKCOMP_DIR}/mysearchline.h
     ${QSKCOMP_DIR}/mysearchline.cpp
+    ${QSKCOMP_DIR}/tabfocus.h
+    ${QSKCOMP_DIR}/tabfocus.cpp
 )
 
 set(QSKCOMP_INCLUDE_DIRS ${QSKCOMP_DIR})

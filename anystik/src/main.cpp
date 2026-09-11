@@ -43,6 +43,7 @@
 #include "stickerstore.h"
 #include "android_tls_bootstrap.h"
 #include "davobfus.h"
+#include "tabfocus.h"
 
 #include <memory>
 #include <thread>
@@ -351,6 +352,9 @@ int main(int argc, char* argv[]) {
     QskWindow window;
     window.setTitle("anystik");
     window.addItem(rootBox);
+
+    // Tab/Shift+Tab 手动焦点管理（QSkinny 默认关闭 tab focus 链）
+    window.installEventFilter(new MyTabFocus(&window));
 
 #ifdef Q_OS_ANDROID
     window.show();
