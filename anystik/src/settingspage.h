@@ -14,6 +14,7 @@ class QskSeparator;
 class QskLinearBox;
 class QskTextLabel;
 class QskPushButton;
+class MyScrollArea;
 
 struct FontSizes {
     int body = 21, title = 29, caption = 19, global = 16;
@@ -99,6 +100,22 @@ private:
     QskTextLabel* m_curRootLabel = nullptr;
     QskTextLabel* m_targetRootLabel = nullptr;
     QskTextLabel* m_targetPrivateLabel = nullptr;
+
+    // ── DAV 服务端 ──
+    QskLinearBox* m_davRow = nullptr;
+    QskLinearBox* m_davRow2 = nullptr;
+    QskLinearBox* m_davRow3 = nullptr;
+    QskTextField* m_davUrlEdit = nullptr;
+    QskTextField* m_davUserEdit = nullptr;
+    QskTextField* m_davPassEdit = nullptr;
+    QskTextLabel* m_davUrlLabel = nullptr;
+    QskTextLabel* m_davUserLabel = nullptr;
+    QskTextLabel* m_davPassLabel = nullptr;
+    QskSeparator* m_davSep1 = nullptr;
+    QskSeparator* m_davSep2 = nullptr;
+    QskSeparator* m_davSep3 = nullptr;
+
+    MyScrollArea* m_scroll = nullptr;
 
     static QPointer<SettingsPage> s_instance;
 };

@@ -5,6 +5,7 @@
 #include "androidutils.h"
 #include "stickerstore.h"
 #include "migrationdialog.h"
+#include "myscrollarea.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
@@ -39,11 +40,11 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     , m_debugBgSwitch(nullptr)
 {
     setAutoLayoutChildren(true);
-    auto* layout = new QskLinearBox(Qt::Vertical, this);
-    layout->setPanel(true);
+    auto* root = new QskLinearBox(Qt::Vertical, this);
+    root->setPanel(true);
 
     // ── TopBar ──
-    auto* topBar = new QskLinearBox(Qt::Horizontal, layout);
+    auto* topBar = new QskLinearBox(Qt::Horizontal, root);
     topBar->setPanel(true);
     topBar->setPreferredHeight(56);
 
@@ -56,6 +57,16 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     connect(backBtn, &QskAbstractButton::clicked, this, [this]() {
         finish();
     });
+
+    // ── 滚动主体 ──
+    m_scroll = new MyScrollArea(root);
+    m_scroll->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
+    m_scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    auto* layout = new QskLinearBox(Qt::Vertical, m_scroll);
+    m_scroll->setItemResizable(true);
+    m_scroll->setScrolledItem(layout);
 
     layout->addSpacer(24, 0);
 
@@ -267,7 +278,50 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     connect(migratePrivateBtn, &QskPushButton::clicked, this,
             [this]() { onMigrateStorageClicked(StickerStore::StorageRoot::AppPrivate); });
 
-    layout->addStretch(1);
+    new QskSeparator(Qt::Horizontal, layout);
+
+    // ── Row 14: DAV URL ──
+    m_davRow = new QskLinearBox(Qt::Horizontal, layout);
+    m_davRow->setSpacing(12);
+    m_davUrlLabel = new QskTextLabel(tr("DAV URL"), m_davRow);
+    m_davUrlLabel->setPreferredWidth(160);
+    m_davUrlEdit = new QskTextField(m_davRow);
+    m_davUrlEdit->setPlaceholderText("https://dav.example.com");
+    m_davUrlEdit->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    m_davSep1 = new QskSeparator(Qt::Horizontal, layout);
+
+    // ── Row 15: DAV User ──
+    m_davRow2 = new QskLinearBox(Qt::Horizontal, layout);
+    m_davRow2->setSpacing(12);
+    m_davUserLabel = new QskTextLabel(tr("DAV User"), m_davRow2);
+    m_davUserLabel->setPreferredWidth(160);
+    m_davUserEdit = new QskTextField(m_davRow2);
+    m_davUserEdit->setPlaceholderText(tr("username"));
+    m_davUserEdit->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    m_davSep2 = new QskSeparator(Qt::Horizontal, layout);
+
+    // ── Row 16: DAV Password ──
+    m_davRow3 = new QskLinearBox(Qt::Horizontal, layout);
+    m_davRow3->setSpacing(12);
+    m_davPassLabel = new QskTextLabel(tr("DAV Password"), m_davRow3);
+    m_davPassLabel->setPreferredWidth(160);
+    m_davPassEdit = new QskTextField(m_davRow3);
+    m_davPassEdit->setEchoMode(QskTextField::Password);
+    m_davPassEdit->setPlaceholderText(tr("password"));
+    m_davPassEdit->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    m_davSep3 = new QskSeparator(Qt::Horizontal, layout);
+
+    // ── 占位行（验证滚动后移除）──
+    for (int i = 1; i <= 5; ++i) {
+        auto* row = new QskLinearBox(Qt::Horizontal, layout);
+        row->setSpacing(12);
+        row->setPreferredHeight(48);
+        auto* lbl = new QskTextLabel(tr("Placeholder %1").arg(i), row);
+        lbl->setPreferredWidth(160);
+    }
 }
 
 SettingsPage::~SettingsPage()
@@ -502,6 +556,11 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     m_gotifyUrlEdit->setText(settings.value("gotifyUrl").toString());
     m_gotifyTokenEdit->setText(settings.value("gotifyToken").toString());
 
+    // ── Restore DAV settings ──
+    m_davUrlEdit->setText(settings.value("davUrl").toString());
+    m_davUserEdit->setText(settings.value("davUser").toString());
+    m_davPassEdit->setText(settings.value("davPass").toString());
+
     {
         QString savedBackend = settings.value("pushBackend").toString();
         int savedIdx = 0; // 0 = Auto
@@ -663,6 +722,20 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     connect(m_gotifyTokenEdit, &QskTextField::textEdited,
         this, [](const QString& text) {
             QSettings().setValue("gotifyToken", text);
+        });
+
+    // ── Row 14-16: DAV settings (save on text change) ──
+    connect(m_davUrlEdit, &QskTextField::textEdited,
+        this, [](const QString& text) {
+            QSettings().setValue("davUrl", text);
+        });
+    connect(m_davUserEdit, &QskTextField::textEdited,
+        this, [](const QString& text) {
+            QSettings().setValue("davUser", text);
+        });
+    connect(m_davPassEdit, &QskTextField::textEdited,
+        this, [](const QString& text) {
+            QSettings().setValue("davPass", text);
         });
 
     // Sync debug background (restored value may differ from QskSetup default)
