@@ -127,6 +127,7 @@ bool SyncEngine::startSync()
     m_localFileCount = 0;
     m_localDirPacks.clear();
     m_diagnosis = davbisync::SyncDiagnosis();
+    davbisync::baselineLoad(&m_base);
     m_uploadQueue.clear();
     m_downloadQueue.clear();
     m_pendingCloudRenames.clear();
@@ -134,6 +135,7 @@ bool SyncEngine::startSync()
     m_uploadIndex = 0;
     m_uploadDone = 0;
     m_uploadSkipped = 0;
+    m_downloadSkipped = 0;
     m_uploadTotal = 0;
     m_downloadDone = 0;
     m_downloadIndex = 0;
@@ -271,6 +273,7 @@ void SyncEngine::scanCloudDir(const QString& cloudRelDir)
     m_scanCurrentDir = dir;
     emit progressUpdated(0, QStringLiteral("scan"),
                          QStringLiteral("listing %1").arg(cloudRelDir));
+    probeServer();   // 阶段 B 起点，轻量 OPTIONS，仅首目录触发一次
     if (!m_parser->listDirectory(m_webdav, dir, false)) {
         finishWithError(QStringLiteral("cloud listing failed to start: %1")
                             .arg(cloudRelDir));
@@ -296,6 +299,9 @@ void SyncEngine::collectCloudItems()
             davbisync::BaselineEntry e;
             e.size = qint64(item.size());
             e.mtimeMsec = item.lastModified().toMSecsSinceEpoch();
+            if (e.mtimeMsec > 0) {
+                m_cloudMtimeAvail = true;
+            }
             // 一个目录内的重复列出（服务端不一致）以首次为准（insert 不覆盖）
             if (!m_cloudFiles.contains(rel)) {
                 m_cloudFiles.insert(rel, e);
@@ -336,6 +342,10 @@ void SyncEngine::finishCloudScan()
         return;
     }
     m_cloudReady = true;
+    if (m_cloudFileCount > 0) {
+        m_cloudMtimeDecided = true;    // 云端有文件 → getlastmodified 结论可定
+        updateRemoteFeature();
+    }
     log(davbisync::Info, QStringLiteral("scan"),
         QStringLiteral("cloud listing done: %1 files in %2 dirs")
             .arg(m_cloudFiles.size()).arg(m_scannedCloudDirs.size()));
@@ -360,22 +370,30 @@ void SyncEngine::buildOpQueue()
 
     // 统一双向 diff：以基线(状态文件)作参照，无状态文件 → 空列表(一切条目均为新增)。
     // 无任何模式/首次分支；空状态下凡「两侧都有且 size 不同」→ 双侧新增且不一致 → 冲突。
-    davbisync::SyncBaseline base;
-    davbisync::baselineLoad(&base);
+    davbisync::SyncBaseline& base = m_base;
 
-    const auto localChanged = [&base](const QString& rel, qint64 size) {
+    const auto mtimeDiffer = [](qint64 cur, qint64 baseMsec) {
+        return cur > 0 && baseMsec > 0 && cur != baseMsec;
+    };
+    // 判据 = size 不同，或 size 相同但两侧 mtime 均有效且不同（第二判据，防
+    // size-only 漏报）。任一侧 mtime 无效（0）→ 仅 size（无 mtime 服务器回退）。
+    const auto localChanged = [&base, &mtimeDiffer](
+        const QString& rel, qint64 size, qint64 mtimeMsec) {
         const auto it = base.local.constFind(rel);
         if (it == base.local.constEnd()) {
             return true;
         }
-        return it.value().size != size;
+        return it.value().size != size
+            || mtimeDiffer(mtimeMsec, it.value().mtimeMsec);
     };
-    const auto cloudChanged = [&base](const QString& rel, qint64 size) {
+    const auto cloudChanged = [&base, &mtimeDiffer](
+        const QString& rel, qint64 size, qint64 mtimeMsec) {
         const auto it = base.cloud.constFind(rel);
         if (it == base.cloud.constEnd()) {
             return true;
         }
-        return it.value().size != size;
+        return it.value().size != size
+            || mtimeDiffer(mtimeMsec, it.value().mtimeMsec);
     };
 
     for (auto it = m_localFiles.cbegin(); it != m_localFiles.cend(); ++it) {
@@ -390,12 +408,21 @@ void SyncEngine::buildOpQueue()
         }
         const qint64 cloudSize = cit.value().size;
         if (cloudSize == localSize) {
-            // 两侧一致（预检通过）→ 跳过
-            ++m_uploadSkipped;
-            continue;
+            const qint64 cloudMsec = cit.value().mtimeMsec;
+            const qint64 localMsec = it.value().mtimeMsec;
+            const bool mtimeEqual =
+                cloudMsec > 0 && localMsec > 0 && cloudMsec == localMsec;
+            if (cloudMsec <= 0 || localMsec <= 0 || mtimeEqual) {
+                // 相等预检通过：size 同，且（一侧无 mtime → size-only 一致）
+                // 或 mtime 亦同 → 跳过
+                ++m_uploadSkipped;
+                continue;
+            }
+            // size 相同但双侧 mtime 有效且不同 -> 落入下方 changed 判卷
+            // （双侧皆变且当前不一致 → 冲突双保留）
         }
-        const bool lc = localChanged(rel, localSize);
-        const bool cc = cloudChanged(rel, cloudSize);
+        const bool lc = localChanged(rel, localSize, it.value().mtimeMsec);
+        const bool cc = cloudChanged(rel, cloudSize, cit.value().mtimeMsec);
         if (lc && cc) {
             // 双侧皆变且不一致 → 冲突：云端旧版改名 .conflictN 保留，本地新版本上传覆盖
             m_conflictRelCloud.append(rel);
@@ -442,7 +469,7 @@ void SyncEngine::buildOpQueue()
             if (!p.pullEnabled) {
                 log(davbisync::Info, QStringLiteral("pack"),
                     QStringLiteral("skip download by policy: %1").arg(rel));
-                ++m_uploadSkipped;
+                ++m_downloadSkipped;
                 continue;
             }
         }
@@ -549,7 +576,9 @@ void SyncEngine::pushNext()
     }
 
     finishOk(QStringLiteral("uploaded %1, skipped %2, downloaded %3")
-                 .arg(m_uploadDone).arg(m_uploadSkipped).arg(m_downloadDone));
+             .arg(m_uploadDone)
+             .arg(m_uploadSkipped + m_downloadSkipped)
+             .arg(m_downloadDone));
 }
 
 void SyncEngine::mkdirNextChain()
@@ -601,10 +630,44 @@ void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudPa
                 const qint64 remoteSize =
                     reply->header(QNetworkRequest::ContentLengthHeader).toLongLong();
                 const QFileInfo fi(localPath);
-                // 注意：qwebdav 的 put 只带 Date 头，多数 WebDAV 服务端不(按本地时间)回写
-                // Last-Modified(常取上传时刻)。故采用 size 主判据(相当于 rclone
-                // --size-only)，保证幂等：大小一致即视为已同步。
-                if (remoteSize == fi.size()) {
+                // HEAD 幂等判定读 size + mtime 双值（与 buildOpQueue 同口径）：
+                // skip 当且仅当「大小与两侧 mtime 均相对基线未变」。两侧各自与基线比
+                //（云 mtime 不与本地 mtime 直接比——上传后云 last-modified 为服务器
+                // 时刻，互比会每轮空转重传）。
+                bool cloudUnchanged = false;
+                const qint64 headMsec = [reply]() -> qint64 {
+                    const QByteArray lm = reply->rawHeader("Last-Modified");
+                    if (lm.isEmpty()) {
+                        return 0;
+                    }
+                    const QDateTime t = QDateTime::fromString(
+                        QString::fromLatin1(lm), Qt::RFC2822Date);
+                    return t.isValid() ? t.toMSecsSinceEpoch() : 0;
+                }();
+                const qint64 baseCloudMsec =
+                    m_cloudFiles.value(cloudPath).mtimeMsec;
+                if (headMsec > 0) {
+                    // 服务器回 mtime：与基线一致才视为云端未变；
+                    // run 中途被第三方改动（mtime 漂移）→ 需重传
+                    cloudUnchanged = (headMsec == baseCloudMsec);
+                } else if (baseCloudMsec <= 0) {
+                    // 纯 size-only 型服务器（两侧均无 mtime）→ 大小一致即视为一致
+                    cloudUnchanged = true;
+                } else {
+                    // 扫描能拿到 mtime 但 HEAD 不回 → 无法确认，保守视为已变
+                    cloudUnchanged = false;
+                }
+                bool localUnchanged = false;
+                const qint64 localMsec = fi.lastModified().toMSecsSinceEpoch();
+                const auto bit = m_base.local.constFind(cloudPath);
+                if (!localMsec) {
+                    localUnchanged = true;      // 本地 mtime 不可用 → size-only 语义
+                } else if (bit == m_base.local.constEnd()) {
+                    localUnchanged = false;     // 无本地基线 → 视为已变（dst 为准）
+                } else {
+                    localUnchanged = (localMsec == bit.value().mtimeMsec);
+                }
+                if (remoteSize == fi.size() && cloudUnchanged && localUnchanged) {
                     ++m_uploadSkipped;
                     ++m_uploadIndex;
                     m_fileStartMsec = QDateTime::currentMSecsSinceEpoch(); // 跳过不算文件用时
@@ -612,7 +675,7 @@ void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudPa
                     pushNext();
                     return;
                 }
-                uploadFile(localPath, cloudPath);           // 缺失或大小不同 → 本地为准覆盖
+                uploadFile(localPath, cloudPath);   // 缺失/大小不同/任一侧相对基线已变 → 上传覆盖
             });
 }
 
@@ -633,8 +696,9 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudPath)
         finishWithError(QStringLiteral("cannot open local file: %1").arg(localPath));
         return;
     }
-    const QDateTime mtime = QFileInfo(localPath).lastModified();
-    QNetworkReply* reply = m_webdav->put(cloudPath, file, mtime);
+    // 上传不 set Date 头（远端 last-modified 只读不改写；dt 缺省为无效
+    // QDateTime，qwebdav 内部 dt.isValid() 分支跳过），云 mtime 交服务器生成
+    QNetworkReply* reply = m_webdav->put(cloudPath, file);
     m_activeReplies.append(reply);
     connect(reply, &QNetworkReply::uploadProgress, this,
             [this, reply](qint64 done, qint64 total) {
@@ -669,9 +733,24 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudPath)
                         .arg(QFileInfo(localPath).fileName())
                         .arg(m_lastFileMs / 1000.0, 0, 'f', 1));
                 // 更新云清单，保证 finishOk 的基线反映真实云端
+                // 写后回读：PUT 响应若带 Last-Modified 头直接回填真实云 mtime
+                // （远端时间戳只读不改写；解析失败则置 0 等下一轮扫描回填）
                 davbisync::BaselineEntry e;
                 e.size = QFileInfo(localPath).size();
-                e.mtimeMsec = m_fileStartMsec;
+                e.mtimeMsec = 0;
+                const QByteArray lm = reply->rawHeader("Last-Modified");
+                if (!lm.isEmpty()) {
+                    const QDateTime t =
+                        QDateTime::fromString(QString::fromLatin1(lm), Qt::RFC2822Date);
+                    if (t.isValid()) {
+                        e.mtimeMsec = t.toMSecsSinceEpoch();
+                        m_putMtimeEcho = true;
+                    }
+                }
+                if (!m_putEchoDecided) {
+                    m_putEchoDecided = true;
+                    updateRemoteFeature();
+                }
                 m_cloudFiles.insert(cloudPath, e);
                 ++m_uploadDone;
                 ++m_uploadIndex;
@@ -696,7 +775,9 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
             QStringLiteral("skip download into builtin-source pack: %1")
                 .arg(cloudRel));
         m_diagnosis.skipped.append(cloudRel);
-        ++m_uploadSkipped;
+        ++m_downloadSkipped;
+        ++m_downloadIndex;
+        emitProgress();
         pushNext();
         return;
     }
@@ -767,16 +848,26 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
                 }
                 m_tempFiles.removeOne(tmp);
                 QFile::remove(tmp);
-                m_lastFileMs = QDateTime::currentMSecsSinceEpoch() - m_fileStartMsec;
-                log(davbisync::Info, QStringLiteral("download"),
-                    QStringLiteral("完成 %1 · 用时 %2 s")
-                        .arg(cloudRel.section(QLatin1Char('/'), -1))
-                        .arg(m_lastFileMs / 1000.0, 0, 'f', 1));
                 // 更新本地清单以便 finishOk 基线（云端目录名即本地包标题）
                 const QString localAbs =
                     StickerStore::instance()->resolveStickerPath(
                         QStringLiteral("packs/") + title + QLatin1Char('/')
                         + cloudRel.section(QLatin1Char('/'), -1));
+                // 远端 last-modified 只读：把本地副本 mtime 对齐为云端值（只改本地），
+                // 下一轮不会因下载改了本地时间戳而误判为空转上传
+                const qint64 cloudMsec =
+                    m_cloudFiles.value(cloudRel).mtimeMsec;
+                if (cloudMsec > 0) {
+                    QFile f(localAbs);
+                    f.setFileTime(
+                        QDateTime::fromMSecsSinceEpoch(cloudMsec, Qt::UTC),
+                        QFileDevice::FileModificationTime);
+                }
+                m_lastFileMs = QDateTime::currentMSecsSinceEpoch() - m_fileStartMsec;
+                log(davbisync::Info, QStringLiteral("download"),
+                    QStringLiteral("完成 %1 · 用时 %2 s")
+                        .arg(cloudRel.section(QLatin1Char('/'), -1))
+                        .arg(m_lastFileMs / 1000.0, 0, 'f', 1));
                 QFileInfo fi(localAbs);
                 davbisync::BaselineEntry e;
                 e.size = fi.size();
@@ -875,6 +966,69 @@ QString SyncEngine::statDetail() const
             qint64(elapsedSec * double(total - done) / double(done)) * 1000));
     }
     return line.join(QStringLiteral(" · "));
+}
+
+void SyncEngine::probeServer()
+{
+    if (m_serverProbed || !m_webdav) {
+        return;
+    }
+    m_serverProbed = true;
+    QNetworkReply* reply = m_webdav->options(m_cloudRoot);
+    if (!reply) {
+        return;
+    }
+    m_activeReplies.append(reply);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        removeActiveReply(reply);
+        m_serverName = QString::fromLatin1(reply->rawHeader("Server"));
+        m_davCap = QString::fromLatin1(reply->rawHeader("DAV"));
+        m_allowMethods = QString::fromLatin1(reply->rawHeader("Allow"));
+        if (reply->error() == QNetworkReply::NoError
+                && !m_davCap.contains(QLatin1Char('1'))) {
+            log(davbisync::Warn, QStringLiteral("probe"),
+                QStringLiteral("非标准 WebDAV（DAV=%1），部分功能可能失败")
+                    .arg(m_davCap));
+        }
+        updateRemoteFeature();
+    });
+}
+
+void SyncEngine::updateRemoteFeature()
+{
+    QStringList lines;
+    if (m_serverProbed) {
+const QString davNames = [this]() {
+        QStringList parts;
+        if (m_davCap.contains(QLatin1Char('1'))) {
+            parts << QStringLiteral("1(文件读写)");
+        }
+        if (m_davCap.contains(QLatin1Char('2'))) {
+            parts << QStringLiteral("2(文件锁)");
+        }
+        return parts.isEmpty()
+            ? (m_davCap.isEmpty() ? QStringLiteral("?") : m_davCap)
+            : parts.join(QStringLiteral("+"));
+    }();
+    lines << QStringLiteral("服务器软件: %1 · WebDAV 等级: %2 · 可用方法: %3")
+                  .arg(m_serverName.isEmpty() ? QStringLiteral("?") : m_serverName)
+                  .arg(davNames)
+                  .arg(m_allowMethods.isEmpty() ? QStringLiteral("?") : m_allowMethods);
+    }
+    if (m_cloudMtimeDecided || m_putEchoDecided) {
+lines << QStringLiteral("文件时间: %1 · 上传回读: %2 · 判定: %3")
+                  .arg(m_cloudMtimeAvail ? QStringLiteral("支持✓")
+                                         : QStringLiteral("不支持✗"))
+                  .arg(m_putMtimeEcho ? QStringLiteral("✓")
+                                      : QStringLiteral("✗(下轮回填)"))
+                  .arg(m_cloudMtimeAvail ? QStringLiteral("大小＋时间")
+                                         : QStringLiteral("仅大小"));
+    }
+    const QString text = lines.isEmpty()
+        ? QStringLiteral("远程特征: 检测中...")
+        : QStringLiteral("远程特征: ") + lines.join(QStringLiteral(" | "));
+    emit remoteFeature(text);
+    log(davbisync::Info, QStringLiteral("probe"), text);
 }
 
 void SyncEngine::removeActiveReply(QNetworkReply* reply)

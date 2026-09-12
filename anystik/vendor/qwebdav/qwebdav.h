@@ -109,6 +109,8 @@ public:
     QNetworkReply* put(const QString& path, QIODevice* data, const QDateTime& dt = QDateTime());
     QNetworkReply* put(const QString& path, const QByteArray& data, const QDateTime& dt = QDateTime());
 
+    QNetworkReply* options(const QString& path);
+
     QNetworkReply* mkdir(const QString& dir );
     QNetworkReply* copy(const QString& pathFrom, const QString& pathTo, bool overwrite = false);
     QNetworkReply* move(const QString& pathFrom, const QString& pathTo, bool overwrite = false);

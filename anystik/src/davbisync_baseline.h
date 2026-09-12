@@ -6,8 +6,10 @@
 
 namespace davbisync {
 
-// 基线条目：相对「云盘根/StickerPacks」的云路径 → 大小（mtime 仅记录，云端 mtime
-// 未必可靠，双向判定以 size 为准，参照 rclone --size-only 语义）
+// 基线条目：相对云根的路径 → 大小 + mtime。判定 = size 不同，或 size 相同且
+// 两侧 mtime 均有效(≠0) 且不同（第二判据，防 size-only 漏报）；任一侧 mtime 无效
+// → 仅 size（无 mtime 服务器回退）。云端 last-modified 只读不改写，需要写 mtime
+// 时仅作用于本地文件（下载对齐本地 mtime）
 struct BaselineEntry
 {
     qint64 size = -1;      // 文件字节数；-1 = 未知

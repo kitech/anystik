@@ -497,6 +497,19 @@ QNetworkReply* QWebdav::put(const QString& path, const QByteArray& data, const Q
 }
 
 
+QNetworkReply* QWebdav::options(const QString& path)
+{
+    QNetworkRequest req = buildRequest();
+
+    QUrl reqUrl(m_baseUrl);
+    reqUrl.setPath(absolutePath(path));
+
+    req.setUrl(reqUrl);
+
+    return QNetworkAccessManager::sendCustomRequest(req, "OPTIONS");
+}
+
+
 QNetworkReply* QWebdav::propfind(const QString& path, const QWebdav::PropNames& props, int depth)
 {
 //    QByteArray query;

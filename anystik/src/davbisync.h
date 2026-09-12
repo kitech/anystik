@@ -95,6 +95,7 @@ signals:
     void syncLog(int level, const QString& tag, const QString& line);
     void finished(int exitCode, const QString& summaryAfterSkipped);
     void treeScanned(int files, int dirs);
+    void remoteFeature(const QString& summary);
 
 public slots:
     void setPollingDelay(int ms);
@@ -128,6 +129,8 @@ private:
     void finishWithError(const QString& msg);
     void log(davbisync::LogLevel level, const QString& tag, const QString& line);
     QString statDetail() const;
+    void probeServer();
+    void updateRemoteFeature();
     static QString canonicalRel(const QString& raw);
     QString nextConflictName(const QString& dirBase, const QString& fileBase);
 
@@ -141,6 +144,7 @@ private:
     int m_uploadIndex = 0;
     int m_uploadDone = 0;
     int m_uploadSkipped = 0;
+    int m_downloadSkipped = 0;
     int m_uploadTotal = 0;
     int m_downloadDone = 0;
     int m_downloadIndex = 0;
@@ -151,6 +155,7 @@ private:
 
     // ── 扫描状态（阶段 A/B）──
     bool m_cloudReady = false;     // 云端清单是否已就绪
+    bool m_serverProbed = false;   // OPTIONS 预检仅触发一次
     QSet<QString> m_scannedCloudDirs;   // 已列出过的云端目录
     QString m_scanCurrentDir;           // 本次正在列的目录
     QList<QPair<QString, QString>> m_pendingDirs; // 待展开子目录 (relDir, depthPath)
@@ -160,8 +165,18 @@ private:
     QMap<QString, QString> m_localDirPacks; // 云目录 rel → 本地 packId（存在性）
     QMap<QString, davbisync::PackPolicy> m_packPolicies; // id → 策略（空=默认全参与）
     davbisync::SyncDiagnosis m_diagnosis;   // 本次运行诊断（冲突/跳过清单）
+    davbisync::SyncBaseline m_base;         // 本次运行基线（startSync 载入，diff/HEAD 共用）
     int m_cloudFileCount = 0;
     int m_localFileCount = 0;
+
+    // ── 远程能力检测（零阻断；仅影响判定精确度与展示）──
+    bool m_cloudMtimeAvail = false;    // PROPFIND getlastmodified 可用
+    bool m_putMtimeEcho = false;       // PUT 响应回读 Last-Modified 可用
+    bool m_cloudMtimeDecided = false;  // 云端非空已完成判定
+    bool m_putEchoDecided = false;     // 首个上传已完成判定
+    QString m_serverName;              // OPTIONS Server 头
+    QString m_davCap;                  // OPTIONS DAV: 头
+    QString m_allowMethods;            // OPTIONS Allow 头
 
     // ── 差异（阶段 C 产物）──
     QList<QString> m_conflictRelCloud;  // 双侧皆变 → 云端旧版改名保留的路径

@@ -101,6 +101,12 @@ SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
     m_detailLabel->setWrapMode(QskTextOptions::WrapAnywhere);
     m_detailLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
 
+    // ── 远程能力检测结果行 ──
+    m_featureLabel = new QskTextLabel(QStringLiteral("远程特征: 检测中..."), m_layout);
+    m_featureLabel->setFontRole(QskFontRole::Caption);
+    m_featureLabel->setWrapMode(QskTextOptions::WrapAnywhere);
+    m_featureLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
+
     // ── 状态行 ──
     m_statusLabel = new QskTextLabel(QStringLiteral("同步中..."), m_layout);
     m_statusLabel->setFontRole(QskFontRole::Caption);
@@ -146,7 +152,7 @@ SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
     m_countLabel = new QskTextLabel(QStringLiteral("0 条"), tools);
     m_countLabel->setAlignment(Qt::AlignVCenter);
 
-    auto* copyBtn = new QskPushButton(QStringLiteral("复制当前结果"), tools);
+    auto* copyBtn = new QskPushButton(QStringLiteral("复制"), tools);
     connect(copyBtn, &QskAbstractButton::clicked, this, &SyncProgressPopup::copyFiltered);
 
     auto* clearBtn = new QskPushButton(QStringLiteral("清空"), tools);
@@ -204,6 +210,9 @@ void SyncProgressPopup::registerEngine(SyncEngine* engine)
             [this](int exitCode, const QString& summary) {
                 applyFinished(exitCode, summary);
             });
+
+    connect(engine, &SyncEngine::remoteFeature, this,
+            [this](const QString& text) { m_featureLabel->setText(text); });
 }
 
 void SyncProgressPopup::resetForRun()
@@ -217,6 +226,9 @@ void SyncProgressPopup::resetForRun()
     if (m_statusLabel) {
         m_statusLabel->setTextColor(QColor());
         m_statusLabel->setText(QStringLiteral("同步中..."));
+    }
+    if (m_featureLabel) {
+        m_featureLabel->setText(QStringLiteral("远程特征: 检测中..."));
     }
     m_cancelBtn->setEnabled(true);
     m_closeBtn->setEnabled(false);

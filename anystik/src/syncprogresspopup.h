@@ -57,6 +57,7 @@ private:
     QskProgressBar* m_progressBar = nullptr;
     QskTextLabel* m_pctLabel = nullptr;
     QskTextLabel* m_detailLabel = nullptr;
+    QskTextLabel* m_featureLabel = nullptr;
     QskTextLabel* m_statusLabel = nullptr;
     QskTextLabel* m_countLabel = nullptr;
     QskComboBox* m_levelCombo = nullptr;
