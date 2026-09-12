@@ -112,6 +112,12 @@ public:
     bool uninstallPack(const QString& packId, bool removeFiles);
     qint64 packDiskSize(const QString& packId);
     QVariantMap packMeta(const QString& packId) const;
+    // 是否为「内置下载源」安装的包：downloadedPackMeta/<id>.url 命中 kBuiltinSources
+    // （归一化匹配，去 gh-proxy 前缀）。非下载包（本地导入/粘贴板/自定义源）恒 false。
+    bool isBuiltinSourcePack(const QString& packId) const;
+    // 全部内置源包对应的云端目录名集合（sanitizeDirName(title)）：
+    // 供同步两侧统一排除——上传侧整包不列出、下载侧对命中的云目录跳过拉取
+    QStringList builtinSourceCloudDirs();
 
     void probeRemote(const QString& url);
     // 动态精确大小：获取 HEAD 成功且带 Content-Length 时写入的 realSize；无则 -1
@@ -138,6 +144,21 @@ public:
     QString storageRootPath(StorageRoot r) const;
     bool   isCurrentStoragePictures() const;
     QString currentStickerBaseDir() const { return stickerBaseDir(); }
+    // 由 DB 存储的相对路径还原为绝对路径（相对 stickerBase()，绝对路径透传）
+    QString resolveStickerPath(const QString& stored);
+
+    // ── 双向同步的下行落地接口（只增改、不做删除方向）──
+    // 云端目录名净化（同 davbisync 旧 normalizeDirName；包标题 → 合法目录名）
+    static QString sanitizeDirName(const QString& name);
+    // 按标题复用或新建贴纸包，返回 packId；失败返回空串
+    QString ensurePack(const QString& title);
+    // 把云端 get 落地的临时文件移入 base/packs/<title>/<fileName> 并入库。
+    // 幂等：目标相对路径已有 sticker 行则直接返回 true（不动字节）。
+    bool importStickerFile(const QString& packId, const QString& srcAbs,
+                           QString* errorOut = nullptr);
+    // 冲突改名：重命名本地文件并对 DB 迁移 file_path（packId + 旧文件名）
+    bool renameStickerFile(const QString& packId, const QString& oldFileName,
+                           const QString& newFileName);
 
 Q_SIGNALS:
     void dataChanged();
@@ -202,7 +223,6 @@ private:
     // resolveStickerPath() 拼回 base 得到绝对路径。
     mutable QString m_stickerBaseDir;
     QString stickerBaseDir() const;
-    QString resolveStickerPath(const QString& stored);
     QString relativeToBase(const QString& abs);
     // 迁移完全成功后清理旧 base 的贴纸文件（packs/、pastes/），避免两份拷贝
     void cleanupMigrationSource(const QString& fromRoot);

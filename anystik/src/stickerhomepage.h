@@ -3,6 +3,8 @@
 
 #include "page.h"
 #include "stickerstore.h"
+#include "davbisync.h"
+#include "syncprogresspopup.h"
 #include <QPointer>
 #include <QTimer>
 
@@ -50,6 +52,7 @@ private:
     void openStickerFolder();
 
     void showDirPicker();
+    void ensureSyncPopup(bool reset = true);
 
     void showToast(const QString& text);
 
@@ -77,6 +80,8 @@ private:
     StickerBrief m_ctxBrief;      // 长按的贴纸上下文
     StickerPackBrief m_ctxPack;   // 分组管理上下文
     QString m_activeTab;          // "" = 全部, "__recent" = 最近, 否则 packId（含粘贴板）
+    SyncEngine* m_syncEngine = nullptr;  // 懒创建；finished 恢复按钮
+    QPointer<SyncProgressPopup> m_syncPopup; // 同步进度浮动窗口（closed → deleteLater）
 };
 
 #endif // STICKER_HOME_PAGE_H

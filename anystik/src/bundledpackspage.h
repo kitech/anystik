@@ -14,8 +14,10 @@ class QskProgressBar;
 class MyScrollArea;
 
 // 表情包目录：A 区「已下载」管理已装包(版本/MD5/大小 + 启用停用/卸载/彻底删除)，
-// B 区「下载源」为代码硬编码的 4 个内置地址(获取/下载安装/继续/取消 + 进度条)。
-// 元数据(url/版本commit/MD5/目录/大小/时间)由 StickerStore 持久化于 QSettings。
+// B 区「下载源」为代码硬编码的内置地址(获取/下载安装/继续/取消 + 进度条；地址见 kBuiltinSources[]，
+// 数量由 kBuiltinSourceCount 决定，且会随内置源增减而变)。
+// 元数据(url/版本commit/MD5/目录/大小/时间)由 StickerStore 持久化于 QSettings，url 用于判定
+// 「内置源下载包」——这类包在 WebDAV 上传同步中被排除。
 class BundledPacksPage : public Page
 {
     Q_OBJECT

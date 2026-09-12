@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Quick Network Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Quick Network Concurrent Xml)
 find_package(QT NAMES Qt6 REQUIRED COMPONENTS LinguistTools)
 find_package(QSkinny REQUIRED)
 
@@ -88,6 +88,16 @@ qt_add_executable(anystik
     src/myi18n.cpp
     src/davobfus.h
     src/davobfus.cpp
+    src/davbisync.h
+    src/davbisync.cpp
+    src/davbisync_baseline.h
+    src/davbisync_baseline.cpp
+    src/syncprogresspopup.h
+    src/syncprogresspopup.cpp
+    vendor/qwebdav/qnaturalsort.cpp
+    vendor/qwebdav/qwebdav.cpp
+    vendor/qwebdav/qwebdavdirparser.cpp
+    vendor/qwebdav/qwebdavitem.cpp
     ${qlapp_dir}/cJSON.c
     ${qlapp_dir}/message_db.cpp
     ${qlapp_dir}/storage.cpp
@@ -121,13 +131,24 @@ endif()
 # ── vendor: cJSON header ──
 target_include_directories(anystik PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/qwebdav
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/include
     ${qlapp_dir}
     ${qlcomp_dir}
     ${QSKCOMP_INCLUDE_DIRS}
 )
 
-target_link_libraries(anystik PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::CorePrivate Qt6::Concurrent)
+target_link_libraries(anystik PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::CorePrivate Qt6::Concurrent Qt6::Xml)
+
+# 系统 /usr/lib 若存在更新版 Qt6 的未版本化 libQt6*.so，ld 解析 QSkinny 导入目标引入的
+# -lQt6* 时会命中错误版本（符号不匹配）。把 vendored Qt 库目录前置到链接搜索路径。
+set(_VENDORED_QT_LIB "${QT6_GCC_LIB_DIR}")
+if(NOT _VENDORED_QT_LIB AND DEFINED Qt6_DIR)
+    get_filename_component(_VENDORED_QT_LIB "${Qt6_DIR}/../../../lib" ABSOLUTE)
+endif()
+if(NOT ANDROID AND _VENDORED_QT_LIB AND EXISTS "${_VENDORED_QT_LIB}/libQt6Core.so")
+    target_link_options(anystik PRIVATE "-L${_VENDORED_QT_LIB}")
+endif()
 
 # ── extras/go 共享库 (c-shared) ──
 set(GO_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/extras/go)

@@ -8,6 +8,7 @@
 #include "androidutils.h"
 #include "pagemanager.h"
 #include "mysearchline.h"
+#include "qwebdav.h"
 
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
@@ -30,6 +31,7 @@
 #include <QTimer>
 #include <QVariantMap>
 #include <QQuickWindow>
+#include <QUrl>
 #include <QWindow>
 #include <QGuiApplication>
 #include <QClipboard>
@@ -133,14 +135,51 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     m_syncBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     connect(m_syncBtn, &QskAbstractButton::clicked, this, [this]() {
+        if (m_syncEngine && m_syncEngine->isRunning()) {
+            ensureSyncPopup(false);
+            return;
+        }
         const QSettings dav;
         const QString davUrl  = dav.value("davUrl").toString();
         const QString davUser = dav.value("davUser").toString();
         const QString davPass = dav.value("davPass").toString();
-        Q_UNUSED(davUrl)
-        Q_UNUSED(davUser)
-        Q_UNUSED(davPass)
-        showToast(tr("未实现"));
+        if (davUrl.isEmpty()) {
+            showToast(tr("请先在设置页填写 WebDAV 地址"));
+            return;
+        }
+        const QUrl url(davUrl);
+        if (!url.isValid() || url.host().isEmpty()) {
+            showToast(tr("WebDAV 地址无效"));
+            return;
+        }
+        const bool https = QUrl(davUrl).scheme().startsWith(QLatin1String("https"));
+
+        if (!m_syncEngine) {
+            m_syncEngine = new SyncEngine(this);
+            connect(m_syncEngine, &SyncEngine::finished, this,
+                    [this](int exitCode, const QString& summary) {
+                        m_syncBtn->setText(tr("同步"));
+                        if (exitCode == 0) {
+                            showToast(tr("同步完成"));
+                        } else if (exitCode == 2) {
+                            showToast(tr("已取消"));
+                        } else {
+                            showToast(tr("同步失败：%1").arg(summary));
+                        }
+                        qInfo() << "[sync] finished exit=" << exitCode << summary;
+                    });
+        }
+
+        ensureSyncPopup();
+        m_syncEngine->setConnectionSettings(
+            https ? 2 : 1,
+            url.host(),
+            url.path(),
+            davUser,
+            davPass);
+        if (m_syncEngine->startSync()) {
+            m_syncBtn->setText(tr("同步中..."));
+        }
     });
 
     auto* moreBtn = new QskPushButton(QString::fromUtf8("⋯"), topBar);
@@ -776,6 +815,23 @@ void StickerHomePage::requestPasteSticker()
     } else {
         showToast(err.isEmpty() ? tr("粘贴失败") : err);
     }
+}
+
+// ── 同步进度浮动窗口：懒创建；closed → deleteLater（QPointer 自动置空）──
+void StickerHomePage::ensureSyncPopup(bool reset)
+{
+    if (!m_syncEngine) {
+        return;
+    }
+    if (!m_syncPopup) {
+        m_syncPopup = new SyncProgressPopup(m_syncEngine, this);
+        connect(m_syncPopup, &QskPopup::closed,
+                m_syncPopup, &QObject::deleteLater);
+    }
+    if (reset) {
+        m_syncPopup->resetForRun();
+    }
+    m_syncPopup->open();
 }
 
 // ── 轻量目录选择器（纯 QSkinny，无 QtWidgets 依赖）──

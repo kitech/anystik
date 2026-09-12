@@ -20,6 +20,8 @@ public:
 
     static LogModel& instance();
 
+    explicit LogModel(QObject* parent = nullptr);
+
     void append(Level level, const QString& tag, const QString& message);
     void clear();
 
@@ -32,8 +34,6 @@ signals:
     void cleared();
 
 private:
-    LogModel(QObject* parent = nullptr);
-
     std::deque<Entry> m_buffer;
     int m_maxEntries = 500;
 };

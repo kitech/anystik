@@ -25,6 +25,7 @@
 #include <QMimeType>
 #include <QSettings>
 #include <QUrl>
+#include <QSet>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -2074,6 +2075,187 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut)
     return ok;
 }
 
+// ── 双向同步下行落地（只增改，不做删除方向）──────────────────
+
+QString StickerStore::sanitizeDirName(const QString& name)
+{
+    const QString illegal = QStringLiteral("/\\:*?\"<>|");
+    QString out;
+    out.reserve(name.size());
+    for (QChar c : name) {
+        if (!c.isPrint())
+            continue;
+        if (illegal.contains(c))
+            continue;
+        if (c < QLatin1Char(' '))
+            continue;
+        out.append(c);
+    }
+    if (out.isEmpty())
+        out = QStringLiteral("pack");
+    return out;
+}
+
+QString StickerStore::ensurePack(const QString& title)
+{
+    if (!ensureInit() || title.trimmed().isEmpty()) {
+        return QString();
+    }
+    auto& db = stickerDb();
+    QString err;
+    return findOrCreatePack(db, title, int(db.list_packs(1).size()), &err);
+}
+
+QStringList StickerStore::builtinSourceCloudDirs()
+{
+    QStringList dirs;
+    const auto packs = this->packs(1, "title ASC");
+    for (const auto& p : packs) {
+        if (isBuiltinSourcePack(p.id)) {
+            dirs << sanitizeDirName(p.title);
+        }
+    }
+    return dirs;
+}
+
+bool StickerStore::importStickerFile(const QString& packId,
+                                     const QString& srcAbs,
+                                     QString* errorOut)
+{
+    if (m_migrating) {
+        if (errorOut) *errorOut = QStringLiteral("正在迁移，请稍候再导入");
+        return false;
+    }
+    if (!ensureInit()) {
+        if (errorOut) *errorOut = QStringLiteral("storage init failed");
+        return false;
+    }
+    const QFileInfo si(srcAbs);
+    if (!si.exists() || !si.isFile()) {
+        if (errorOut) *errorOut = QStringLiteral("src file missing");
+        return false;
+    }
+
+    auto& db = stickerDb();
+    auto pack = db.get_pack(packId.toUtf8().constData());
+    if (!pack) {
+        if (errorOut) *errorOut = QStringLiteral("pack not found");
+        return false;
+    }
+    const QString title = QString::fromUtf8(pack->title.c_str());
+    const QString targetDir =
+        stickerBaseDir() + QStringLiteral("/packs/") + title;
+    if (!QDir().mkpath(targetDir)) {
+        if (errorOut) *errorOut = QStringLiteral("无法创建包目录");
+        return false;
+    }
+
+    const QString fileName = si.fileName();
+    const QString dst = targetDir + QLatin1Char('/') + fileName;
+    const QString rel = relativeToBase(dst);
+
+    // 幂等：同包同相对路径已有行 → 已导入（双向按 size 判 same，不会重入）
+    const auto existing = db.list_stickers(packId.toUtf8().constData());
+    for (const auto& e : existing) {
+        if (QString::fromStdString(e.file_path) == rel) {
+            return true;
+        }
+    }
+
+    // 解码预检（保持 importDirectory 的 svg 例外：QVariant 依赖平台 qsvg 插件）
+    const bool svgOk = QFileInfo(srcAbs).suffix().toLower()
+                       == QLatin1String("svg");
+    QImageReader probe(srcAbs);
+    probe.setAutoTransform(true);
+    if (!svgOk && !probe.size().isValid()) {
+        if (errorOut) *errorOut = QStringLiteral("图片解码失败");
+        return false;
+    }
+    const QSize imgSize = probe.size();
+
+    // 移动落地（src 为云端 get 的临时文件）；目标已存在则覆盖（rename 的 POSIX 覆盖语义）
+    if (dst != srcAbs) {
+        if (!QFile::rename(srcAbs, dst)) {
+            // 跨设备 rename 失败 → 拷贝 + 清理源
+            if (!QFile::copy(srcAbs, dst)) {
+                if (errorOut) *errorOut = QStringLiteral("文件落地失败");
+                return false;
+            }
+            QFile::remove(srcAbs);
+        }
+    }
+
+    QFileInfo fi(dst);
+    StickerRow row;
+    row.id = fileIdFor(dst).toStdString();
+    row.pack_id = pack->id;
+    row.file_path = rel.toStdString();
+    row.emoji = "";
+    row.width = int(imgSize.width());
+    row.height = int(imgSize.height());
+    row.size = int(fi.size());
+    row.last_used = 0;
+    row.position = int(db.count_stickers(packId.toUtf8().constData()));
+
+    const bool ok = db.add_sticker(row);
+    if (ok) {
+        emit dataChanged();
+    } else if (errorOut) {
+        *errorOut = QStringLiteral("贴纸入库失败");
+    }
+    return ok;
+}
+
+bool StickerStore::renameStickerFile(const QString& packId,
+                                     const QString& oldFileName,
+                                     const QString& newFileName)
+{
+    if (!ensureInit() || packId.isEmpty() || oldFileName.isEmpty()
+            || newFileName.isEmpty() || oldFileName == newFileName) {
+        return false;
+    }
+    auto& db = stickerDb();
+    auto pack = db.get_pack(packId.toUtf8().constData());
+    if (!pack) {
+        return false;
+    }
+    const QString title = QString::fromUtf8(pack->title.c_str());
+    const QString base = stickerBaseDir();
+    const QString oldAbs = base + QStringLiteral("/packs/") + title
+        + QLatin1Char('/') + oldFileName;
+    const QString newAbs = base + QStringLiteral("/packs/") + title
+        + QLatin1Char('/') + newFileName;
+
+    if (QFile::exists(oldAbs) && oldAbs != newAbs) {
+        if (QFile::exists(newAbs)) {
+            if (!QFile::remove(newAbs)) {
+                return false;
+            }
+        }
+        if (!QFile::rename(oldAbs, newAbs)) {
+            return false;
+        }
+    }
+
+    const QString oldRel = relativeToBase(oldAbs);
+    const QString newRel = relativeToBase(newAbs);
+
+    SqliteStatement stmt = Storage::instance().msgDb().prepare(
+        "UPDATE stickers SET file_path=?1 WHERE pack_id=?2 AND file_path=?3");
+    if (!stmt.isPrepared()) {
+        return false;
+    }
+    const QByteArray newRelU = newRel.toUtf8();
+    const QByteArray packU = packId.toUtf8();
+    const QByteArray oldRelU = oldRel.toUtf8();
+    if (!stmt.bind(1, newRelU.constData())) return false;
+    if (!stmt.bind(2, packU.constData())) return false;
+    if (!stmt.bind(3, oldRelU.constData())) return false;
+    const bool ok = stmt.step();
+    if (ok) emit dataChanged();
+    return ok;
+}
+
 bool StickerStore::renamePack(const QString& packId, const QString& newTitle)
 {
     if (!ensureInit() || newTitle.trimmed().isEmpty()) {
@@ -3347,4 +3529,26 @@ QVariantMap StickerStore::packMeta(const QString& packId) const
 {
     return QSettings().value(
         QStringLiteral("downloadedPackMeta/") + packId).toMap();
+}
+
+namespace {
+// 归一化内置源 URL：截掉 gh-proxy 代理前缀，防改代理导致匹配失效
+QString normalizeSourceUrl(const QString& url)
+{
+    const QString prefix = QStringLiteral("https://gh-proxy.com/");
+    return url.startsWith(prefix) ? url.mid(prefix.size()) : url;
+}
+} // namespace
+
+bool StickerStore::isBuiltinSourcePack(const QString& packId) const
+{
+    static const QSet<QString> s_builtinUrls = []() {
+        QSet<QString> set;
+        for (unsigned i = 0; i < kBuiltinSourceCount; ++i)
+            set.insert(normalizeSourceUrl(QString::fromUtf8(kBuiltinSources[i].url)));
+        return set;
+    }();
+
+    const QString url = packMeta(packId).value(QStringLiteral("url")).toString();
+    return !url.isEmpty() && s_builtinUrls.contains(normalizeSourceUrl(url));
 }
