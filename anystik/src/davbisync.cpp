@@ -46,6 +46,29 @@ QString formatDuration(qint64 msec)
         .arg(ss, 2, 10, QLatin1Char('0'));
 }
 
+// rclone num 风格冲突保留文件判定：file.conflict<digits>
+bool isConflictRel(const QString& rel)
+{
+    const int dot = rel.lastIndexOf(QLatin1Char('.'));
+    if (dot <= 0) {
+        return false;
+    }
+    const QString suff = rel.mid(dot + 1);
+    if (!suff.startsWith(QLatin1String("conflict")) || suff.size() == 8) {
+        return false;
+    }
+    const QString digits = suff.mid(8);
+    if (digits.isEmpty()) {
+        return false;
+    }
+    for (const QChar& c : digits) {
+        if (!c.isDigit()) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 SyncEngine::SyncEngine(QObject* parent)
@@ -367,6 +390,28 @@ void SyncEngine::buildOpQueue()
     m_downloadQueue.clear();
     m_conflictRelCloud.clear();
     m_conflictNames.clear();
+
+    // 过滤自身冲突保留文件（.conflict<digits>，rclone num 风格）：
+    // 多客户端共享同一 dav 目录时，不互相下载/上传传播，也不写入基线
+    //（基线由 m_localFiles/m_cloudFiles 直接导出）。仅记入诊断「跳过」。
+    for (auto it = m_localFiles.begin(); it != m_localFiles.end();) {
+        if (isConflictRel(it.key())) {
+            m_diagnosis.skipped
+                .append(QStringLiteral("%1 (conflict 保留文件)").arg(it.key()));
+            it = m_localFiles.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = m_cloudFiles.begin(); it != m_cloudFiles.end();) {
+        if (isConflictRel(it.key())) {
+            m_diagnosis.skipped
+                .append(QStringLiteral("%1 (conflict 保留文件)").arg(it.key()));
+            it = m_cloudFiles.erase(it);
+        } else {
+            ++it;
+        }
+    }
 
     // 统一双向 diff：以基线(状态文件)作参照，无状态文件 → 空列表(一切条目均为新增)。
     // 无任何模式/首次分支；空状态下凡「两侧都有且 size 不同」→ 双侧新增且不一致 → 冲突。
