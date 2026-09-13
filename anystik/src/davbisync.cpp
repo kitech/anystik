@@ -165,6 +165,8 @@ bool SyncEngine::startSync()
     m_downloadDone = 0;
     m_downloadIndex = 0;
     m_downloadFailed = 0;
+    m_totalJobs = 0;
+    m_jobsDone = 0;
     m_mkdirChain.clear();
     m_activeReplies.clear();
     m_tempFiles.clear();
@@ -577,6 +579,8 @@ void SyncEngine::buildOpQueue()
     }
 
     m_uploadTotal = m_uploadQueue.size();
+    m_totalJobs = m_uploadQueue.size()
+        + m_downloadQueue.size() + m_pendingCloudRenames.size();
     log(davbisync::Info, QStringLiteral("scan"),
         QStringLiteral("op queue: %1 uploads, %2 downloads, %3 conflicts")
             .arg(m_uploadQueue.size()).arg(m_downloadQueue.size())
@@ -635,6 +639,8 @@ void SyncEngine::pushNext()
                             QStringLiteral("cloud rename failed %1: %2")
                                 .arg(from, reply->errorString()));
                     }
+                    ++m_jobsDone;
+                    emitProgress();
                     pushNext();
                 });
         return;
@@ -772,6 +778,7 @@ void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudRe
                     ++m_uploadSkipped;
                     ++m_uploadIndex;
                     m_fileStartMsec = QDateTime::currentMSecsSinceEpoch(); // 跳过不算文件用时
+                    ++m_jobsDone;
                     emitProgress();
                     pushNext();
                     return;
@@ -805,12 +812,7 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRel)
             [this, reply](qint64 done, qint64 total) {
                 Q_UNUSED(reply)
                 if (m_running && total > 0) {
-                    const double frac =
-                        double(m_uploadIndex) / qMax(1, m_uploadQueue.size());
-                    const double inc = (total > 0 ? double(done) / double(total) : 0.0)
-                        / qMax(1, m_uploadQueue.size());
-                    m_percent = int(100.0 * (frac + inc));
-                    emit progressUpdated(m_percent, QStringLiteral("upload"), statDetail());
+                    setProgress(QStringLiteral("upload"), done, total);
                 }
             });
     connect(reply, &QNetworkReply::finished, this,
@@ -855,6 +857,7 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRel)
                 persistBaseline();
                 ++m_uploadDone;
                 ++m_uploadIndex;
+                ++m_jobsDone;
                 emitProgress();
                 pushNext();
             });
@@ -878,6 +881,7 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
         m_diagnosis.skipped.append(cloudRel);
         ++m_downloadSkipped;
         ++m_downloadIndex;
+        ++m_jobsDone;
         emitProgress();
         pushNext();
         return;
@@ -924,13 +928,7 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
             [this, reply](qint64 done, qint64 total) {
                 Q_UNUSED(reply)
                 if (m_running && total > 0) {
-                    const double frac =
-                        double(m_downloadIndex) / qMax(1, m_downloadQueue.size());
-                    const double inc = (total > 0 ? double(done) / double(total) : 0.0)
-                        / qMax(1, m_downloadQueue.size());
-                    m_percent = int(100.0 * (frac + inc));
-                    emit progressUpdated(m_percent, QStringLiteral("download"),
-                                         statDetail());
+                    setProgress(QStringLiteral("download"), done, total);
                 }
             });
     connect(reply, &QNetworkReply::finished, this,
@@ -964,6 +962,7 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
                         .append(QStringLiteral("%1 (%2)").arg(cloudRel, err));
                     ++m_downloadFailed;
                     ++m_downloadIndex;
+                    ++m_jobsDone;
                     emitProgress();
                     pushNext();
                     return;
@@ -1006,6 +1005,7 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
                 persistBaseline();
                 ++m_downloadDone;
                 ++m_downloadIndex;
+                ++m_jobsDone;
                 emitProgress();
                 pushNext();
             });
@@ -1041,12 +1041,20 @@ QString SyncEngine::cloudPath(const QString& dbRel) const
 
 void SyncEngine::emitProgress()
 {
-    const int total =
-        qMax(1, m_uploadTotal + m_downloadQueue.size() + m_pendingCloudRenames.size());
-    const int done = m_uploadIndex + m_downloadDone;
-    m_percent = int(100.0 * double(done) / double(total));
+    setProgress(QStringLiteral("sync"), 0, 0);
+}
+
+void SyncEngine::setProgress(const QString& stage, qint64 fileDone,
+                             qint64 fileTotal)
+{
+    // 统一连续标尺：已完成件数为基，当前件内 fileDone/fileTotal 折算一格，
+    // m_jobsDone 只增 → 阶段切换（改名→上传→下载）不回落、不重置
+    const double total = double(qMax(1, m_totalJobs));
+    const double inFile = (fileTotal > 0)
+        ? double(fileDone) / double(fileTotal) : 0.0;
+    m_percent = int(100.0 * (double(m_jobsDone) + inFile) / total);
     m_percent = qBound(0, m_percent, 100);
-    emit progressUpdated(m_percent, QStringLiteral("sync"), statDetail());
+    emit progressUpdated(m_percent, stage, statDetail());
 }
 
 QString SyncEngine::statDetail() const

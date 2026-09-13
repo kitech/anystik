@@ -5,6 +5,7 @@
 #include "dialogpopup.h"
 #include "toastpopup.h"
 #include "pushstatusbar.h"
+#include "settings_trace.h"
 #include "androidutils.h"
 #include "pagemanager.h"
 #include "mysearchline.h"
@@ -99,6 +100,7 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
 
     // 恢复 keepScreenOn，延迟到窗口就绪后应用
     m_keepScreenOn = QSettings().value("keepScreenOn", true).toBool();
+    trace_settings("home-keepScreenOn-read");
     QTimer::singleShot(50, this, [this]() { jniKeepScreenOn(m_keepScreenOn); });
 
     setAutoLayoutChildren(true);
@@ -140,6 +142,7 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
             return;
         }
         const QSettings dav;
+        trace_settings("home-dav-read");
         const QString davUrl  = dav.value("davUrl").toString();
         const QString davUser = dav.value("davUser").toString();
         const QString davPass = dav.value("davPass").toString();
@@ -673,6 +676,7 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
             m_keepScreenOn = !m_keepScreenOn;
             jniKeepScreenOn(m_keepScreenOn);
             QSettings().setValue("keepScreenOn", m_keepScreenOn);
+            trace_settings("home-keepScreenOn");
             qDebug() << "[StickerHomePage] keepScreenOn:" << m_keepScreenOn;
         }
 

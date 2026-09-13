@@ -1,4 +1,5 @@
 #include "myi18n.h"
+#include "settings_trace.h"
 
 #include <QLocale>
 #include <QMetaObject>
@@ -12,6 +13,7 @@ Lang& Lang::instance() {
 
 Lang::Lang() {
     const QString saved = QSettings().value("language", QString()).toString();
+    trace_settings("i18n-language-read");
     if (saved.isEmpty()) {
         const QLocale sys = QLocale::system();
         if (sys.language() == QLocale::English) {

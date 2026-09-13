@@ -6,6 +6,7 @@
 #include "stickerstore.h"
 #include "migrationdialog.h"
 #include "myscrollarea.h"
+#include "settings_trace.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
@@ -288,6 +289,7 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     m_davUrlEdit = new QskTextField(m_davRow);
     m_davUrlEdit->setPlaceholderText("https://dav.example.com");
     m_davUrlEdit->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_davUrlEdit->setPreferredHeight(40);
 
     m_davSep1 = new QskSeparator(Qt::Horizontal, layout);
 
@@ -299,6 +301,7 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     m_davUserEdit = new QskTextField(m_davRow2);
     m_davUserEdit->setPlaceholderText(tr("username"));
     m_davUserEdit->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_davUserEdit->setPreferredHeight(40);
 
     m_davSep2 = new QskSeparator(Qt::Horizontal, layout);
 
@@ -311,6 +314,7 @@ SettingsPage::SettingsPage(QQuickItem* parent)
     m_davPassEdit->setEchoMode(QskTextField::Password);
     m_davPassEdit->setPlaceholderText(tr("password"));
     m_davPassEdit->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_davPassEdit->setPreferredHeight(40);
 
     m_davSep3 = new QskSeparator(Qt::Horizontal, layout);
 
@@ -542,6 +546,7 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
 
     // Restore persisted values (before connecting handlers)
     QSettings settings;
+    trace_settings("settings-restore");
     m_transitionCombo->setCurrentIndex(settings.value("transition", 3).toInt());
     m_skinCombo->setCurrentIndex(settings.value("skin", 0).toInt());
     m_darkSwitch->setChecked(settings.value("darkMode", false).toBool());
@@ -616,6 +621,7 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     connect(m_darkSwitch, &QskAbstractButton::toggled,
         this, [](bool checked) {
             QSettings().setValue("darkMode", checked);
+            trace_settings("settings-darkMode");
             auto* s = qskSkinManager->skin();
             if (s) {
                 s->setColorScheme(checked
@@ -714,28 +720,32 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
 
     // ── Row 9b/10: Gotify settings (save on text change) ──
     // 注意：新版 QSkinny (a46557b) 中 textChanged() 无参（纯属性通知），
-    // 带文本的用户编辑信号是 textEdited(const QString&)
-    connect(m_gotifyUrlEdit, &QskTextField::textEdited,
-        this, [](const QString& text) {
-            QSettings().setValue("gotifyUrl", text);
+    // 文本一变必发（不依赖控件进入 Editing 态）；textEdited(const QString&)
+    // 在 mac 上不触发导致保存丢失，统一改用 textChanged。
+    connect(m_gotifyUrlEdit, &QskTextField::textChanged,
+        this, [this]() {
+            QSettings().setValue("gotifyUrl", m_gotifyUrlEdit->text());
         });
-    connect(m_gotifyTokenEdit, &QskTextField::textEdited,
-        this, [](const QString& text) {
-            QSettings().setValue("gotifyToken", text);
+    connect(m_gotifyTokenEdit, &QskTextField::textChanged,
+        this, [this]() {
+            QSettings().setValue("gotifyToken", m_gotifyTokenEdit->text());
         });
 
     // ── Row 14-16: DAV settings (save on text change) ──
-    connect(m_davUrlEdit, &QskTextField::textEdited,
-        this, [](const QString& text) {
-            QSettings().setValue("davUrl", text);
+    connect(m_davUrlEdit, &QskTextField::textChanged,
+        this, [this]() {
+            QSettings().setValue("davUrl", m_davUrlEdit->text());
+            trace_settings("settings-davUrl");
         });
-    connect(m_davUserEdit, &QskTextField::textEdited,
-        this, [](const QString& text) {
-            QSettings().setValue("davUser", text);
+    connect(m_davUserEdit, &QskTextField::textChanged,
+        this, [this]() {
+            QSettings().setValue("davUser", m_davUserEdit->text());
+            trace_settings("settings-davUser");
         });
-    connect(m_davPassEdit, &QskTextField::textEdited,
-        this, [](const QString& text) {
-            QSettings().setValue("davPass", text);
+    connect(m_davPassEdit, &QskTextField::textChanged,
+        this, [this]() {
+            QSettings().setValue("davPass", m_davPassEdit->text());
+            trace_settings("settings-davPass");
         });
 
     // Sync debug background (restored value may differ from QskSetup default)

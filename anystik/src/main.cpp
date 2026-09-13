@@ -4,6 +4,8 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QDateTime>
 #include <QDebug>
 #include <QStandardPaths>
 #include <QScreen>
@@ -43,6 +45,7 @@
 #include "stickerstore.h"
 #include "android_tls_bootstrap.h"
 #include "davobfus.h"
+#include "settings_trace.h"
 #include "tabfocus.h"
 
 #include <memory>
@@ -136,6 +139,43 @@ static void toggleStatsTimer(QskWindow* win)
 
 } // namespace
 
+// mac 设置落盘诊断探针：非 mac 平台为空转。
+// 输出 QSettings 实际生效格式/落盘文件/可写性/真实磁盘状态（exists/size/mtime），
+// sync() 前后各确认一次；调用点由 site 标签区分。
+void trace_settings(const char* site)
+{
+#ifdef Q_OS_MACOS
+    if (1) return;                       // 关闭探针输出：日志与磁盘探测全部跳过
+    QSettings s;
+    const QString file = s.fileName();
+    const QFileInfo fi(file);
+    qInfo().noquote() << "[S_TRACE]" << site
+        << "format=" << int(s.format())
+        << "fileName=" << file
+        << "exists=" << fi.exists()
+        << "writable=" << s.isWritable()
+        << "status=" << s.status()
+        << "cfgLoc=" << QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
+        << "keys=" << s.allKeys();
+    if (fi.exists()) {
+        qInfo().noquote() << "[S_TRACE]" << site
+            << "size=" << fi.size()
+            << "mtime=" << fi.lastModified().toString(Qt::ISODate);
+    }
+    s.sync();
+    qInfo().noquote() << "[S_TRACE]" << site
+        << "afterSync status=" << s.status();
+    const QFileInfo fia(file);
+    if (fia.exists()) {
+        qInfo().noquote() << "[S_TRACE]" << site
+            << "afterSync exists size=" << fia.size()
+            << "mtime=" << fia.lastModified().toString(Qt::ISODate);
+    }
+#else
+    Q_UNUSED(site)
+#endif
+}
+
 int main(int argc, char* argv[]) {
 #ifdef Q_OS_ANDROID
     // 必须在任何 TLS 后端探测之前完成引导与日志开关：
@@ -155,6 +195,25 @@ int main(int argc, char* argv[]) {
 
     QCoreApplication::setOrganizationName("fedlet");
     QCoreApplication::setApplicationName("anystik");
+    // mac 上 QSettings(NativeFormat) 走 CFPreferences 异步 daemon 缓存，落盘无保证
+    //（析构虽自动 sync 仍丢失）；强制 IniFormat 走文件原子写 = 与 Linux 行为一致，
+    // 确保保存及时可靠。必须早于任何 QSettings 构造。
+#ifdef Q_OS_MACOS
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    // 定向 mac 落盘到 ~/Library/Application Support（maccessible 层次浅、可写），
+    // 规避 $HOME/.config 在 mac 上不可写的问题。必须早于任何 QSettings 构造。
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+        QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation));
+    // mac 诊断探针回环：确认 QSettings 是否真的能写盘（写→sync→查磁盘→删）
+    {
+        QSettings probe;
+        probe.setValue("__diagProbe", QDateTime::currentDateTime().toString(Qt::ISODate));
+        probe.sync();
+        trace_settings("startup-probe");
+        probe.remove("__diagProbe");
+        probe.sync();
+    }
+#endif
 
     // 预告填入：把内置源 approxSize(含 -1) 一次性写入 dlProgress 元数据（零网络）
     StickerStore::instance()->seedBuiltinApproxSizes();
@@ -384,6 +443,7 @@ int main(int argc, char* argv[]) {
                 qDebug() << "[anystik] applicationState:" << state
                          << "-> syncing QSettings";
                 QSettings().sync();
+                trace_settings("lifecycle-sync");
             }
 #ifdef Q_OS_ANDROID
             if (state == Qt::ApplicationActive) {

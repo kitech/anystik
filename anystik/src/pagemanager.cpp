@@ -1,4 +1,5 @@
 #include "pagemanager.h"
+#include "settings_trace.h"
 #include <QskStackBox.h>
 #include <QSettings>
 #include <QDebug>
@@ -484,6 +485,7 @@ void PageManager::saveAllStates()
     QSettings().setValue("pageManager_history", m_history);
     QSettings().setValue("pageManager_currentId", currentPageId());
     QSettings().sync();
+    trace_settings("pageManager-save");
 
     qDebug() << "[PageManager] saved" << m_pages.size() << "pages, history:" << m_history;
 }

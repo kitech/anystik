@@ -136,6 +136,7 @@ private:
     QString cloudPath(const QString& dbRel) const;  // 业务 dbRel → 传输路径（唯一入云拼根点）
     void persistBaseline();          // 成功操作后增量原子保存基线（防中断重传）
     void emitProgress();
+    void setProgress(const QString& stage, qint64 fileDone, qint64 fileTotal);
     void finishOk(const QString& summary);
     void finishWithError(const QString& msg);
     void log(davbisync::LogLevel level, const QString& tag, const QString& line);
@@ -197,6 +198,8 @@ private:
     bool m_running = false;
     bool m_finished = false;      // 已 emit finished，防重复收尾
     int m_percent = 0;
+    int m_totalJobs = 0;           // 本轮总量 = 上传+下载+改名
+    int m_jobsDone = 0;            // 已完成/已跳过件数（只增，基准不回落）
     QWebdav *m_webdav = nullptr;
     QWebdavDirParser *m_parser = nullptr;
     QString m_rootPath = QStringLiteral("/");
