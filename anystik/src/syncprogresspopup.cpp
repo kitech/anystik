@@ -80,10 +80,18 @@ SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
     m_layout->setSpacing(8);
     m_layout->setMargins(18);
 
-    // ── 标题 ──
-    auto* title = new QskTextLabel(QStringLiteral("同步进度"), m_layout);
+    // ── 标题行（左：标题 / 右：关闭按钮）──
+    auto* titleRow = new QskLinearBox(Qt::Horizontal, m_layout);
+    titleRow->setSpacing(8);
+
+    auto* title = new QskTextLabel(QStringLiteral("同步进度"), titleRow);
     title->setFontRole(QskFontRole::Title);
-    title->setAlignment(Qt::AlignCenter);
+    title->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+    title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    m_cornerCloseBtn = new QskPushButton(QStringLiteral("✕"), titleRow);
+    connect(m_cornerCloseBtn, &QskAbstractButton::clicked,
+            this, &QskPopup::close);
 
     // ── 进度条 ──
     auto* progressRow = new QskLinearBox(Qt::Horizontal, m_layout);
@@ -170,6 +178,7 @@ SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
     m_closeBtn->setEnabled(false);
     connect(m_closeBtn, &QskAbstractButton::clicked, this, &QskPopup::close);
 
+    m_cornerCloseBtn->setEnabled(false);
     registerEngine(engine);
 
     QTimer::singleShot(0, this, [this]() { updateGeometry(); });
@@ -232,6 +241,7 @@ void SyncProgressPopup::resetForRun()
     }
     m_cancelBtn->setEnabled(true);
     m_closeBtn->setEnabled(false);
+    m_cornerCloseBtn->setEnabled(false);
 }
 
 void SyncProgressPopup::applyFinished(int exitCode, const QString& summary)
@@ -239,6 +249,7 @@ void SyncProgressPopup::applyFinished(int exitCode, const QString& summary)
     m_finished = true;
     m_cancelBtn->setEnabled(false);
     m_closeBtn->setEnabled(true);
+    m_cornerCloseBtn->setEnabled(true);
 
     if (exitCode == davbisync::FinishOk) {
         m_statusLabel->setTextColor(QColor(120, 210, 140));

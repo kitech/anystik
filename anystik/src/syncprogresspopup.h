@@ -66,6 +66,7 @@ private:
     QskScrollView* m_scrollView = nullptr;
     QskPushButton* m_cancelBtn = nullptr;
     QskPushButton* m_closeBtn = nullptr;
+    QskPushButton* m_cornerCloseBtn = nullptr;
     QTimer* m_debounceTimer = nullptr;
     QVector<QskTextLabel*> m_rows;
     bool m_finished = false;
