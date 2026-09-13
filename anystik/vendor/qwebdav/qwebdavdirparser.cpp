@@ -296,13 +296,13 @@ void QWebdavDirParser::parseMultiResponse(const QByteArray &data)
         // ingore the path itself within the listing of the path
 
         // Apache returns only path without scheme and authority
-        if ((!m_includeRequestedURI) && ((m_webdav->rootPath()+m_path) == responseName))
+        if ((!m_includeRequestedURI) && (m_webdav->absolutePath(m_path) == responseName))
             continue;
 
         // MS IIS returns URL
         if ((!m_includeRequestedURI) && responseName.startsWith("http")) {
             QUrl checkUrl(responseName);
-            if ((m_webdav->rootPath()+m_path) == checkUrl.path())
+            if ((m_webdav->absolutePath(m_path) == checkUrl.path()))
                 continue;
         }
 
@@ -318,11 +318,11 @@ void QWebdavDirParser::parseMultiResponse(const QByteArray &data)
             if (responseName.startsWith("http")) {
                 // box.com
                 QUrl checkUrl(responseName);
-                if ((m_webdav->rootPath()+m_path) == checkUrl.path()+"/")
+                if ((m_webdav->absolutePath(m_path) == checkUrl.path()+"/"))
                     m_dirList.removeLast();
             } else {
                 // dav-pocket.appspot.com
-                if ((m_webdav->rootPath()+m_path) == (responseName+"/"))
+                if ((m_webdav->absolutePath(m_path) == (responseName+"/")))
                     m_dirList.removeLast();
             }
         }

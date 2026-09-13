@@ -109,6 +109,9 @@ public:
     QNetworkReply* put(const QString& path, QIODevice* data, const QDateTime& dt = QDateTime());
     QNetworkReply* put(const QString& path, const QByteArray& data, const QDateTime& dt = QDateTime());
 
+    //! creates the absolute path from m_rootPath and relPath
+    QString absolutePath(const QString &relPath);
+
     QNetworkReply* options(const QString& path);
 
     QNetworkReply* mkdir(const QString& dir );
@@ -149,8 +152,6 @@ protected:
     QNetworkReply* createRequest(const QString& method, QNetworkRequest& req, QIODevice* outgoingData = 0 );
     QNetworkReply* createRequest(const QString& method, QNetworkRequest& req, const QByteArray& outgoingData);
 
-    //! creates the absolute path from m_rootPath and relPath
-    QString absolutePath(const QString &relPath);
 private:
 
     QNetworkRequest buildRequest();

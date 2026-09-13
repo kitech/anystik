@@ -302,8 +302,12 @@ QByteArray QWebdav::hexToDigest(const QString &input)
 
 QString QWebdav::absolutePath(const QString &relPath)
 {
-    return QString(m_rootPath + relPath);
-
+    QString path = m_rootPath;
+    if (!path.startsWith(QLatin1Char('/')))
+        path.prepend(QLatin1Char('/'));
+    if (!path.endsWith(QLatin1Char('/')))
+        path.append(QLatin1Char('/'));
+    return path + relPath;
 }
 
 QNetworkReply* QWebdav::createRequest(const QString& method, QNetworkRequest& req, QIODevice* outgoingData)
