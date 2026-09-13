@@ -8,6 +8,7 @@
 #include <QGuiApplication>
 #include <QQuickWindow>
 #include <QScreen>
+#include "version_config.h"
 
 AboutPage::AboutPage(QQuickItem* parent)
     : Page(parent)
@@ -57,7 +58,7 @@ void AboutPage::onCreate(const QVariantMap&, const QVariantMap&)
     // ── Section: App ──
     addSection("App");
     addRow("Name", "anystik");
-    addRow("Version", "0.1.0");
+    addRow("Version", QString(APP_VERSION_NAME " (%1)").arg(APP_VERSION_CODE));
     addRow("Qt", QT_VERSION_STR);
     addRow("RHI", QQuickWindow::sceneGraphBackend());
 #ifdef Q_PROCESSOR_ARM_V8

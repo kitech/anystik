@@ -4,6 +4,17 @@ export JAVA_HOME=/opt/jdk-17.0.13+11
 export ANDROID_SDK_ROOT=/opt/android-sdk
 export ANDROID_NDK_ROOT=/opt/android-ndk-r26b
 
+APP_VERSION_CODE=$(git rev-list --count HEAD)
+if [ -z "$APP_VERSION_CODE" ]; then APP_VERSION_CODE=1; fi
+cat > src/version_config.h <<H
+#ifndef VERSION_CONFIG_H
+#define VERSION_CONFIG_H
+#define APP_VERSION_NAME "0.5"
+#define APP_VERSION_CODE ${APP_VERSION_CODE}
+#endif
+H
+echo "[build-android.sh] versionConfig: 0.5 (${APP_VERSION_CODE})"
+
 QT_ANDROID=/opt/qt/6.7.3/android_arm64_v8a
 QSK_ANDROID=/opt/qt/qskinny-arm64
 QT_HOST=/opt/qt/6.7.3/gcc_64
@@ -72,6 +83,10 @@ cp app_icon.png "$APK_DIR/res/drawable/ic_launcher.png"
 
 # 移除 renderscript.srcDirs 配置（build-tools 34+ 不再支持，且会干扰自定义 Java 源码）
 sed -i '/renderscript\.srcDirs/d' "$APK_DIR/build.gradle"
+
+# 注入版本号（defaultConfig 覆盖 Manifest 默认值；先删已注入行再追加，保证幂等）
+sed -i '/^        versionCode /d; /^        versionName /d' "$APK_DIR/build.gradle"
+sed -i "/defaultConfig {/a\\        versionCode ${APP_VERSION_CODE}\n        versionName \"0.5\"" "$APK_DIR/build.gradle"
 
 # ── 注入 UnifiedPush connector（Maven 依赖，见 vendor/vendorinfos.md）──
 # build.gradle 是 androiddeployqt 生成的产物，aux-mode 不覆写已存在的文件，

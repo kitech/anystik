@@ -4,6 +4,8 @@ import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.os.Handler;
+import android.os.Looper;
 
 public class NetworkMonitor {
     private static native void onNetworkChanged(boolean isConnected, String networkType);
@@ -11,6 +13,9 @@ public class NetworkMonitor {
     private static ConnectivityManager connectivityManager;
     private static boolean lastConnected = false;
     private static String lastType = "Unknown";
+    private static Handler handler;
+    private static Runnable pendingOffline;
+    private static final int OFFLINE_DELAY_MS = 3000;
 
     public static void startMonitoring(Context ctx) {
         if (networkCallback != null) return;
@@ -20,21 +25,42 @@ public class NetworkMonitor {
         networkCallback = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(Network network) {
+                if (pendingOffline != null) {
+                    handler.removeCallbacks(pendingOffline);
+                    pendingOffline = null;
+                }
                 updateState(network);
             }
 
             @Override
             public void onLost(Network network) {
-                updateState(null);
+                if (pendingOffline != null) return;
+                pendingOffline = new Runnable() {
+                    @Override
+                    public void run() {
+                        pendingOffline = null;
+                        if (lastConnected) {
+                            lastConnected = false;
+                            lastType = "Unknown";
+                            onNetworkChanged(false, "Unknown");
+                        }
+                    }
+                };
+                handler.postDelayed(pendingOffline, OFFLINE_DELAY_MS);
             }
 
             @Override
             public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
+                if (pendingOffline != null) {
+                    handler.removeCallbacks(pendingOffline);
+                    pendingOffline = null;
+                }
                 updateStateFromCaps(caps);
             }
         };
 
         connectivityManager.registerDefaultNetworkCallback(networkCallback);
+        handler = new Handler(Looper.getMainLooper());
 
         // 初始状态检查
         Network active = connectivityManager.getActiveNetwork();
@@ -84,6 +110,10 @@ public class NetworkMonitor {
     }
 
     public static void checkCurrentNetwork(Context ctx) {
+        if (pendingOffline != null) {
+            handler.removeCallbacks(pendingOffline);
+            pendingOffline = null;
+        }
         if (connectivityManager == null) return;
         Network active = connectivityManager.getActiveNetwork();
         if (active != null) {
@@ -102,6 +132,10 @@ public class NetworkMonitor {
     }
 
     public static void stopMonitoring(Context ctx) {
+        if (pendingOffline != null) {
+            handler.removeCallbacks(pendingOffline);
+            pendingOffline = null;
+        }
         if (networkCallback != null && connectivityManager != null) {
             connectivityManager.unregisterNetworkCallback(networkCallback);
             networkCallback = null;
