@@ -141,6 +141,11 @@ bool SyncEngine::startSync()
     m_fileStartMsec = m_startMsec;
     m_lastFileMs = 0;
 
+    m_serverProbed = false;
+    m_davCap.clear();
+    m_allowMethods.clear();
+    m_serverName.clear();
+
     m_cloudReady = false;
     m_cloudFiles.clear();
     m_localFiles.clear();
@@ -168,7 +173,30 @@ bool SyncEngine::startSync()
     m_totalJobs = 0;
     m_jobsDone = 0;
     m_mkdirChain.clear();
+    // 清余：断开 + 释放上一会话在途 reply，杜绝其迟到回调污染新一轮
+    for (QNetworkReply* r : m_activeReplies) {
+        if (r) {
+            disconnect(r, nullptr, this, nullptr);
+            r->abort();
+            r->deleteLater();
+        }
+    }
     m_activeReplies.clear();
+    // 重建 parser：旧 parser 的连接/内部 reply 可能残留，拆旧建新彻底隔离
+    if (m_parser) {
+        disconnect(m_parser, nullptr, this, nullptr);
+        m_parser->deleteLater();
+    }
+    m_parser = new QWebdavDirParser(this);
+    connect(m_parser, &QWebdavDirParser::finished, this, [this]() {
+        if (!m_running) return;
+        if (m_scanCurrentDir.isEmpty()) return;
+        collectCloudItems();
+    });
+    connect(m_parser, &QWebdavDirParser::errorChanged, this,
+            [this](const QString& line) {
+                log(davbisync::Warn, QStringLiteral("webdav"), line);
+            });
     m_tempFiles.clear();
 
     emit progressUpdated(0, QStringLiteral("scan"),
@@ -192,10 +220,12 @@ void SyncEngine::abort()
     if (m_parser) {
         m_parser->abort();
     }
-    // 取消在途网络请求（其 finished 回调会带 deleteLater 返回，无需额外处理）
+    // 取消在途网络请求：断钩防迟到回调，abort + 释放
     for (QNetworkReply* r : m_activeReplies) {
         if (r) {
+            disconnect(r, nullptr, this, nullptr);
             r->abort();
+            r->deleteLater();
         }
     }
     m_activeReplies.clear();
@@ -1233,6 +1263,14 @@ void SyncEngine::finishOk(const QString& summary)
     if (!m_diagnosis.conflicts.isEmpty()) {
         s += QStringLiteral(", conflicts %1").arg(m_diagnosis.conflicts.size());
     }
+    for (QNetworkReply* r : m_activeReplies) {
+        if (r) {
+            disconnect(r, nullptr, this, nullptr);
+            r->abort();
+            r->deleteLater();
+        }
+    }
+    m_activeReplies.clear();
     log(davbisync::Info, QStringLiteral("sync"), s);
     emit progressUpdated(100, QStringLiteral("done"), s);
     emit finished(davbisync::FinishOk, s);
@@ -1248,6 +1286,14 @@ void SyncEngine::finishWithError(const QString& msg)
     log(davbisync::Error, QStringLiteral("sync"), msg);
     log(davbisync::Error, QStringLiteral("sync"),
         QStringLiteral("aborted; completed transfers kept, rerun will re-check by size"));
+    for (QNetworkReply* r : m_activeReplies) {
+        if (r) {
+            disconnect(r, nullptr, this, nullptr);
+            r->abort();
+            r->deleteLater();
+        }
+    }
+    m_activeReplies.clear();
     emit progressUpdated(m_percent, QStringLiteral("aborted"), msg);
     emit finished(davbisync::FinishError, msg);
 }
