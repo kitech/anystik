@@ -579,6 +579,7 @@ void SyncEngine::pushNext()
                     if (reply->error() == QNetworkReply::NoError) {
                         m_cloudFiles.insert(to, m_cloudFiles.value(from));
                         m_cloudFiles.remove(from);
+                        persistBaseline();
                         log(davbisync::Info, QStringLiteral("conflict"),
                             QStringLiteral("cloud rename %1 → %2")
                                 .arg(from, to));
@@ -805,6 +806,7 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudPath)
                     updateRemoteFeature();
                 }
                 m_cloudFiles.insert(cloudPath, e);
+                persistBaseline();
                 ++m_uploadDone;
                 ++m_uploadIndex;
                 emitProgress();
@@ -933,6 +935,7 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
                 e.mtimeMsec = fi.lastModified().toMSecsSinceEpoch();
                 m_localFiles.insert(cloudRel, e);
                 m_cloudToLocal.insert(cloudRel, localAbs);
+                persistBaseline();
                 ++m_downloadDone;
                 ++m_downloadIndex;
                 emitProgress();
@@ -1098,6 +1101,19 @@ void SyncEngine::removeActiveReply(QNetworkReply* reply)
     }
 }
 
+// 成功操作后增量持久化基线：中断（abort/崩溃/杀进程）后重启，已完成部分
+// 不会因旧基线缺失而被 diff 判为「双侧皆变」重传/误改 .conflictN。
+// 原子写（QSaveFile tmp+rename），每文件一次，JSON 极小可接受。
+void SyncEngine::persistBaseline()
+{
+    davbisync::SyncBaseline bl;
+    bl.lastMode = QStringLiteral("incremental");
+    bl.lastRunMsec = QDateTime::currentMSecsSinceEpoch();
+    bl.local = m_localFiles;
+    bl.cloud = m_cloudFiles;
+    davbisync::baselineSave(bl);
+}
+
 void SyncEngine::finishOk(const QString& summary)
 {
     if (m_finished) {
@@ -1109,12 +1125,7 @@ void SyncEngine::finishOk(const QString& summary)
 
     // 成功后固化基线（原子写，中断不毁旧基线）
     // 统一双向同步：状态文件固定以 incremental 记录（无模式区分，字段仅作兼容占位）
-    davbisync::SyncBaseline bl;
-    bl.lastMode = QStringLiteral("incremental");
-    bl.lastRunMsec = QDateTime::currentMSecsSinceEpoch();
-    bl.local = m_localFiles;
-    bl.cloud = m_cloudFiles;
-    davbisync::baselineSave(bl);
+    persistBaseline();
 
     QString s = summary;
     if (!m_diagnosis.conflicts.isEmpty()) {

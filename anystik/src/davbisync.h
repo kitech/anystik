@@ -124,6 +124,7 @@ private:
     void downloadFile(const QString& cloudRel, const QString& localAbs);
     void removeActiveReply(QNetworkReply* reply);   // 注销并销毁 reply
     QUrl cloudUrl(const QString& relPath) const;
+    void persistBaseline();          // 成功操作后增量原子保存基线（防中断重传）
     void emitProgress();
     void finishOk(const QString& summary);
     void finishWithError(const QString& msg);
