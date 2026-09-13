@@ -250,14 +250,22 @@ void SyncEngine::buildLocalListing()
         }
         const QString cloudRoot =
             m_packPolicies.contains(pack.id) ? policy.cloudRoot() : m_cloudRoot;
-        const QString cloudDir =
-            cloudRoot + QLatin1Char('/')
-            + StickerStore::sanitizeDirName(pack.title);
+        const auto stickers = StickerStore::instance()->stickers(pack.id);
+        // 云目录名 = db 中存储的本地目录名（file_path 目录末段），与本地目录一致；
+        // 例如「剪贴板」包本地目录为 pastes → 云端也用 anystik/pastes（不再转译 title）
+        QString dirName = StickerStore::sanitizeDirName(pack.title);
+        if (!stickers.isEmpty()) {
+            const QString d = QFileInfo(stickers.constFirst().filePath).path();
+            const QString seg = d.section(QLatin1Char('/'), -1);
+            if (!seg.isEmpty()) {
+                dirName = seg;
+            }
+        }
+        const QString cloudDir = cloudRoot + QLatin1Char('/') + dirName;
         m_localDirPacks.insert(cloudDir, pack.id);
         if (m_packPolicies.contains(pack.id) && !policy.pushEnabled) {
             continue;    // 不上传（pull 方向仍可）
         }
-        const auto stickers = StickerStore::instance()->stickers(pack.id);
         for (const auto& s : stickers) {
             const QString localAbs =
                 StickerStore::instance()->resolveStickerPath(s.filePath);
@@ -826,7 +834,13 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
         pushNext();
         return;
     }
-    const QString packId = StickerStore::instance()->ensurePack(title);
+    // 云端目录 → 本地包：优先用本机已有云目录映射（确保剪贴板 pastes 归原包），
+    // 新机器无映射时以云目录段为标题建包（目录名两端保持一致）
+    QString packId = m_localDirPacks.value(relDir);
+    if (packId.isEmpty()) {
+        const QString title = relDir.section(QLatin1Char('/'), -1);
+        packId = StickerStore::instance()->ensurePack(title);
+    }
     if (packId.isEmpty()) {
         finishWithError(QStringLiteral("ensurePack failed for cloud dir: %1")
                             .arg(relDir));
