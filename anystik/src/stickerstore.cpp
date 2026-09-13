@@ -2111,7 +2111,7 @@ QStringList StickerStore::builtinSourceCloudDirs()
     QStringList dirs;
     const auto packs = this->packs(1, "title ASC");
     for (const auto& p : packs) {
-        if (isBuiltinSourcePack(p.id)) {
+        if (isBuiltinSourcePack(p.id, p.title)) {
             dirs << sanitizeDirName(p.title);
         }
     }
@@ -3549,9 +3549,29 @@ QString normalizeSourceUrl(const QString& url)
 }
 } // namespace
 
-bool StickerStore::isBuiltinSourcePack(const QString& packId) const
+bool StickerStore::isBuiltinSourcePack(const QString& packId,
+                                       const QString& title) const
 {
-    static const QSet<QString> s_builtinUrls = []() {
+    const QString url = packMeta(packId).value(QStringLiteral("url")).toString();
+    const QString urlNorm = normalizeSourceUrl(url);
+    for (unsigned i = 0; i < kBuiltinSourceCount; ++i) {
+        // 保持现有：下载安装写入的 url 元数据
+        const bool urlHit = !url.isEmpty()
+            && urlNorm == normalizeSourceUrl(
+                   QString::fromUtf8(kBuiltinSources[i].url));
+        // 新增：自带 name 匹配当前目录标题
+        const QString name = QString::fromUtf8(kBuiltinSources[i].name);
+        const bool nameHit = title == name || title == sanitizeDirName(name);
+        if (urlHit || nameHit)
+            return true;
+    }
+    return false;
+}
+
+QString StickerStore::builtinSourceDiag(const QString& packId,
+                                        const QString& title) const
+{
+    static const QSet<QString> s_builtinUrls = []() {   // 与 isBuiltinSourcePack 同口径
         QSet<QString> set;
         for (unsigned i = 0; i < kBuiltinSourceCount; ++i)
             set.insert(normalizeSourceUrl(QString::fromUtf8(kBuiltinSources[i].url)));
@@ -3559,5 +3579,23 @@ bool StickerStore::isBuiltinSourcePack(const QString& packId) const
     }();
 
     const QString url = packMeta(packId).value(QStringLiteral("url")).toString();
-    return !url.isEmpty() && s_builtinUrls.contains(normalizeSourceUrl(url));
+    const QString urlNorm = normalizeSourceUrl(url);
+    const bool urlHit = !url.isEmpty() && s_builtinUrls.contains(urlNorm);
+
+    bool titleHit = false;
+    for (unsigned i = 0; i < kBuiltinSourceCount; ++i) {
+        const QString name = QString::fromUtf8(kBuiltinSources[i].name);
+        if (title == name || title == sanitizeDirName(name)) {
+            titleHit = true;
+            break;
+        }
+    }
+
+    return QStringLiteral("id=%1 title=%2 meta.url=%3 urlNorm=%4 urlHit=%5 builtinTitleHit=%6")
+        .arg(packId)
+        .arg(title)
+        .arg(url.isEmpty() ? QStringLiteral("(empty)") : url)
+        .arg(urlNorm.isEmpty() ? QStringLiteral("(empty)") : urlNorm)
+        .arg(urlHit ? QStringLiteral("YES") : QStringLiteral("NO"))
+        .arg(titleHit ? QStringLiteral("YES") : QStringLiteral("NO"));
 }

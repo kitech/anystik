@@ -112,9 +112,15 @@ public:
     bool uninstallPack(const QString& packId, bool removeFiles);
     qint64 packDiskSize(const QString& packId);
     QVariantMap packMeta(const QString& packId) const;
-    // 是否为「内置下载源」安装的包：downloadedPackMeta/<id>.url 命中 kBuiltinSources
-    // （归一化匹配，去 gh-proxy 前缀）。非下载包（本地导入/粘贴板/自定义源）恒 false。
-    bool isBuiltinSourcePack(const QString& packId) const;
+    // 是否为「内置下载源」的包：downloadedPackMeta/<id>.url 命中 kBuiltinSources
+    // （归一化匹配，去 gh-proxy 前缀），或标题命中 kBuiltinSources[].name
+    // （dav 云下载/导入建的包无 url 元数据，靠自带 name 判据兜底）。
+    bool isBuiltinSourcePack(const QString& packId,
+                             const QString& title) const;
+    // 诊断辅助（只读、不改判定）：返回该包的 url/标题 相对内置源表的比对结果，
+    // 供定位「内置源包为何未被排除上传」。格式：
+    //   id=.. title=.. meta.url=.. urlNorm=.. urlHit=YES/NO builtinTitleHit=YES/NO
+    QString builtinSourceDiag(const QString& packId, const QString& title) const;
     // 全部内置源包对应的云端目录名集合（sanitizeDirName(title)）：
     // 供同步两侧统一排除——上传侧整包不列出、下载侧对命中的云目录跳过拉取
     QStringList builtinSourceCloudDirs();

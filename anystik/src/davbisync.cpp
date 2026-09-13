@@ -238,7 +238,7 @@ void SyncEngine::buildLocalListing()
     const auto packs = StickerStore::instance()->packs(1, "title ASC");
     int dirs = 0;
     for (const auto& pack : packs) {
-        if (StickerStore::instance()->isBuiltinSourcePack(pack.id)) {
+        if (StickerStore::instance()->isBuiltinSourcePack(pack.id, pack.title)) {
             log(davbisync::Info, QStringLiteral("pack"),
                 QStringLiteral("skip builtin-source pack: %1").arg(pack.title));
             continue;
@@ -271,6 +271,13 @@ void SyncEngine::buildLocalListing()
         if (m_packPolicies.contains(pack.id) && !policy.pushEnabled) {
             continue;    // 不上传（pull 方向仍可）
         }
+        log(davbisync::Info, QStringLiteral("diag"),
+            QStringLiteral("upload-candidate %1")
+                .arg(StickerStore::instance()->builtinSourceDiag(
+                         pack.id, pack.title)));
+        qInfo().noquote() << "[sync] diag upload-candidate"
+                          << StickerStore::instance()->builtinSourceDiag(
+                                 pack.id, pack.title);
         for (const auto& s : stickers) {
             // 业务键 dbRel = 相对 base 的路径（StickerBrief.filePath 已是绝对路径，
             // 勿再 resolve；用 relativeToBase 归化，与云端 canonicalRel 键对称）
@@ -1061,13 +1068,13 @@ QString SyncEngine::statDetail() const
 {
     QStringList parts;
     if (m_uploadTotal > 0) {
-        parts << QStringLiteral("上传 在传%1/完%2/总%3")
-                     .arg(m_uploadIndex + 1).arg(m_uploadDone)
+        parts << QStringLiteral("上传 在传%1/要传%2/总%3")
+                     .arg(m_uploadIndex + 1).arg(m_uploadTotal)
                      .arg(m_localFiles.size());
     }
     if (!m_downloadQueue.isEmpty()) {
-        parts << QStringLiteral("下载 在传%1/完%2/总%3")
-                     .arg(m_downloadIndex + 1).arg(m_downloadDone)
+        parts << QStringLiteral("下载 在传%1/要下%2/总%3")
+                     .arg(m_downloadIndex + 1).arg(m_downloadQueue.size())
                      .arg(m_cloudFileCount);
     }
     if (!m_conflictRelCloud.isEmpty()) {
