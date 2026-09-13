@@ -15,6 +15,8 @@
 #include <QNetworkRequest>
 #include <QNetworkReply>
 
+#include <memory>
+
 namespace {
 
 QString formatBytes(qint64 n)
@@ -162,6 +164,7 @@ bool SyncEngine::startSync()
     m_uploadTotal = 0;
     m_downloadDone = 0;
     m_downloadIndex = 0;
+    m_downloadFailed = 0;
     m_mkdirChain.clear();
     m_activeReplies.clear();
     m_tempFiles.clear();
@@ -173,7 +176,8 @@ bool SyncEngine::startSync()
     buildLocalListing();
 
     // 阶段 B：云端清单（异步逐目录）
-    scanCloudDir(m_cloudRoot);
+    // 扫描根 = 业务 dbRel 空串（cloudPath 拼出云根 anystik）
+    scanCloudDir(QString());
     return true;
 }
 
@@ -247,32 +251,33 @@ void SyncEngine::buildLocalListing()
             m_diagnosis.skipped.append(pack.title);
             continue;
         }
-        const QString cloudRoot =
-            m_packPolicies.contains(pack.id) ? policy.cloudRoot() : m_cloudRoot;
         const auto stickers = StickerStore::instance()->stickers(pack.id);
-        // 云目录名 = db 中存储的本地目录名（file_path 目录末段），与本地目录一致；
-        // 例如「剪贴板」包本地目录为 pastes → 云端也用 anystik/pastes（不再转译 title）
-        QString dirName = StickerStore::sanitizeDirName(pack.title);
+        // 云 rel = DB 存储的相对路径直通（本地存储 root ≙ 云根，1:1 透传，
+        // 不再以目录末段转译云目录名）：
+        //   file_path=pastes/x           → 业务键/云 rel = pastes/x（云上 anystik/pastes/x）
+        //   file_path=packs/<T>/x        → 业务键/云 rel = packs/<T>/x（云上 anystik/packs/<T>/x）
+        // anystik/ 前缀只在 cloudPath()/cloudUrl()（唯一入云拼根点）临时出现，不落任何持久数据。
+        QString relDir;
         if (!stickers.isEmpty()) {
-            const QString d = QFileInfo(stickers.constFirst().filePath).path();
-            const QString seg = d.section(QLatin1Char('/'), -1);
-            if (!seg.isEmpty()) {
-                dirName = seg;
-            }
+            // StickerBrief.filePath 为 resolve 后的绝对路径 → 归化到 dbRel 父目录
+            relDir = QFileInfo(StickerStore::instance()->relativeToBase(
+                                   stickers.constFirst().filePath)).path();
         }
-        const QString cloudDir = cloudRoot + QLatin1Char('/') + dirName;
-        m_localDirPacks.insert(cloudDir, pack.id);
+        if (!relDir.isEmpty()) {
+            m_localDirPacks.insert(relDir, pack.id);
+        }
         if (m_packPolicies.contains(pack.id) && !policy.pushEnabled) {
             continue;    // 不上传（pull 方向仍可）
         }
         for (const auto& s : stickers) {
-            const QString localAbs =
-                StickerStore::instance()->resolveStickerPath(s.filePath);
+            // 业务键 dbRel = 相对 base 的路径（StickerBrief.filePath 已是绝对路径，
+            // 勿再 resolve；用 relativeToBase 归化，与云端 canonicalRel 键对称）
+            const QString localAbs = s.filePath;
+            const QString rel = StickerStore::instance()->relativeToBase(localAbs);
             const QFileInfo fi(localAbs);
             if (!fi.exists() || !fi.isFile()) {
                 continue;
             }
-            const QString rel = cloudDir + QLatin1Char('/') + fi.fileName();
             davbisync::BaselineEntry e;
             e.size = fi.size();
             e.mtimeMsec = fi.lastModified().toMSecsSinceEpoch();
@@ -291,22 +296,24 @@ void SyncEngine::buildLocalListing()
 // 阶段 B：云端清单（逐目录 listDirectory）
 // ═══════════════════════════════════════════════════════════════════
 
-void SyncEngine::scanCloudDir(const QString& cloudRelDir)
+void SyncEngine::scanCloudDir(const QString& dbRelDir)
 {
     if (!m_running) {
         return;
     }
-    QString dir = cloudRelDir;
+    // 入参为业务 dbRel；供目录列表的传输路径 = cloudPath(dbRelDir)（唯一入云拼根点）
+    const QString cloudRel = cloudPath(dbRelDir);
+    QString dir = cloudRel;
     if (!dir.endsWith(QLatin1Char('/'))) {
         dir += QLatin1Char('/');
     }
     m_scanCurrentDir = dir;
     emit progressUpdated(0, QStringLiteral("scan"),
-                         QStringLiteral("listing %1").arg(cloudRelDir));
+                         QStringLiteral("listing %1").arg(cloudRel));
     probeServer();   // 阶段 B 起点，轻量 OPTIONS，仅首目录触发一次
     if (!m_parser->listDirectory(m_webdav, dir, false)) {
         finishWithError(QStringLiteral("cloud listing failed to start: %1")
-                            .arg(cloudRelDir));
+                            .arg(cloudRel));
     }
 }
 
@@ -397,6 +404,47 @@ void SyncEngine::buildOpQueue()
     m_downloadQueue.clear();
     m_conflictRelCloud.clear();
     m_conflictNames.clear();
+
+    // 历史污染自愈：下载曾以临时文件名（anystik_dl_*）落盘/上云，且旧的 (0,0)
+    // 伪条目令 localChanged 恒真 → 重跑全量重传。此类键一律不进 diff 基准与
+    // 队列（不进基线、不上传播），仅记诊断跳过。
+    const auto isLegacyTmpRel = [](const QString& rel) {
+        return rel.section(QLatin1Char('/'), -1)
+            .startsWith(QStringLiteral("anystik_dl_"));
+    };
+    for (auto it = m_localFiles.begin(); it != m_localFiles.end();) {
+        if (isLegacyTmpRel(it.key())) {
+            m_diagnosis.skipped
+                .append(QStringLiteral("%1 (历史临时名污染，不再同步)").arg(it.key()));
+            it = m_localFiles.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = m_cloudFiles.begin(); it != m_cloudFiles.end();) {
+        if (isLegacyTmpRel(it.key())) {
+            m_diagnosis.skipped
+                .append(QStringLiteral("%1 (历史临时名污染，不再同步)").arg(it.key()));
+            it = m_cloudFiles.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = m_base.local.begin(); it != m_base.local.end();) {
+        if (isLegacyTmpRel(it.key())
+                || (it.value().size == 0 && it.value().mtimeMsec == 0)) {
+            it = m_base.local.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto it = m_base.cloud.begin(); it != m_base.cloud.end();) {
+        if (isLegacyTmpRel(it.key())) {
+            it = m_base.cloud.erase(it);
+        } else {
+            ++it;
+        }
+    }
 
     // 过滤自身冲突保留文件（.conflict<digits>，rclone num 风格）：
     // 多客户端共享同一 dav 目录时，不互相下载/上传传播，也不写入基线
@@ -567,7 +615,7 @@ void SyncEngine::pushNext()
         const auto item = m_pendingCloudRenames.takeFirst();
         const QString from = item.first;
         const QString to = item.second;
-        QNetworkReply* reply = m_webdav->move(from, to);
+        QNetworkReply* reply = m_webdav->move(cloudPath(from), cloudPath(to));
         m_activeReplies.append(reply);
         connect(reply, &QNetworkReply::finished, this,
                 [this, reply, from, to]() {
@@ -596,8 +644,8 @@ void SyncEngine::pushNext()
     if (m_uploadIndex < m_uploadQueue.size()) {
         const auto& item = m_uploadQueue.at(m_uploadIndex);
         const QString localPath = item.first;
-        const QString cloudPath = item.second;
-        const QString cloudDir = cloudPath.section(QLatin1Char('/'), 0, -2);
+        const QString cloudRel = item.second;
+        const QString cloudDir = cloudRel.section(QLatin1Char('/'), 0, -2);
         if (m_mkdirChain.isEmpty() && !m_ensuredDirs.contains(cloudDir)) {
             // 构建「根目录 → cloudDir」的完整待建链，顶层在前
             m_mkdirChain.clear();
@@ -617,7 +665,7 @@ void SyncEngine::pushNext()
             mkdirNextChain();
             return;
         }
-        checkAndUpload(localPath, cloudPath);
+        checkAndUpload(localPath, cloudRel);
         return;
     }
 
@@ -641,7 +689,7 @@ void SyncEngine::mkdirNextChain()
         return;
     }
     const QString dir = m_mkdirChain.constFirst();
-    QNetworkReply* reply = m_webdav->mkdir(dir);
+    QNetworkReply* reply = m_webdav->mkdir(cloudPath(dir));
     m_activeReplies.append(reply);
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, dir]() {
@@ -660,24 +708,24 @@ void SyncEngine::mkdirNextChain()
             });
 }
 
-void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudPath)
+void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudRel)
 {
-    QNetworkRequest req(cloudUrl(cloudPath));
+    QNetworkRequest req(cloudUrl(cloudRel));
     QNetworkReply* reply = m_webdav->head(req);
     m_activeReplies.append(reply);
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, localPath, cloudPath]() {
+            [this, reply, localPath, cloudRel]() {
                 removeActiveReply(reply);
                 if (!m_running) {
                     return;
                 }
                 if (reply->error() == QNetworkReply::ContentNotFoundError) {
-                    uploadFile(localPath, cloudPath);      // 云端不存在 → 直接上传
+                    uploadFile(localPath, cloudRel);      // 云端不存在 → 直接上传
                     return;
                 }
                 if (reply->error() != QNetworkReply::NoError) {
                     finishWithError(QStringLiteral("webdav check failed: %1 (%2)")
-                                        .arg(cloudPath, reply->errorString()));
+                                        .arg(cloudRel, reply->errorString()));
                     return;
                 }
                 const qint64 remoteSize =
@@ -698,7 +746,7 @@ void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudPa
                     return t.isValid() ? t.toMSecsSinceEpoch() : 0;
                 }();
                 const qint64 baseCloudMsec =
-                    m_cloudFiles.value(cloudPath).mtimeMsec;
+                    m_cloudFiles.value(cloudRel).mtimeMsec;
                 if (headMsec > 0) {
                     // 服务器回 mtime：与基线一致才视为云端未变；
                     // run 中途被第三方改动（mtime 漂移）→ 需重传
@@ -712,7 +760,7 @@ void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudPa
                 }
                 bool localUnchanged = false;
                 const qint64 localMsec = fi.lastModified().toMSecsSinceEpoch();
-                const auto bit = m_base.local.constFind(cloudPath);
+                const auto bit = m_base.local.constFind(cloudRel);
                 if (!localMsec) {
                     localUnchanged = true;      // 本地 mtime 不可用 → size-only 语义
                 } else if (bit == m_base.local.constEnd()) {
@@ -728,11 +776,11 @@ void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudPa
                     pushNext();
                     return;
                 }
-                uploadFile(localPath, cloudPath);   // 缺失/大小不同/任一侧相对基线已变 → 上传覆盖
+                uploadFile(localPath, cloudRel);   // 缺失/大小不同/任一侧相对基线已变 → 上传覆盖
             });
 }
 
-void SyncEngine::uploadFile(const QString& localPath, const QString& cloudPath)
+void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRel)
 {
     m_fileStartMsec = QDateTime::currentMSecsSinceEpoch();
     const QFileInfo finfo(localPath);
@@ -743,15 +791,15 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudPath)
             .arg(m_uploadIndex + 1)
             .arg(m_uploadTotal));
 
-    QFile* file = new QFile(localPath);
+    auto file = std::make_unique<QFile>(localPath);
     if (!file->open(QIODevice::ReadOnly)) {
-        delete file;
         finishWithError(QStringLiteral("cannot open local file: %1").arg(localPath));
         return;
     }
     // 上传不 set Date 头（远端 last-modified 只读不改写；dt 缺省为无效
     // QDateTime，qwebdav 内部 dt.isValid() 分支跳过），云 mtime 交服务器生成
-    QNetworkReply* reply = m_webdav->put(cloudPath, file);
+    QNetworkReply* reply = m_webdav->put(cloudPath(cloudRel),
+                                         file.get());
     m_activeReplies.append(reply);
     connect(reply, &QNetworkReply::uploadProgress, this,
             [this, reply](qint64 done, qint64 total) {
@@ -766,9 +814,8 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudPath)
                 }
             });
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, file, localPath, cloudPath]() {
+            [this, reply, file = std::move(file), localPath, cloudRel]() {
                 removeActiveReply(reply);
-                file->deleteLater();
                 if (!m_running) {
                     return;
                 }
@@ -804,7 +851,7 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudPath)
                     m_putEchoDecided = true;
                     updateRemoteFeature();
                 }
-                m_cloudFiles.insert(cloudPath, e);
+                m_cloudFiles.insert(cloudRel, e);
                 persistBaseline();
                 ++m_uploadDone;
                 ++m_uploadIndex;
@@ -848,14 +895,14 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
         return;
     }
 
-    // 临时文件，下载完成后 importStickerFile 移入 base/packs/<title>/
+    // 临时文件，下载完成后 importStickerFile 按业务 rel(cloudRel) 移入
+    //   对应目录：pastes/* → base/pastes 顶层；packs/<T>/* → base/packs/<T>
     const QString tmp = QDir::tempPath() + QLatin1Char('/')
                         + QStringLiteral("anystik_dl_")
                         + QString::number(m_downloadIndex)
                         + QLatin1Char('_') + baseName;
-    QFile* out = new QFile(tmp);
+    auto out = std::make_unique<QFile>(tmp);
     if (!out->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        delete out;
         finishWithError(QStringLiteral("cannot create temp file: %1").arg(tmp));
         return;
     }
@@ -866,8 +913,13 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
             .arg(baseName).arg(m_downloadIndex + 1)
             .arg(m_downloadQueue.size()));
 
-    QNetworkReply* reply = m_webdav->get(cloudRel, out);
+    QNetworkReply* reply = m_webdav->get(cloudPath(cloudRel));
     m_activeReplies.append(reply);
+    connect(reply, &QNetworkReply::readyRead, this,
+            [this, reply, out = out.get()]() {
+                if (m_running && out && out->isOpen())
+                    out->write(reply->readAll());
+            });
     connect(reply, &QNetworkReply::downloadProgress, this,
             [this, reply](qint64 done, qint64 total) {
                 Q_UNUSED(reply)
@@ -882,9 +934,11 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
                 }
             });
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, out, tmp, packId, cloudRel, title]() {
+            [this, reply, out = std::move(out), tmp, packId, cloudRel]() {
                 removeActiveReply(reply);
-                out->deleteLater();
+                if (out->isOpen()) {
+                    out->flush();
+                }
                 if (!m_running) {
                     return;
                 }
@@ -899,20 +953,35 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
                     return;
                 }
                 QString err;
-                if (!StickerStore::instance()->importStickerFile(packId, tmp, &err)) {
+                const QString dlName = cloudRel.section(QLatin1Char('/'), -1);
+                if (!StickerStore::instance()->importStickerFile(
+                        packId, tmp, &err, dlName, cloudRel)) {
                     m_tempFiles.removeOne(tmp);
                     QFile::remove(tmp);
-                    finishWithError(QStringLiteral("import cloud file failed: %1 (%2)")
-                                        .arg(cloudRel, err));
+                    // 单文件内容失败（如图片解码失败）不全盘中止：
+                    // 跳过该文件，继续后续队列（网络/HTTP 错误才 finishWithError）
+                    m_diagnosis.skipped
+                        .append(QStringLiteral("%1 (%2)").arg(cloudRel, err));
+                    ++m_downloadFailed;
+                    ++m_downloadIndex;
+                    emitProgress();
+                    pushNext();
                     return;
                 }
                 m_tempFiles.removeOne(tmp);
                 QFile::remove(tmp);
-                // 更新本地清单以便 finishOk 基线（云端目录名即本地包标题）
+                // 更新本地清单以便 finishOk 基线（落盘路径与业务 rel 一致：
+                // 剪贴板 base/pastes/<f>、普通包 base/packs/<T>/<f>）
                 const QString localAbs =
-                    StickerStore::instance()->resolveStickerPath(
-                        QStringLiteral("packs/") + title + QLatin1Char('/')
-                        + cloudRel.section(QLatin1Char('/'), -1));
+                    StickerStore::instance()->resolveStickerPath(cloudRel);
+                // 防御：import 已成功则 dst 必存在；避免以 (size0,mtime0)
+                // 伪条目污染基线（其曾导致重跑被全判为「本地变化」而全量重传）
+                if (!QFileInfo(localAbs).isFile()) {
+                    finishWithError(
+                        QStringLiteral("imported file missing on disk: %1")
+                            .arg(localAbs));
+                    return;
+                }
                 // 远端 last-modified 只读：把本地副本 mtime 对齐为云端值（只改本地），
                 // 下一轮不会因下载改了本地时间戳而误判为空转上传
                 const qint64 cloudMsec =
@@ -942,7 +1011,7 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
             });
 }
 
-QUrl SyncEngine::cloudUrl(const QString& relPath) const
+QUrl SyncEngine::cloudUrl(const QString& dbRel) const
 {
     QUrl u;
     u.setScheme(m_webdav->isSSL() ? QStringLiteral("https") : QStringLiteral("http"));
@@ -955,9 +1024,19 @@ QUrl SyncEngine::cloudUrl(const QString& relPath) const
     if (!p.endsWith(QLatin1Char('/'))) {
         p += QLatin1Char('/');
     }
-    p += relPath;
+    p += cloudPath(dbRel);
     u.setPath(p);
     return u;
+}
+
+QString SyncEngine::cloudPath(const QString& dbRel) const
+{
+    // 唯一入云拼接点：业务 dbRel → 传q参数（传出 传输路径）。
+    // 规律：业务域（DB/基线/内存/文件系统）一律无云根，仅此处临时添 m_cloudRoot。
+    if (dbRel.isEmpty()) {
+        return m_cloudRoot;
+    }
+    return m_cloudRoot + QLatin1Char('/') + dbRel;
 }
 
 void SyncEngine::emitProgress()
@@ -1133,6 +1212,9 @@ void SyncEngine::finishOk(const QString& summary)
     persistBaseline();
 
     QString s = summary;
+    if (m_downloadFailed > 0) {
+        s += QStringLiteral(", failed %1").arg(m_downloadFailed);
+    }
     if (!m_diagnosis.conflicts.isEmpty()) {
         s += QStringLiteral(", conflicts %1").arg(m_diagnosis.conflicts.size());
     }
@@ -1162,12 +1244,20 @@ void SyncEngine::log(davbisync::LogLevel level, const QString& tag, const QStrin
 
 QString SyncEngine::canonicalRel(const QString& raw)
 {
+    // 出云唯一剥离点：清前后斜杠后，剥掉首个目录段（=云根）。
+    // ⇒ 远端返回路径归化为业务域 dbRel（anystik/pastes/x → pastes/x）。
     QString r = raw;
     while (r.startsWith(QLatin1Char('/'))) {
         r.remove(0, 1);
     }
     while (r.endsWith(QLatin1Char('/'))) {
         r.chop(1);
+    }
+    const int slash = r.indexOf(QLatin1Char('/'));
+    if (slash < 0) {
+        r.clear();
+    } else {
+        r = r.mid(slash + 1);
     }
     return r;
 }

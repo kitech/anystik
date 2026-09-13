@@ -155,10 +155,18 @@ public:
     static QString sanitizeDirName(const QString& name);
     // 按标题复用或新建贴纸包，返回 packId；失败返回空串
     QString ensurePack(const QString& title);
-    // 把云端 get 落地的临时文件移入 base/packs/<title>/<fileName> 并入库。
-    // 幂等：目标相对路径已有 sticker 行则直接返回 true（不动字节）。
+    // 把云端 get 落地的临时文件移入目标目录并入库。
+    // targetRel 非空时落盘到该相对路径（= 业务 dbRel，与下载侧键一致）：
+    //   例 pastes/<f>     → base/pastes/<f>（剪贴板顶层，避免误入 packs/）
+    //       packs/<T>/<f> → base/packs/<T>/<f>
+    // 为空时沿用 base/packs/<title>/<fileName>（按包标题）。
+    // dstName 非空时用其作为目标文件名（下载侧传云端原始 basename，避免
+    // 以临时文件名落盘）；为空则沿用 srcAbs 文件名。幂等：目标相对路径已有
+    // sticker 行则直接返回 true（不动字节）。
     bool importStickerFile(const QString& packId, const QString& srcAbs,
-                           QString* errorOut = nullptr);
+                           QString* errorOut = nullptr,
+                           const QString& dstName = QString(),
+                           const QString& targetRel = QString());
     // 冲突改名：重命名本地文件并对 DB 迁移 file_path（packId + 旧文件名）
     bool renameStickerFile(const QString& packId, const QString& oldFileName,
                            const QString& newFileName);

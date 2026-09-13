@@ -2120,7 +2120,9 @@ QStringList StickerStore::builtinSourceCloudDirs()
 
 bool StickerStore::importStickerFile(const QString& packId,
                                      const QString& srcAbs,
-                                     QString* errorOut)
+                                     QString* errorOut,
+                                     const QString& dstName,
+                                     const QString& targetRel)
 {
     if (m_migrating) {
         if (errorOut) *errorOut = QStringLiteral("正在迁移，请稍候再导入");
@@ -2142,17 +2144,24 @@ bool StickerStore::importStickerFile(const QString& packId,
         if (errorOut) *errorOut = QStringLiteral("pack not found");
         return false;
     }
-    const QString title = QString::fromUtf8(pack->title.c_str());
-    const QString targetDir =
-        stickerBaseDir() + QStringLiteral("/packs/") + title;
+    // 目标相对路径：下载侧直传业务 dbRel（落盘 = 键一致）；为空则按包标题
+    // base/packs/<title>（其余调用）。剪贴板 pastes/<f> → base/pastes/<f>，
+    // 不再误入 packs/ 下；普通包 packs/<T>/<f> → base/packs/<T>/<f>。
+    const QString rel = targetRel.isEmpty()
+        ? QStringLiteral("packs/") + QString::fromUtf8(pack->title.c_str())
+        : targetRel;
+    const QString targetDir = stickerBaseDir() + QLatin1Char('/')
+        + QFileInfo(rel).path();
     if (!QDir().mkpath(targetDir)) {
         if (errorOut) *errorOut = QStringLiteral("无法创建包目录");
         return false;
     }
 
-    const QString fileName = si.fileName();
+    // 目标文件名：下载侧显式传云端原始 basename；其余调用沿用源文件名
+    const QString fileName = targetRel.isEmpty()
+        ? (dstName.isEmpty() ? si.fileName() : dstName)
+        : rel.section(QLatin1Char('/'), -1);
     const QString dst = targetDir + QLatin1Char('/') + fileName;
-    const QString rel = relativeToBase(dst);
 
     // 幂等：同包同相对路径已有行 → 已导入（双向按 size 判 same，不会重入）
     const auto existing = db.list_stickers(packId.toUtf8().constData());

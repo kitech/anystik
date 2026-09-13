@@ -111,13 +111,15 @@ private:
     void setRunning(bool running);
 
     // ── 双向同步（本地⇄云端；只增改 → put/get/rename/mkdir，不做删除方向）──
-    // 云路径 = 相对「云盘根/StickerPacks」的规范化路径（无前导斜杠）。
+    // 业务 rel（dbRel）= DB file_path 直传的相对路径（pastes/x、packs/<T>/x），
+    // 不含云根；云根 anystik/ 仅由 cloudPath()/cloudUrl() 在传输边界临时拼出，
+    // 从不写入 DB/基线/内存键。键 = 统一 tet dbRel。
     using FileEntryMap = QMap<QString, davbisync::BaselineEntry>;
 
     // 阶段 A：本地清单
     void buildLocalListing();
-    // 阶段 B：云端清单（逐目录 listDirectory 状态机）
-    void scanCloudDir(const QString& cloudRelDir);
+    // 阶段 B：云端清单（逐目录 listDirectory 状态机；入参为业务 dbRel）
+    void scanCloudDir(const QString& dbRelDir);
     void collectCloudItems();            // parser finished 后收集当前目录并调度下一目录
     void processPendingCloudDirs();
     void finishCloudScan();
@@ -126,11 +128,12 @@ private:
     // 阶段 D：应用
     void pushNext();
     void mkdirNextChain();          // 逐层串行 mkdir，直到完整目录链就位
-    void checkAndUpload(const QString& localPath, const QString& cloudPath);
-    void uploadFile(const QString& localPath, const QString& cloudPath);
+    void checkAndUpload(const QString& localPath, const QString& cloudRel);
+    void uploadFile(const QString& localPath, const QString& cloudRel);
     void downloadFile(const QString& cloudRel, const QString& localAbs);
     void removeActiveReply(QNetworkReply* reply);   // 注销并销毁 reply
-    QUrl cloudUrl(const QString& relPath) const;
+    QUrl cloudUrl(const QString& dbRel) const;
+    QString cloudPath(const QString& dbRel) const;  // 业务 dbRel → 传输路径（唯一入云拼根点）
     void persistBaseline();          // 成功操作后增量原子保存基线（防中断重传）
     void emitProgress();
     void finishOk(const QString& summary);
@@ -142,9 +145,9 @@ private:
     static QString canonicalRel(const QString& raw);
     QString nextConflictName(const QString& dirBase, const QString& fileBase);
 
-    QList<QPair<QString, QString>> m_uploadQueue; // (本地绝对路径, 云端相对路径)
-    QList<QPair<QString, QString>> m_downloadQueue; // (云端相对路径, 本地绝对路径)
-    QList<QPair<QString, QString>> m_pendingCloudRenames; // (旧云端rel, 新云端rel) 冲突改名
+    QList<QPair<QString, QString>> m_uploadQueue; // (本地绝对路径, 业务 dbRel)
+    QList<QPair<QString, QString>> m_downloadQueue; // (业务 dbRel, 本地绝对路径)
+    QList<QPair<QString, QString>> m_pendingCloudRenames; // (旧 dbRel, 新 dbRel) 冲突改名
     QStringList m_ensuredDirs;                    // 已确保存在的云端目录
     QStringList m_mkdirChain;                     // 待逐层 mkdir 的目录（顶层在前）
     QList<QNetworkReply*> m_activeReplies;        // 在途请求（abort 时逐一取消）
@@ -156,6 +159,7 @@ private:
     int m_uploadTotal = 0;
     int m_downloadDone = 0;
     int m_downloadIndex = 0;
+    int m_downloadFailed = 0;      // 单文件内容失败（图片解码失败等）跳过数
     qint64 m_startMsec = 0;        // 本次同步开始时刻（startSync）
     qint64 m_fileStartMsec = 0;    // 当前文件开始时刻（uploadFile）
     qint64 m_lastFileMs = 0;       // 最近完成的单个文件用时
