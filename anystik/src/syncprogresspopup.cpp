@@ -240,10 +240,10 @@ void SyncProgressPopup::applyFinished(int exitCode, const QString& summary)
     m_cancelBtn->setEnabled(false);
     m_closeBtn->setEnabled(true);
 
-    if (exitCode == 0) {
+    if (exitCode == davbisync::FinishOk) {
         m_statusLabel->setTextColor(QColor(120, 210, 140));
         m_statusLabel->setText(QStringLiteral("同步完成 · ") + summary);
-    } else if (exitCode == 2) {
+    } else if (exitCode == davbisync::FinishCancelled) {
         m_statusLabel->setTextColor(QColor(255, 180, 84));
         m_statusLabel->setText(QStringLiteral("已取消 · ") + summary);
     } else {

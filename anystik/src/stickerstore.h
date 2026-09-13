@@ -146,6 +146,9 @@ public:
     QString currentStickerBaseDir() const { return stickerBaseDir(); }
     // 由 DB 存储的相对路径还原为绝对路径（相对 stickerBase()，绝对路径透传）
     QString resolveStickerPath(const QString& stored);
+    // resolveStickerPath 的反向：绝对路径还原为相对 stickerBase() 的相对路径
+    // （base 外/绝对路径原样返回）
+    QString relativeToBase(const QString& abs);
 
     // ── 双向同步的下行落地接口（只增改、不做删除方向）──
     // 云端目录名净化（同 davbisync 旧 normalizeDirName；包标题 → 合法目录名）
@@ -223,7 +226,6 @@ private:
     // resolveStickerPath() 拼回 base 得到绝对路径。
     mutable QString m_stickerBaseDir;
     QString stickerBaseDir() const;
-    QString relativeToBase(const QString& abs);
     // 迁移完全成功后清理旧 base 的贴纸文件（packs/、pastes/），避免两份拷贝
     void cleanupMigrationSource(const QString& fromRoot);
     // 迁移异步：工作线程执行「阶段一 只复制」（不碰源/DB），全部成功后才在

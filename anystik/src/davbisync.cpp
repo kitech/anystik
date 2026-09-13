@@ -197,9 +197,8 @@ void SyncEngine::abort()
         QFile::remove(t);
     }
     m_tempFiles.clear();
-    emit progressUpdated(m_percent, QStringLiteral("cancelled"),
-                         QStringLiteral("cancel requested"));
-    emit finished(2, QStringLiteral("cancelled by user"));
+    emit progressUpdated(m_percent, QStringLiteral("cancelled"), QString());
+    emit finished(davbisync::FinishCancelled, QStringLiteral("cancel requested"));
     m_finished = true;
 }
 
@@ -975,12 +974,14 @@ QString SyncEngine::statDetail() const
 {
     QStringList parts;
     if (m_uploadTotal > 0) {
-        parts << QStringLiteral("上传 %1/%2")
-                     .arg(m_uploadIndex).arg(m_uploadTotal);
+        parts << QStringLiteral("上传 在传%1/完%2/总%3")
+                     .arg(m_uploadIndex + 1).arg(m_uploadDone)
+                     .arg(m_localFiles.size());
     }
     if (!m_downloadQueue.isEmpty()) {
-        parts << QStringLiteral("下载 %1/%2")
-                     .arg(m_downloadDone).arg(m_downloadQueue.size());
+        parts << QStringLiteral("下载 在传%1/完%2/总%3")
+                     .arg(m_downloadIndex + 1).arg(m_downloadDone)
+                     .arg(m_cloudFileCount);
     }
     if (!m_conflictRelCloud.isEmpty()) {
         parts << QStringLiteral("冲突 %1").arg(m_conflictRelCloud.size());
@@ -992,12 +993,16 @@ QString SyncEngine::statDetail() const
         curText = QStringLiteral("重命名 %1").arg(m_pendingCloudRenames.size());
     } else if (m_uploadIndex < m_uploadQueue.size()) {
         const auto& item = m_uploadQueue.at(m_uploadIndex);
-        curText = QStringLiteral("上传 %1")
-            .arg(QFileInfo(item.first).fileName());
+        curText = QStringLiteral("上传 %1").arg(
+            StickerStore::instance()->relativeToBase(item.first));
         curSizeText = formatBytes(QFileInfo(item.first).size());
     } else if (m_downloadIndex < m_downloadQueue.size()) {
         const QString rel = m_downloadQueue.at(m_downloadIndex).first;
-        curText = QStringLiteral("下载 %1").arg(rel.section(QLatin1Char('/'), -1));
+        const QString dlAbs = m_cloudToLocal.value(rel);
+        curText = QStringLiteral("下载 %1").arg(
+            dlAbs.isEmpty()
+                ? rel.section(QLatin1Char('/'), -1)
+                : StickerStore::instance()->relativeToBase(dlAbs));
         const auto cit = m_cloudFiles.constFind(rel);
         if (cit != m_cloudFiles.constEnd()) {
             curSizeText = formatBytes(cit.value().size);
@@ -1133,7 +1138,7 @@ void SyncEngine::finishOk(const QString& summary)
     }
     log(davbisync::Info, QStringLiteral("sync"), s);
     emit progressUpdated(100, QStringLiteral("done"), s);
-    emit finished(0, s);
+    emit finished(davbisync::FinishOk, s);
 }
 
 void SyncEngine::finishWithError(const QString& msg)
@@ -1147,7 +1152,7 @@ void SyncEngine::finishWithError(const QString& msg)
     log(davbisync::Error, QStringLiteral("sync"),
         QStringLiteral("aborted; completed transfers kept, rerun will re-check by size"));
     emit progressUpdated(m_percent, QStringLiteral("aborted"), msg);
-    emit finished(1, msg);
+    emit finished(davbisync::FinishError, msg);
 }
 
 void SyncEngine::log(davbisync::LogLevel level, const QString& tag, const QString& line)

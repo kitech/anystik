@@ -159,9 +159,9 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
             connect(m_syncEngine, &SyncEngine::finished, this,
                     [this](int exitCode, const QString& summary) {
                         m_syncBtn->setText(tr("同步"));
-                        if (exitCode == 0) {
+                        if (exitCode == davbisync::FinishOk) {
                             showToast(tr("同步完成"));
-                        } else if (exitCode == 2) {
+                        } else if (exitCode == davbisync::FinishCancelled) {
                             showToast(tr("已取消"));
                         } else {
                             showToast(tr("同步失败：%1").arg(summary));

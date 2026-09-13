@@ -27,6 +27,13 @@ enum LogLevel
     Error = 2
 };
 
+enum FinishCode
+{
+    FinishOk = 0,        // 同步全部成功
+    FinishError = 1,     // 出错中止
+    FinishCancelled = 2  // 用户取消
+};
+
 struct PackPolicy
 {
     bool pullEnabled = true;
