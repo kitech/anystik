@@ -992,13 +992,55 @@ static int imageAnimationFrames(const QByteArray& bytes, const QByteArray& fmt)
     return 0;
 }
 
-// 缩放自验证：缩放结果写临时文件保留，与原图对比格式+帧数，不匹配则 qWarning。
-// 保原格式语义：GIF→GIF、APNG→APNG 应一致；WebP→APNG 属既有预期转换，豁免不误报。
-static void verifyScaledResult(const QByteArray& srcRaw,
+// 全量解帧探针：把缩放/直通字节按 Qt 一直 read 到 null，统计实读帧数与"与第 1 帧互异"
+// 的帧数（QImage::copy 深拷贝帧 0 为基准逐字节 memcmp）。用于戳穿两类假动画：
+// ①图像描述块计数虚高、但真实解码仅能出首帧；②40 帧像素完全相同（退化静止）。
+// 仅对 Qt 可多帧解码的格式（GIF）有意义；APNG 走 chunk 计数，不落此探针。
+static void fullDecodeScaledFrames(const QByteArray& bytes,
+                                   int* outOkFrames,
+                                   int* outDistinctFrames)
+{
+    *outOkFrames = 0;
+    *outDistinctFrames = 1;
+    if (bytes.isEmpty()) return;
+
+    QBuffer probe;
+    probe.setData(bytes);
+    probe.open(QIODevice::ReadOnly);
+    QImageReader reader(&probe);
+    reader.setAutoTransform(true);
+    if (!reader.canRead()) return;
+
+    const bool animated = reader.supportsOption(QImageIOHandler::Animation);
+    QImage ref;
+    int n = 0;
+    for (int i = 0; i < 600; ++i) {
+        const QImage frame = reader.read();
+        if (frame.isNull() || !frame.size().isValid()) break;
+        if (ref.isNull()) {
+            ref = frame.copy();
+            *outDistinctFrames = 1;
+        } else if (frame.size() == ref.size()
+                   && memcmp(frame.constBits(), ref.constBits(),
+                             (size_t)frame.sizeInBytes()) != 0) {
+            ++(*outDistinctFrames);
+        }
+        ++n;
+        if (!animated && !reader.jumpToNextImage()) break;
+    }
+    *outOkFrames = n;
+    // 兜底：distinct 不超实读帧数
+    if (*outDistinctFrames > n) *outDistinctFrames = qMax(1, n);
+}
+
+// 缩放自验证（硬门槛）：对整份缩放结果解析一次，与原图对比格式+帧数；
+// 不一致→MISMATCH 日志 + 返回 false（剪贴板不上可疑动画字节），临时产物保留人工比对。
+// 保原格式语义：GIF→GIF、APNG→APNG 应一致；WebP→APNG / TIFF 多页→APNG 属既有预期转换。
+static bool verifyScaledResult(const QByteArray& srcRaw,
                                const QByteArray& scaledBytes,
                                const char* tag)
 {
-    if (srcRaw.isEmpty() || scaledBytes.isEmpty()) return;
+    if (srcRaw.isEmpty() || scaledBytes.isEmpty()) return false;
 
     QByteArray srcFmt, scaleFmt;
     QSize srcSize, scaleSize;
@@ -1010,8 +1052,23 @@ static void verifyScaledResult(const QByteArray& srcRaw,
     if (scaleFrames == 0)
         scaleFrames = imageAnimationFrames(scaledBytes, scaleFmt);
 
+    // 真动画判据：GIF 全量解帧实读（实读>=2 且互异>=2 才算动画）；
+    // APNG/WebP 走 chunk 计数（acTL/fcTL/fdAT），Qt PNG 插件只扁平解析、实读恒 1 帧，不落此判据。
+    int okFrames = 0, distinctFrames = 0;
+    bool decodeOk = true;
+    if (scaleFmt == "gif") {
+        fullDecodeScaledFrames(scaledBytes, &okFrames, &distinctFrames);
+        decodeOk = (okFrames >= 2 && distinctFrames >= 2);
+    }
+
+    // 缩放结果落盘常驻（setAutoRemove(false)），日志给路径供外部播放器复核；
+    // 后缀随输出格式（gif→.gif；apng/png→.png；webp→.webp）。
+    const QByteArray scaleSuffix = (scaleFmt == "gif") ? QByteArray(".gif")
+            : (scaleFmt == "webp") ? QByteArray(".webp") : QByteArray(".png");
     QTemporaryFile tmp(QDir::tempPath()
-                       + QStringLiteral("/anystik_scale_verify_XXXXXX"));
+                       + QStringLiteral("/anystik_scale_verify_XXXXXX")
+                       + QLatin1String(scaleSuffix.constData()));
+    tmp.setAutoRemove(false);
     QString tmpPath;
     if (tmp.open()) {
         tmp.write(scaledBytes);
@@ -1019,21 +1076,27 @@ static void verifyScaledResult(const QByteArray& srcRaw,
         tmpPath = tmp.fileName();
     }
 
-    const bool fmtConvert = (srcFmt == "webp" && scaleFmt == "apng");
+    // 允许的重编码映射：WebP→APNG（已知转换）、TIFF 多页→APNG（paste 侧 multipageTiffToApng）
+    const bool fmtConvert = (srcFmt == "webp" && scaleFmt == "apng")
+            || ((srcFmt == "tif" || srcFmt == "tiff") && scaleFmt == "apng");
     const bool fmtOk = (srcFmt == scaleFmt) || fmtConvert;
     const bool framesOk = (srcFrames == scaleFrames);
-    if (!fmtOk || !framesOk) {
+    if (!fmtOk || !framesOk || !decodeOk) {
         qWarning("[StickerScale][%s] MISMATCH orig=fmt:%s frames:%d %dx%d "
-                 "vs scaled=fmt:%s frames:%d %dx%d tmp=%s",
+                 "vs scaled=fmt:%s frames:%d %dx%d decode(ok=%d/distinct=%d) tmp=%s",
                  tag, srcFmt.constData(), srcFrames, srcSize.width(), srcSize.height(),
                  scaleFmt.constData(), scaleFrames, scaleSize.width(), scaleSize.height(),
+                 okFrames, distinctFrames,
                  qPrintable(tmpPath));
-    } else {
-        qInfo("[StickerScale][%s] verify ok fmt=%s frames=%d %dx%d->%dx%d",
-              tag, scaleFmt.constData(), scaleFrames,
-              srcSize.width(), srcSize.height(),
-              scaleSize.width(), scaleSize.height());
+        return false;
     }
+    qInfo("[StickerScale][%s] verify ok fmt=%s frames=%d %dx%d->%dx%d "
+          "decode(ok=%d/distinct=%d) tmp=%s",
+          tag, scaleFmt.constData(), scaleFrames,
+          srcSize.width(), srcSize.height(),
+          scaleSize.width(), scaleSize.height(),
+          okFrames, distinctFrames, qPrintable(tmpPath));
+    return true;
 }
 
 // ── APNG 组装（多页 TIFF → APNG 重编码用）───────────────────────────
@@ -1232,6 +1295,10 @@ static bool decodeAllFrames(const QByteArray& bytes,
     reader.setAutoTransform(true);
     if (!reader.canRead()) return false;
 
+    // 动画格式（GIF/动画 WebP）：read() 自动推进帧并读到 null 收尾，绝不能
+    // 再调 jumpToNextImage()（其 handler 未重写→基类恒 false→循环断在第 1 帧）。
+    // 非动画多帧（多页 TIFF）：Qt tiff 插件 read() 不翻页，jumpToNextImage() 负责推进。
+    const bool animated = reader.supportsOption(QImageIOHandler::Animation);
     QList<QImage> frames;
     QVector<int> delays;
     const int kMaxFrames = 600;
@@ -1240,7 +1307,7 @@ static bool decodeAllFrames(const QByteArray& bytes,
         if (frame.isNull() || !frame.size().isValid()) break;
         frames << frame.convertToFormat(QImage::Format_RGBA8888);
         delays << qMax(1, reader.nextImageDelay());
-        if (!reader.jumpToNextImage()) break;
+        if (!animated && !reader.jumpToNextImage()) break;
     }
     if (frames.size() < 2) return false;
     *outFrames = frames;
@@ -1277,10 +1344,15 @@ static QByteArray buildGifBytes(const QList<QImage>& frames,
     const QString path = tmp.fileName();
     tmp.close();                       // GifBegin 需要独占创建文件
 
-    int delay = 10;
+    // Qt nextImageDelay() 为毫秒；gif-h delay 为百分秒（GIF GCE Delay Time 1/100s）。
+    // 不换算动画会慢 10 倍；cs 域 1~65535。
+    const auto toGifDelay = [](int ms) -> uint32_t {
+        return uint32_t(qBound(1, (ms + 5) / 10, 65535));
+    };
+
+    int delay = 10;                    // 默认 100ms（cs）
     if (delayMs.size() == frames.size()) {
-        delay = delayMs.first();
-        if (delay < 1) delay = 10;
+        delay = int(toGifDelay(delayMs.first()));
     }
 
     const int w = frames.first().width();
@@ -1294,13 +1366,12 @@ static QByteArray buildGifBytes(const QList<QImage>& frames,
     bool ok = true;
     for (int i = 0; i < frames.size(); ++i) {
         const QImage& fr = frames.at(i);
+        int delayCs = delay;
         if (delayMs.size() == frames.size()) {
-            int ms = delayMs.at(i);
-            if (ms < 1) ms = 10;
-            delay = ms;
+            delayCs = int(toGifDelay(delayMs.at(i)));
         }
         ok = GifWriteFrame(&writer, fr.constBits(), uint32_t(w), uint32_t(h),
-                           uint32_t(delay), 8, true);
+                           uint32_t(delayCs), 8, true);
         if (!ok) break;
     }
     GifEnd(&writer);
@@ -2391,14 +2462,14 @@ static bool copyScaledFramesToClipboard(const QList<QImage>& frames,
 
     if (srcFmt == "gif") {
         const QByteArray gifBytes = buildGifBytes(scaled, delayMs);
-        if (!gifBytes.isEmpty()) {
-            verifyScaledResult(srcRaw, gifBytes, "desktop-gif");
+        if (!gifBytes.isEmpty()
+                && verifyScaledResult(srcRaw, gifBytes, "desktop-gif")) {
             return stashAnimationClipboard("gif", gifBytes, srcPath, scaled.first());
         }
     } else {
         const QByteArray apng = buildApngFromFrames(scaled, delayMs);
-        if (!apng.isEmpty()) {
-            verifyScaledResult(srcRaw, apng, "desktop-apng");
+        if (!apng.isEmpty()
+                && verifyScaledResult(srcRaw, apng, "desktop-apng")) {
             return stashAnimationClipboard("apng", apng, srcPath, scaled.first());
         }
     }
@@ -2450,7 +2521,10 @@ bool StickerStore::copyStickerToClipboard(const QString& filePath)
         QFile f(filePath);
         if (f.open(QIODevice::ReadOnly)) {
             const QByteArray raw = f.readAll();
-            return stashAnimationClipboard(animFmt, raw, filePath, QImage(filePath));
+            if (verifyScaledResult(raw, raw, "desktop-copy"))
+                return stashAnimationClipboard(animFmt, raw, filePath, QImage(filePath));
+            qWarning("[StickerCopy] animation passthrough verify failed fmt=%s",
+                     animFmt.constData());
         }
     }
     QImage img(filePath);
@@ -2550,14 +2624,22 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
     }
     if (bytes.isEmpty()) return false;
 
+    // 拷贝前核对：格式+帧数须与原图一致；不一致→MISMATCH 日志并回退静态 PNG
+    if (!verifyScaledResult(raw, bytes, "android-anim")) {
+        const QImage first = scaled.first();
+        QBuffer wb;
+        wb.open(QIODevice::WriteOnly);
+        if (!first.save(&wb, "PNG")) return false;
+        bytes = wb.data();
+        ext = QStringLiteral(".png");
+    }
+
     const QString tmpPath = QStandardPaths::writableLocation(
         QStandardPaths::AppLocalDataLocation) + QStringLiteral("/scaled") + ext;
     QFile out(tmpPath);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
     out.write(bytes);
     out.close();
-
-    verifyScaledResult(raw, bytes, "android-anim");
 
     showAndroidToast(QStringLiteral("已复制到剪贴板"));
     bool copied = false;
