@@ -13,6 +13,7 @@
 #include <private/qquicksinglepointhandler_p.h>
 #include <functional>
 #include <QHash>
+#include <QFontMetricsF>
 
 static constexpr qreal TILE_SIZE = 76;
 static constexpr qreal TILE_GAP  = 10;
@@ -78,6 +79,33 @@ void StickerTileNode::paint(QPainter* painter, const QSize& size, const void*)
     painter->setPen(pen);
     painter->setBrush(Qt::NoBrush);
     painter->drawRoundedRect(QRectF(0.5, 0.5, w - 1, h - 1), radius, radius);
+
+    // ── 分辨率 + 文件大小角标（0 也如实显示）──
+    const QString sizeStr = [this]() -> QString {
+        const qint64 b = m_brief.size;
+        if (b < 1024)
+            return QString::number(b) + QStringLiteral(" B");
+        if (b < 1024 * 1024)
+            return QString::number(b / 1024) + QStringLiteral(" KB");
+        return QString::number(b / (1024.0 * 1024.0), 'f', 1)
+            + QStringLiteral(" MB");
+    }();
+    const QString tag = QStringLiteral("%1×%2 · %3")
+        .arg(m_brief.width).arg(m_brief.height).arg(sizeStr);
+
+    QFont tf;
+    tf.setPixelSize(8);
+    const QFontMetricsF fm(tf);
+    const qreal  tagW = qBound(30.0, fm.horizontalAdvance(tag) + 6, w - 6);
+    const qreal  tagH = 14;
+    const QRectF tagRect(w - tagW - 3, h - tagH - 3, tagW, tagH);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(0, 0, 0, 150));
+    painter->drawRoundedRect(tagRect, 4, 4);
+    painter->setFont(tf);
+    painter->setPen(QColor("#ffffff"));
+    painter->drawText(tagRect, Qt::AlignCenter,
+        fm.elidedText(tag, Qt::ElideRight, tagW - 4));
 }
 
 QskHashValue StickerTileNode::hash(const void*) const
