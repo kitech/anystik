@@ -2808,6 +2808,10 @@ static void setDlHint(const QString& url, const QVariantMap& hint)
 // 内置下载源唯一表（唯一改源点）。approxSize 为预告约值，非运行时所得
 // 如暂未获取到approxSize则-1
 const BuiltinSource kBuiltinSources[] = {
+    { "DeepSeek酱 鲸鱼娘 梗图 preview(19)",
+      "https://gh-proxy.org/https://github.com/the-beating-light-of-the-nail/deepseek-chan-meme-pack/archive/3678bd997602446aedb9b2854ebee7400c808138.zip",
+      715185L,    // 2026-09-15 实测 GET 全量字节（仓库 archive，含 19 张 preview webp + README）
+      "https://github.com/the-beating-light-of-the-nail/deepseek-chan-meme-pack" },
     { "WhatsApp 官方示例贴纸 (SDK)",
       "https://gh-proxy.org/https://github.com/WhatsApp/stickers/archive/06144a1f6077bbb346e1230032fc4e0bce996d03.zip",
       13163057L,   // 8/30 selftest5 整包实测（约值，随 commit 变化）
