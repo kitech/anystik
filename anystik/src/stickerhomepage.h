@@ -42,9 +42,9 @@ private:
     void updateStickerCount();
 
     void showStickerMenu(const StickerBrief& brief, const QPointF& scenePos);
-    void openScaleSub(QskMenu* parent, int entryIndex);
-    void closeScaleSub();
-    void applyScaleSubAnchor(QskMenu* parent, QskMenu* sub, int entryIndex);
+    void openSubMenu(QskMenu* parent, int entryIndex);
+    void closeSubMenu();
+    void applySubMenuAnchor(QskMenu* parent, QskMenu* sub, int entryIndex);
     void scheduleSubClose();
     void cancelSubClose();
     void openPreview(const StickerBrief& brief);
@@ -89,8 +89,10 @@ private:
     QString m_activeTab;          // "" = 全部, "__recent" = 最近, 否则 packId（含粘贴板）
     QPointer<QskMenu> m_ctxMenu;      // 正在显示的主右键菜单
     QPointer<QQuickItem> m_ctxOverlay; // 主菜单的 MenuOverlay（子菜单打开期间隐藏）
-    QPointer<QskMenu> m_scaleSub;      // 缩放子菜单（悬停级联期间存在）
+    QPointer<QskMenu> m_ctxSub;        // 当前级联子菜单（缩放/搜索，同时只存在一个）
+    int m_ctxSubRow = -1;              // 当前子菜单所属父行 index（同行重锚/跨行重建）
     int m_ctxScaleSubIdx = -1;         // 主菜单“缩放拷贝”项的 index（hover 判定用）
+    int m_ctxSearchSubIdx = -1;        // 主菜单“搜索相似”项的 index（hover 判定用）
     QTimer m_subCloseTimer;            // 子菜单离开防抖关闭（悬停进入时重启/取消）
     SyncEngine* m_syncEngine = nullptr;  // 懒创建；finished 恢复按钮
     QPointer<SyncProgressPopup> m_syncPopup; // 同步进度浮动窗口（closed → deleteLater）
