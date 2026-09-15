@@ -35,6 +35,12 @@ public:
                               const QString& yesText, const QString& noText,
                               const std::function<void(bool)>& onResult);
 
+    // ── 面板不透明度（0..1，默认 0.8）──
+    // 全局默认两面弹层共享；单实例可在 show() 返回后、open 前用 setPanelOpacity 覆盖。
+    static qreal  defaultPanelOpacity();
+    static void   setDefaultPanelOpacity(qreal opacity);
+    void setPanelOpacity(qreal opacity);
+
 protected:
     void updateLayout() override;
 
@@ -62,6 +68,11 @@ public:
                              const QStringList& items,
                              const std::function<void(const QString&)>& onPick,
                              bool canCancel = true);
+
+    // ── 面板不透明度（0..1，默认 0.8）──
+    static qreal  defaultPanelOpacity();
+    static void   setDefaultPanelOpacity(qreal opacity);
+    void setPanelOpacity(qreal opacity);
 
 protected:
     void updateLayout() override;

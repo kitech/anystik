@@ -2,6 +2,7 @@
 
 #include <QskBox.h>
 #include <QskBoxShapeMetrics.h>
+#include <QskGradient.h>
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
@@ -25,6 +26,22 @@ namespace
         return QRectF(-parent->x(), -parent->y(),
                       parent->width(), parent->height());
     }
+
+    qreal s_defaultPanelOpacity = 0.8;
+
+    // 面板不透明度：回读当前皮肤面板填充色，仅改 alpha（保留主题配色）
+    void applyPanelOpacity(QskBox* panel, qreal opacity)
+    {
+        if (!panel)
+            return;
+
+        QskGradient g = panel->fillGradient();
+        if (!g.isValid())
+            return;   // 皮肤未提供填充色时保持不透明，不擅自替色
+
+        g.setAlpha(qRound(qBound(0.0, opacity, 1.0) * 255.0));
+        panel->setFillGradient(g);
+    }
 }
 
 /* ── ConfirmPopup ─────────────────────────────────────────────── */
@@ -44,6 +61,7 @@ ConfirmPopup::ConfirmPopup(const QString& title, const QString& text,
     m_panel = new QskBox(this);
     m_panel->setBoxShapeHint(QskBox::Panel,
         QskBoxShapeMetrics(14, Qt::AbsoluteSize));
+    applyPanelOpacity(m_panel, s_defaultPanelOpacity);
 
     m_layout = new QskLinearBox(Qt::Vertical, m_panel);
     m_layout->setMargins(18);
@@ -73,6 +91,21 @@ ConfirmPopup::ConfirmPopup(const QString& title, const QString& text,
         [this]() { finish(true); });
     connect(noButton, &QskPushButton::clicked, this,
         [this]() { finish(false); });
+}
+
+qreal ConfirmPopup::defaultPanelOpacity()
+{
+    return s_defaultPanelOpacity;
+}
+
+void ConfirmPopup::setDefaultPanelOpacity(qreal opacity)
+{
+    s_defaultPanelOpacity = qBound(0.0, opacity, 1.0);
+}
+
+void ConfirmPopup::setPanelOpacity(qreal opacity)
+{
+    applyPanelOpacity(m_panel, opacity);
 }
 
 ConfirmPopup* ConfirmPopup::show(
@@ -159,6 +192,7 @@ SelectPopup::SelectPopup(const QString& title, const QStringList& items,
     m_panel = new QskBox(this);
     m_panel->setBoxShapeHint(QskBox::Panel,
         QskBoxShapeMetrics(14, Qt::AbsoluteSize));
+    applyPanelOpacity(m_panel, s_defaultPanelOpacity);
 
     m_layout = new QskLinearBox(Qt::Vertical, m_panel);
     m_layout->setMargins(18);
@@ -187,6 +221,21 @@ SelectPopup::SelectPopup(const QString& title, const QStringList& items,
         connect(cancel, &QskPushButton::clicked, this,
             [this]() { finish(QString()); });
     }
+}
+
+qreal SelectPopup::defaultPanelOpacity()
+{
+    return s_defaultPanelOpacity;
+}
+
+void SelectPopup::setDefaultPanelOpacity(qreal opacity)
+{
+    s_defaultPanelOpacity = qBound(0.0, opacity, 1.0);
+}
+
+void SelectPopup::setPanelOpacity(qreal opacity)
+{
+    applyPanelOpacity(m_panel, opacity);
 }
 
 SelectPopup* SelectPopup::show(
