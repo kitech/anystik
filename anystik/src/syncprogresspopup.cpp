@@ -1,6 +1,7 @@
 #include "syncprogresspopup.h"
 #include "logmodel.h"
 #include "davbisync.h"
+#include "scrollfader.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskProgressBar.h>
@@ -149,6 +150,9 @@ SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
     m_scrollView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_scrollView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_scrollView->setPreferredHeight(340);
+
+    // 桌面 Fusion：滚动条“滚动时短暂显现→空闲淡出”（其他皮肤自动忽略）
+    ScrollFader::attach(m_scrollView);
 
     m_listBox = new QskLinearBox(Qt::Vertical, m_scrollView);
     m_listBox->setSpacing(1);

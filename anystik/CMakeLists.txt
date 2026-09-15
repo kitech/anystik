@@ -66,6 +66,8 @@ qt_add_executable(anystik
     src/mytaphandler.cpp
     src/myscrollarea.h
     src/myscrollarea.cpp
+    src/scrollfader.h
+    src/scrollfader.cpp
     src/stickerstore.h
     src/stickerstore.cpp
     src/bundledpackspage.h

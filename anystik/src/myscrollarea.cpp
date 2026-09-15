@@ -1,4 +1,5 @@
 #include "myscrollarea.h"
+#include "scrollfader.h"
 #include <QskEvent.h>
 #include <QskScrollView.h>
 #include <QskAspect.h>
@@ -65,6 +66,9 @@ MyScrollArea::MyScrollArea(QQuickItem* parent)
     // 后续 window 变化仍通过信号跟进。
     storeWindow(window());
     connect(this, &QQuickItem::windowChanged, this, &MyScrollArea::storeWindow);
+
+    // 桌面 Fusion 皮肤下：滚动条“滚动时短暂显现→空闲淡出”（其他皮肤自动忽略）
+    ScrollFader::attach(this);
 }
 
 // 跟随本项的 scene window，在其上安装/移除事件过滤器。过滤器在

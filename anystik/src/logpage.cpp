@@ -1,5 +1,6 @@
 #include "logpage.h"
 #include "pagemanager.h"
+#include "scrollfader.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskTextField.h>
@@ -78,6 +79,9 @@ void LogPage::onCreate(const QVariantMap&, const QVariantMap&)
     auto* scrollView = new QskScrollView(layout);
     scrollView->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
     scrollView->setFlickableOrientations(Qt::Vertical);
+
+    // 桌面 Fusion：滚动条“滚动时短暂显现→空闲淡出”（其他皮肤自动忽略）
+    ScrollFader::attach(scrollView);
 
     m_listBox = new QskLinearBox(Qt::Vertical, scrollView);
 
