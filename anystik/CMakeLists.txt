@@ -46,8 +46,6 @@ qt_add_executable(anystik
     src/logpage.cpp
     src/loginpage.h
     src/loginpage.cpp
-    src/menuoverlay.h
-    src/menuoverlay.cpp
     src/mainpage.h
     src/mainpage.cpp
     src/settingspage.h
@@ -62,12 +60,6 @@ qt_add_executable(anystik
     src/pushstatusbar.cpp
     src/phonemonitor.h
     src/phonemonitor.cpp
-    src/mytaphandler.h
-    src/mytaphandler.cpp
-    src/myscrollarea.h
-    src/myscrollarea.cpp
-    src/scrollfader.h
-    src/scrollfader.cpp
     src/stickerstore.h
     src/stickerstore.cpp
     src/bundledpackspage.h
@@ -80,8 +72,6 @@ qt_add_executable(anystik
     src/stickergenpage.cpp
     src/stickerpreviewoverlay.h
     src/stickerpreviewoverlay.cpp
-    src/dialogpopup.h
-    src/dialogpopup.cpp
     src/migrationdialog.h
     src/migrationdialog.cpp
     src/toastpopup.h
