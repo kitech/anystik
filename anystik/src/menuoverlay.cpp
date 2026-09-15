@@ -5,9 +5,10 @@
 #include <QTouchEvent>
 #include <QEvent>
 
-MenuOverlay::MenuOverlay(QskMenu* menu)
+MenuOverlay::MenuOverlay(QskMenu* menu, QskMenu* parentMenu)
     : QQuickItem(menu ? menu->parentItem() : nullptr)
     , m_menu(menu)
+    , m_parentMenu(parentMenu)
 {
     setAcceptedMouseButtons(Qt::AllButtons);
     setAcceptTouchEvents(true);
@@ -57,12 +58,25 @@ bool MenuOverlay::handlePress(const QPointF& scenePos)
     if (!m_menu->isOpen())
         return false;
 
+    if (m_parentMenu && m_parentMenu->isOpen())
+    {
+        const QPointF localPos = m_parentMenu->mapFromScene(scenePos);
+        if (m_parentMenu->contains(localPos))
+        {
+            // 按下父菜单区域：仅关自身（子菜单），事件放行给父菜单项
+            m_menu->close();
+            return true;
+        }
+    }
+
     QPointF localPos = m_menu->mapFromScene(scenePos);
 
     if (m_menu->contains(localPos))
         return false;
 
     m_menu->close();
+    if (m_parentMenu)
+        m_parentMenu->close();
     return true;
 }
 

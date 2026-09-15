@@ -38,6 +38,7 @@
 #include <QClipboard>
 #include <QSettings>
 #include <QDesktopServices>
+#include <QHoverEvent>
 #include <QUrl>
 
 #ifdef Q_OS_ANDROID
@@ -88,6 +89,12 @@ static bool jOpenDir(const QString& path)
 StickerHomePage::StickerHomePage(QQuickItem* parent)
     : Page(parent)
 {
+    // 悬停级联子菜单：离开其区域/父菜单时的防抖关闭。原 singleShot(0) 会在
+    // hover 事件批处理的间隙误执行 → 子菜单被反复关闭又重开（重复淡入）。
+    m_subCloseTimer.setSingleShot(true);
+    m_subCloseTimer.setInterval(225);
+    connect(&m_subCloseTimer, &QTimer::timeout,
+            this, [this]() { closeScaleSub(); });
 }
 
 void StickerHomePage::onCreate(const QVariantMap& launchArgs,
@@ -476,11 +483,11 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
     auto* menu = new QskMenu(this);
     menu->setModal(true);
     menu->setPopupFlag(QskPopup::DeleteOnClose, false);
+    m_ctxMenu = menu;
+    menu->installEventFilter(this);
     const int idxCopy = menu->addOption(QskLabelData(tr("复制")));
-    const int idxCopy01 = menu->addOption(QskLabelData(tr("复制x0.1")));
-    const int idxCopy025 = menu->addOption(QskLabelData(tr("复制x0.25")));
-    const int idxCopy05 = menu->addOption(QskLabelData(tr("复制x0.5")));
-    const int idxCopy20 = menu->addOption(QskLabelData(tr("复制x2.0")));
+    const int idxScaleSub = menu->addOption(QskLabelData(tr("缩放拷贝 ›")));
+    m_ctxScaleSubIdx = idxScaleSub;
     const int idxPreview = menu->addOption(QskLabelData(tr("预览")));
     const int idxCopyMeta = menu->addOption(QskLabelData(tr("复制元信息")));
     const int idxShare = menu->addOption(QskLabelData(tr("分享")));
@@ -516,38 +523,30 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
         const QFontMetricsF fm(menu->effectiveFont(QskMenu::Text));
         const qreal pad = menu->paddingHint(QskMenu::Segment).left()
                         + menu->paddingHint(QskMenu::Segment).right();
-        const qreal minW = qskHorizontalAdvance(fm, QString::fromUtf8("复制x0.25"))
+        const qreal minW = qskHorizontalAdvance(fm, QString::fromUtf8("复制元信息"))
                          + pad + 10;
         menu->setStrutSizeHint(QskMenu::Panel, QSizeF(minW, 0));
     }
 
+    // 缩放复制（抽为辅助，二级缩放子菜单与未来入口共用）
+    auto copyScaled = [this](qreal scale, const QString& toast) {
+        StickerStore::instance()->touchSticker(m_ctxBrief.id);
+        const bool ok = StickerStore::instance()
+            ->copyStickerScaledToClipboard(m_ctxBrief.filePath, scale);
+        showToast(ok ? toast : tr("复制失败"));
+    };
+
     connect(menu, &QskMenu::triggered, this,
-        [this, menu, idxCopy, idxCopy01, idxCopy025, idxCopy05, idxCopy20, idxPreview, idxCopyMeta, idxShare, idxDelete](int index) {
+        [this, menu, idxCopy, idxScaleSub, idxPreview, idxCopyMeta, idxShare, idxDelete](int index) {
         if (index == idxCopy) {
             StickerStore::instance()->touchSticker(m_ctxBrief.id);
             bool ok = StickerStore::instance()->copyStickerToClipboard(m_ctxBrief.filePath);
             showToast(ok ? tr("已复制")
                          : tr("复制失败"));
-        } else if (index == idxCopy01) {
-            StickerStore::instance()->touchSticker(m_ctxBrief.id);
-            bool ok = StickerStore::instance()->copyStickerScaledToClipboard(m_ctxBrief.filePath, 0.1);
-            showToast(ok ? tr("已复制x0.1")
-                         : tr("复制失败"));
-        } else if (index == idxCopy025) {
-            StickerStore::instance()->touchSticker(m_ctxBrief.id);
-            bool ok = StickerStore::instance()->copyStickerScaledToClipboard(m_ctxBrief.filePath, 0.25);
-            showToast(ok ? tr("已复制x0.25")
-                         : tr("复制失败"));
-        } else if (index == idxCopy05) {
-            StickerStore::instance()->touchSticker(m_ctxBrief.id);
-            bool ok = StickerStore::instance()->copyStickerScaledToClipboard(m_ctxBrief.filePath, 0.5);
-            showToast(ok ? tr("已复制x0.5")
-                         : tr("复制失败"));
-        } else if (index == idxCopy20) {
-            StickerStore::instance()->touchSticker(m_ctxBrief.id);
-            bool ok = StickerStore::instance()->copyStickerScaledToClipboard(m_ctxBrief.filePath, 2.0);
-            showToast(ok ? tr("已复制x2.0")
-                         : tr("复制失败"));
+        } else if (index == idxScaleSub) {
+            // 缩放拷贝：级联打开二级缩放子菜单（主菜单保持打开）
+            openScaleSub(menu, idxScaleSub);
+            return; // 主菜单不关闭，保证悬停级联的“父保持打开”语义
         } else if (index == idxPreview) {
             openPreview(m_ctxBrief);
         } else if (index == idxCopyMeta) {
@@ -571,13 +570,244 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
 
     {
         auto* overlay = new MenuOverlay(menu);
+        m_ctxOverlay = overlay;
         connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
         // 菜单关闭即移除铺满父页的 overlay：DeleteOnClose=false 时菜单 close()
         // 不触发 destroyed，若不在此删除，overlay 残留可见会让
         // MyScrollArea::isCoveredByOverlay 恒命中 → 滚轮永久失效（重启才恢复）。
         connect(menu, &QskPopup::closed, overlay, &QObject::deleteLater);
+        connect(menu, &QskPopup::closed, this, [this]() {
+            if (m_scaleSub && m_scaleSub->isOpen())
+                m_scaleSub->close(); // 父菜单关闭时连带收掉子菜单
+            m_ctxMenu = nullptr;
+            m_ctxOverlay = nullptr;
+            m_subCloseTimer.stop();
+        });
     }
     menu->open();
+}
+
+// 主列表右键/长按菜单的“缩放拷贝”二级菜单（悬停级联，模拟经典 Qt 子菜单）。
+// QskMenu 无原生子菜单（0.8.0 仅有 addOption/addSeparator，cascading 只是定位
+// 模式），此处用独立二级 QskMenu 模拟：父菜单保持打开，子菜单悬挂其
+// “缩放拷贝”行右缘、行中对齐；悬停子菜单保持，悬停到其他父行/空白时关闭。
+void StickerHomePage::openScaleSub(QskMenu* parent, int entryIndex)
+{
+    // 已开：仅按父菜单该项行的当前几何重锚（多子菜单行时随悬停步进）
+    if (m_scaleSub && m_scaleSub->isOpen()) {
+        applyScaleSubAnchor(parent, m_scaleSub, entryIndex);
+        return;
+    }
+
+    // 清理上次残留（如有）；主菜单必须保留
+    if (m_scaleSub)
+        m_scaleSub->deleteLater();
+
+    // 隐藏主菜单 overlay，改由父子对 overlay 统一裁决
+    // （否则按下子菜单时会被主菜单 overlay 判为“菜单外”而误关父菜单）
+    if (m_ctxOverlay)
+        m_ctxOverlay->setVisible(false);
+
+    auto* sub = new QskMenu(this);
+    // 非 modal 且不 CloseOnPressOutside：QskPopup::updateInputGrabber 不会为其
+    // 创建铺满页面的 InputGrabber，才不致于抢走父菜单的 hover（Qt 只把 hover
+    // 发给最顶层接收者，模态子菜单一开父菜单即 HoverLeave 且再无 HoverMove，
+    // 导致子菜单开了又关、反复重弹）。点击外部关闭由 MenuOverlay 兜底。
+    sub->setModal(false);
+    sub->setPopupFlag(QskPopup::CloseOnPressOutside, false);
+    sub->setPopupFlag(QskPopup::DeleteOnClose, false);
+    m_scaleSub = sub;
+    sub->installEventFilter(this);
+
+    const int idx01 = sub->addOption(QskLabelData(QStringLiteral("复制x0.1")));
+    const int idx025 = sub->addOption(QskLabelData(QStringLiteral("复制x0.25")));
+    const int idx05 = sub->addOption(QskLabelData(QStringLiteral("复制x0.5")));
+    const int idx20 = sub->addOption(QskLabelData(QStringLiteral("复制x2.0")));
+
+    // 宽度下限（与主菜单同款防压缩）
+    {
+        const QFontMetricsF fm(sub->effectiveFont(QskMenu::Text));
+        const qreal pad = sub->paddingHint(QskMenu::Segment).left()
+                        + sub->paddingHint(QskMenu::Segment).right();
+        sub->setStrutSizeHint(QskMenu::Panel,
+            QSizeF(qskHorizontalAdvance(fm, QString::fromUtf8("复制x0.25")) + pad + 10, 0));
+    }
+
+    // 预锚：打开前即按真实尺寸（sizeConstraint）+ 父菜单已布局几何精确定位。
+    // 注意 QskMenu::updateResources()（每次 polish 用 origin 覆盖 setPosition）
+    // 只会采用 setOrigin 设置的坐标 —— 这里统一用 setOrigin。
+    {
+        const QFontMetricsF fm(sub->effectiveFont(QskMenu::Text));
+        const qreal padT = sub->paddingHint(QskMenu::Segment).top();
+        const qreal padB = sub->paddingHint(QskMenu::Segment).bottom();
+        const qreal rowH = fm.height() + padT + padB;
+        const QSizeF sc = sub->sizeConstraint();
+        const qreal estW = sc.width() > 0 ? sc.width()
+            : (qskHorizontalAdvance(fm, QString::fromUtf8("复制x0.25"))
+               + sub->paddingHint(QskMenu::Segment).left()
+               + sub->paddingHint(QskMenu::Segment).right() + 10);
+        const qreal estH = sc.height() > 0 ? sc.height()
+            : (4.0 * rowH + sub->paddingHint(QskMenu::Panel).top()
+               + sub->paddingHint(QskMenu::Panel).bottom());
+
+        const QPointF po = parent->mapToScene(QPointF(0.0, 0.0));
+        const qreal pw = parent->width() > 0 ? parent->width()
+                                             : parent->sizeConstraint().width();
+        constexpr qreal gap = 4.0;
+
+        qreal x = po.x() + pw + gap;
+        qreal y = po.y();
+        const QRectF cell = parent->cellRect(entryIndex);
+        if (cell.isValid())
+            y += cell.center().y() - (padT + rowH / 2.0);
+        else
+            y = (entryIndex + 0.5) * rowH - (padT + rowH / 2.0);
+
+        const QRectF bounds = window() ? window()->contentItem()->boundingRect()
+                                       : QRectF();
+        if (bounds.isValid()) {
+            // 右侧放不下 → 完全翻到父菜单左侧（gap 分隔），只有窗口连左侧也放
+            // 不下时才钳制到窗口左缘（此时才允许最小覆盖）
+            if (x + estW > bounds.right())
+                x = qMax(bounds.left(), po.x() - gap - estW);
+            if (y + estH > bounds.bottom())
+                y = qMax(bounds.top(), bounds.bottom() - estH);
+        }
+        sub->setOrigin(sub->window() ? sub->parentItem()->mapFromScene(QPointF(x, y))
+                                     : QPointF(x, y));
+    }
+
+    // opened：按真实几何校正锚点（行中对齐 + 越界侧翻/底部钳制）
+    connect(sub, &QskPopup::opened, this,
+        [this, sub, parent, entryIndex]() {
+            if (sub != m_scaleSub)
+                return;
+            applyScaleSubAnchor(parent, sub, entryIndex);
+        });
+
+    auto copyScaled = [this](qreal scale, const QString& toast) {
+        StickerStore::instance()->touchSticker(m_ctxBrief.id);
+        const bool ok = StickerStore::instance()
+            ->copyStickerScaledToClipboard(m_ctxBrief.filePath, scale);
+        showToast(ok ? toast : tr("复制失败"));
+    };
+    connect(sub, &QskMenu::triggered, this,
+        [this, sub, parent, copyScaled, idx01, idx025, idx05, idx20](int index) {
+            if (index == idx01) copyScaled(0.1, tr("已复制x0.1"));
+            else if (index == idx025) copyScaled(0.25, tr("已复制x0.25"));
+            else if (index == idx05) copyScaled(0.5, tr("已复制x0.5"));
+            else if (index == idx20) copyScaled(2.0, tr("已复制x2.0"));
+            // 经典语义：选择子项后整组收拢
+            parent->close();
+            sub->close();
+        });
+
+    {
+        auto* overlay = new MenuOverlay(sub, parent);
+        connect(sub, &QObject::destroyed, overlay, &QObject::deleteLater);
+        connect(sub, &QskPopup::closed, overlay, &QObject::deleteLater);
+    }
+    connect(sub, &QskPopup::closed, this, [this]() {
+        if (m_ctxMenu && m_ctxMenu->isOpen() && m_ctxOverlay)
+            m_ctxOverlay->setVisible(true);
+        m_scaleSub = nullptr;
+    });
+    sub->open();
+}
+
+// 按父菜单该项行的真实几何重锚子菜单：行中对齐（父行中线 == 子菜单首行中线）、
+// 紧贴父右缘，右/底部放不下时侧翻到父左侧/上移钳制。
+// 位置统一走 setOrigin（QskMenu::updateResources 每次 polish 用 origin 覆盖
+// setPosition）；外力 setPosition 无效，需 setOrigin + polish 才生效。
+void StickerHomePage::applyScaleSubAnchor(QskMenu* parent, QskMenu* sub, int entryIndex)
+{
+    if (!sub->window() || !parent->isOpen())
+        return;
+    const QRectF pcell = parent->cellRect(entryIndex);
+    const QRectF scell = sub->cellRect(0);
+    if (!pcell.isValid() || !scell.isValid())
+        return;
+
+    const QPointF po = parent->mapToScene(QPointF(0.0, 0.0));
+    const qreal pw = parent->width() > 0 ? parent->width()
+                                         : parent->sizeConstraint().width();
+    constexpr qreal gap = 4.0;
+
+    qreal x = po.x() + pw + gap;
+    qreal y = po.y() + pcell.center().y() - scell.center().y();
+
+    const QRectF bounds = sub->window()->contentItem()->boundingRect();
+    if (bounds.isValid()) {
+        if (x + sub->width() > bounds.right())
+            x = qMax(bounds.left(), po.x() - gap - sub->width());
+        if (y + sub->height() > bounds.bottom())
+            y = qMax(bounds.top(), bounds.bottom() - sub->height());
+    }
+
+    const QPointF origin = sub->parentItem()->mapFromScene(QPointF(x, y));
+    if (qFuzzyCompare(origin.x(), sub->origin().x()) &&
+        qFuzzyCompare(origin.y(), sub->origin().y()))
+        return; // 无需重锚，避免每次鼠标移动都触发 polish
+
+    sub->setOrigin(origin);
+    sub->polish();
+}
+
+void StickerHomePage::closeScaleSub()
+{
+    if (m_ctxMenu && m_ctxMenu->isOpen() && m_ctxOverlay)
+        m_ctxOverlay->setVisible(true);
+    if (m_scaleSub && m_scaleSub->isOpen())
+        m_scaleSub->close();
+    m_scaleSub = nullptr;
+}
+
+void StickerHomePage::scheduleSubClose()
+{
+    m_subCloseTimer.start();
+}
+
+void StickerHomePage::cancelSubClose()
+{
+    m_subCloseTimer.stop();
+}
+
+bool StickerHomePage::eventFilter(QObject* watched, QEvent* event)
+{
+    if (watched == m_ctxMenu) {
+        switch (event->type()) {
+        case QEvent::HoverMove: {
+            cancelSubClose();
+            const auto& he = *static_cast<QHoverEvent*>(event);
+            const int idx = m_ctxMenu->indexAtPosition(he.position());
+            if (idx == m_ctxScaleSubIdx)
+                openScaleSub(m_ctxMenu, idx);
+            else if (m_scaleSub && m_scaleSub->isOpen())
+                scheduleSubClose(); // 移动子菜单时可能划过其他父行，延迟关闭（sloppy）
+            break;
+        }
+        case QEvent::HoverLeave:
+            scheduleSubClose();
+            break;
+        default:
+            break;
+        }
+    } else if (watched == m_scaleSub) {
+        switch (event->type()) {
+        case QEvent::HoverEnter:
+        case QEvent::HoverMove:
+            // 指针已进入子菜单：保住它，取消父菜单 HoverLeave 的防抖关闭
+            cancelSubClose();
+            break;
+        case QEvent::HoverLeave:
+            // 防抖关闭：若指针随后回到父菜单“缩放拷贝”行，会被父 HoverMove 取消
+            scheduleSubClose();
+            break;
+        default:
+            break;
+        }
+    }
+    return false;
 }
 
 void StickerHomePage::openPreview(const StickerBrief& brief)

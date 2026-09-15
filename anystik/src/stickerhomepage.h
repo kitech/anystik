@@ -15,6 +15,7 @@ class QskPopup;
 class QskTextLabel;
 class QskPushButton;
 class QskLinearBox;
+class QskMenu;
 class StickerGridWidget;
 
 class StickerHomePage : public Page
@@ -26,6 +27,7 @@ public:
 protected:
     void onCreate(const QVariantMap& launchArgs,
                   const QVariantMap& savedState) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     Q_INVOKABLE void retranslateUi() override;
@@ -40,6 +42,11 @@ private:
     void updateStickerCount();
 
     void showStickerMenu(const StickerBrief& brief, const QPointF& scenePos);
+    void openScaleSub(QskMenu* parent, int entryIndex);
+    void closeScaleSub();
+    void applyScaleSubAnchor(QskMenu* parent, QskMenu* sub, int entryIndex);
+    void scheduleSubClose();
+    void cancelSubClose();
     void openPreview(const StickerBrief& brief);
     void confirmDeleteSticker(const StickerBrief& brief);
     void showOptionsMenu(const QPointF& origin);
@@ -80,6 +87,11 @@ private:
     StickerBrief m_ctxBrief;      // 长按的贴纸上下文
     StickerPackBrief m_ctxPack;   // 分组管理上下文
     QString m_activeTab;          // "" = 全部, "__recent" = 最近, 否则 packId（含粘贴板）
+    QPointer<QskMenu> m_ctxMenu;      // 正在显示的主右键菜单
+    QPointer<QQuickItem> m_ctxOverlay; // 主菜单的 MenuOverlay（子菜单打开期间隐藏）
+    QPointer<QskMenu> m_scaleSub;      // 缩放子菜单（悬停级联期间存在）
+    int m_ctxScaleSubIdx = -1;         // 主菜单“缩放拷贝”项的 index（hover 判定用）
+    QTimer m_subCloseTimer;            // 子菜单离开防抖关闭（悬停进入时重启/取消）
     SyncEngine* m_syncEngine = nullptr;  // 懒创建；finished 恢复按钮
     QPointer<SyncProgressPopup> m_syncPopup; // 同步进度浮动窗口（closed → deleteLater）
 };

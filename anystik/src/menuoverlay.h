@@ -34,7 +34,11 @@ public:
      *   same pattern: a full-window transparent item intercepting pointer
      *   events for all open popups.
      */
-    MenuOverlay(QskMenu* menu);
+    /*
+     * parentMenu: 可选的父菜单。按下父菜单区域时仅关闭自身菜单并把事件
+     * 放行给父菜单项（悬停级联子菜单共存用）；按下两者之外则一并关闭。
+     */
+    MenuOverlay(QskMenu* menu, QskMenu* parentMenu = nullptr);
 
 protected:
     bool event(QEvent* event) override;
@@ -42,6 +46,7 @@ protected:
 private:
     bool handlePress(const QPointF& scenePos);
     QPointer<QskMenu> m_menu;
+    QPointer<QskMenu> m_parentMenu;
 };
 
 #endif
