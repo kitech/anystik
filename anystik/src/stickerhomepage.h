@@ -17,6 +17,8 @@ class QskPushButton;
 class QskLinearBox;
 class QskMenu;
 class StickerGridWidget;
+class ImageSearch;
+class ImageSearchPopup;
 
 class StickerHomePage : public Page
 {
@@ -63,6 +65,10 @@ private:
 
     void showToast(const QString& text);
 
+    // 搜索相似：0=Google 1=Bing 2=Yandex（3=DuckDuckGo 直接打开不入托管）
+    void startImageSearch(int engine, const QString& filePath);
+    void openSearchEngine(int engine, const QString& imageUrl);
+
     QskTextLabel* m_countLabel = nullptr;
     QskTextLabel* m_title = nullptr;
     QskPushButton* m_pasteBtn = nullptr;
@@ -96,6 +102,9 @@ private:
     QTimer m_subCloseTimer;            // 子菜单离开防抖关闭（悬停进入时重启/取消）
     SyncEngine* m_syncEngine = nullptr;  // 懒创建；finished 恢复按钮
     QPointer<SyncProgressPopup> m_syncPopup; // 同步进度浮动窗口（closed → deleteLater）
+    ImageSearch* m_search = nullptr;       // 图床托管上传（懒创建）
+    QPointer<ImageSearchPopup> m_searchPopup; // 上传浮动层（closed → deleteLater）
+    int m_pendingEngine = -1;              // 触发时固定的引擎索引（0/1/2）
 };
 
 #endif // STICKER_HOME_PAGE_H

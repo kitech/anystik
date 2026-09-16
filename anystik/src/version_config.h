@@ -1,5 +1,5 @@
 #ifndef VERSION_CONFIG_H
 #define VERSION_CONFIG_H
 #define APP_VERSION_NAME "0.5"
-#define APP_VERSION_CODE 107
+#define APP_VERSION_CODE 108
 #endif

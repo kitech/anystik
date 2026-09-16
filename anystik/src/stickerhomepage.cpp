@@ -1,6 +1,8 @@
 #include "stickerhomepage.h"
 #include "stickerlist.h"
 #include "stickerpreviewoverlay.h"
+#include "imagesearch.h"
+#include "imagesearchpopup.h"
 #include "menuoverlay.h"
 #include "dialogpopup.h"
 #include "toastpopup.h"
@@ -659,18 +661,29 @@ void StickerHomePage::openSubMenu(QskMenu* parent, int entryIndex)
                 sub->close();
             });
     } else if (entryIndex == m_ctxSearchSubIdx) {
-        // 搜索相似：四个搜索引擎。目前为空实现（占位，后续按 m_ctxBrief 接入
-        // 浏览器搜索图/元信息）。
-        sub->addOption(QskLabelData(tr("Google")));
-        sub->addOption(QskLabelData(tr("Bing")));
-        sub->addOption(QskLabelData(tr("Yandex")));
-        sub->addOption(QskLabelData(tr("DuckDuckGo")));
+        // 搜索相似：四个搜索引擎。Google/Bing/Yandex 走“托管上传 → 引擎页”；
+        // DuckDuckGo 无 URL 图搜接口，降级为直接打开图搜页（需手动上传）。
+        const int idxGoogle = sub->addOption(QskLabelData(tr("Google")));
+        const int idxBing = sub->addOption(QskLabelData(tr("Bing")));
+        const int idxYandex = sub->addOption(QskLabelData(tr("Yandex")));
+        const int idxDdg = sub->addOption(QskLabelData(tr("DuckDuckGo")));
         fallbackW = QStringLiteral("DuckDuckGo");
+        const QString filePath = m_ctxBrief.filePath;
         connect(sub, &QskMenu::triggered, this,
-            [this, sub, parent](int) {
-                showToast(tr("未实现"));
+            [this, sub, parent, idxGoogle, idxBing, idxYandex, idxDdg, filePath](int index) {
                 parent->close();
                 sub->close();
+                if (index == idxGoogle) {
+                    startImageSearch(0, filePath);
+                } else if (index == idxBing) {
+                    startImageSearch(1, filePath);
+                } else if (index == idxYandex) {
+                    startImageSearch(2, filePath);
+                } else if (index == idxDdg) {
+                    showToast(tr("DuckDuckGo 需手动上传"));
+                    QDesktopServices::openUrl(QUrl(
+                        QStringLiteral("https://duckduckgo.com/?iax=images&ia=images")));
+                }
             });
     }
 
@@ -1107,6 +1120,78 @@ void StickerHomePage::ensureSyncPopup(bool reset)
         m_syncPopup->resetForRun();
     }
     m_syncPopup->open();
+}
+
+// ── 搜索相似（以图搜图）：托管上传 + 打开系统浏览器 ──
+void StickerHomePage::startImageSearch(int engine, const QString& filePath)
+{
+    m_pendingEngine = engine;
+
+    if (!m_search) {
+        m_search = new ImageSearch(this);
+        connect(m_search, &ImageSearch::progressChanged, this,
+            [this](int percent, qint64 sent, qint64 total, const QString& status) {
+                if (m_searchPopup) {
+                    m_searchPopup->setProgress(percent, sent, total, status);
+                }
+            });
+        connect(m_search, &ImageSearch::uploaded, this,
+            [this](const QString& url) {
+                if (m_searchPopup) {
+                    m_searchPopup->setUploadedUrl(url);
+                }
+                openSearchEngine(m_pendingEngine, url);
+            });
+        connect(m_search, &ImageSearch::failed, this,
+            [this](const QString& reason) {
+                if (m_searchPopup) {
+                    m_searchPopup->setFailed(reason);
+                }
+            });
+    }
+
+    if (!m_searchPopup) {
+        m_searchPopup = new ImageSearchPopup(this);
+        connect(m_searchPopup, &QskPopup::closed,
+                m_searchPopup, &QObject::deleteLater);
+    }
+
+    // 文件名 + 目标引擎（DDG 走降级分支不经此处）
+    static const char* kEngineNames[] = { "Google", "Bing", "Yandex", "DuckDuckGo" };
+    const int engineIdx = qBound(0, engine, 3);
+    m_searchPopup->resetForRun(QFileInfo(filePath).fileName(),
+        QString::fromLatin1(kEngineNames[engineIdx]));
+    // 弹出的时序让步：父/子菜单刚 close（含淡出），下一事件循环再开浮层更稳
+    QTimer::singleShot(0, this, [this]() {
+        if (m_searchPopup) {
+            m_searchPopup->open();
+        }
+    });
+    m_search->upload(filePath);
+}
+
+void StickerHomePage::openSearchEngine(int engine, const QString& imageUrl)
+{
+    const QString enc = QString::fromLatin1(QUrl::toPercentEncoding(imageUrl));
+    QUrl url;
+    switch (engine) {
+        case 0: // Google
+            url = QUrl(QStringLiteral("https://www.google.com/searchbyimage?image_url=")
+                + enc);
+            break;
+        case 1: // Bing
+            url = QUrl(QStringLiteral(
+                "https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=") + enc);
+            break;
+        default: // Yandex
+            url = QUrl(QStringLiteral(
+                "https://yandex.com/images/search?url=") + enc
+                + QStringLiteral("&rpt=imageview"));
+            break;
+    }
+    if (url.isValid()) {
+        QDesktopServices::openUrl(url);
+    }
 }
 
 // ── 轻量目录选择器（纯 QSkinny，无 QtWidgets 依赖）──
