@@ -2,7 +2,7 @@
 
 不使用qml，界面全部使用qskinny布局生成。
 
-不移植现有代码，只写helloworld，跑通android-arm64版本打包安装运行, 
+不移植现有代码，只写helloworld，跑通android-arm64版本打包安装运行,
 当前linux平台版本编译运行，以及macos intel x64平台的打包运行。
 
 qskinny x64安装目录，/opt/qt/qskinny/
@@ -16,7 +16,7 @@ tools 目录，/opt/android-sdk/
 jdk 目录，/opt/jdk-17.0.13+11/
 
 
-https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13+11/OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz 
+https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13+11/OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz
 
 https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13+11/OpenJDK17U-jdk_aarch64_linux_hotspot_17.0.13_11.tar.gz
 
@@ -28,7 +28,7 @@ https://mirrors.cloud.tencent.com/AndroidSDK/android-ndk-r26b-linux.zip
 API 21 - 34 <=> Android 5 - 14
 
 同qt6.7.3，ok
-	
+
 
 ### ndk r18
 
@@ -55,3 +55,6 @@ term1: ssh -p 8022 me@192.168.1.94 "su -c logcat 2>&1" > droid.log
 
 term2: echo > droid.log && tail -f droid.log |grep -a -i tox
 
+### 表情包聚合站
+
+* https://volpeon.ink
