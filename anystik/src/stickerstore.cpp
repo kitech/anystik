@@ -2816,6 +2816,26 @@ const BuiltinSource kBuiltinSources[] = {
       "https://gh-proxy.org/https://github.com/GGGeeeooorrrgggeee/nailong-memes/archive/ada8a505e1bfcd40e0c0ad9962b45d20ffda0599.zip",
       153480410L,  // 2026-09-16 实测 GET 全量字节：141 文件 / 136 张 gif+jpg（均在 gif/ ），sha 钉死
       "https://github.com/GGGeeeooorrrgggeee/nailong-memes", true },
+    { "QQ 官方表情全系 (QFace)",
+      "https://gh-proxy.org/https://github.com/koishijs/QFace/archive/f835d447fb5eb4aa9ae733f31d90cdd6d5589093.zip",
+      143277322L,  // 2026-09-16 API 树求和（≈136.6MB，94 表情 / 949 资源，含 gif/webp/png）
+      "https://koishi.js.org/QFace/", true },
+    { "QQ 超级表情 (37张)",
+      "https://gh-proxy.org/https://github.com/Iamliuxiaozhen/QQemoji/archive/571be5c0f9c304dd2c34511578aa7233637e0c4d.zip",
+      7164746L,   // 2026-09-16 API 树求和（≈6.8MB，super/ 37 张 png）
+      "https://github.com/Iamliuxiaozhen/QQemoji", true },
+    { "4chan 表情包 (2022)",
+      "https://gh-proxy.org/https://github.com/Sundowner8/4chanmotes.github.io/archive/6ac1b8072cff9a0f92c3e86a236c234953c324c8.zip",
+      590793L,    // 2026-09-16 API 树求和（≈0.6MB，emotes/ 约 175 张 png/gif）
+      "https://github.com/Sundowner8/4chanmotes.github.io", true },
+    { "blobs.gg 梗图 GIF (英文)",
+      "https://gh-proxy.org/https://github.com/Raymo111/emoji/archive/ec4fa3b7d74dfd299570cb63ab6ce9d74e4b6f01.zip",
+      24625769L,  // 2026-09-16 API 树求和（≈23.5MB，600+ 张 gif/webp）
+      "https://github.com/Raymo111/emoji", true },
+    { "Discord/Slack 自制表情 (skullface)",
+      "https://gh-proxy.org/https://github.com/skullface/emotes/archive/36915096b337f98e9e7581f95fec46ed2b39f807.zip",
+      4271880L,   // 2026-09-16 API 树求和（≈4.1MB，emoji/ 114 张 png/gif）
+      "https://github.com/skullface/emotes", true },
     { "WhatsApp 官方示例贴纸 (SDK)",
       "https://gh-proxy.org/https://github.com/WhatsApp/stickers/archive/06144a1f6077bbb346e1230032fc4e0bce996d03.zip",
       13163057L,   // 8/30 selftest5 整包实测（约值，随 commit 变化）

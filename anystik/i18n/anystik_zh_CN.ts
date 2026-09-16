@@ -62,6 +62,11 @@
         <translation>取消</translation>
     </message>
     <message>
+        <location filename="../src/bundledpackspage.cpp" line="+474"/>
+        <source>约 %1</source>
+        <translation>约 %1</translation>
+    </message>
+    <message>
         <location line="-162"/>
         <location line="+62"/>
         <location line="+149"/>

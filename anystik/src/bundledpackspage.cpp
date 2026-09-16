@@ -467,10 +467,16 @@ void BundledPacksPage::onProgress(const QString& url, qint64 done, qint64 total)
         return;
 
     QString text = tr("下载中  %1").arg(formatSize(done));
-    if (total > 0)
+    if (total > 0) {
         text += " / " + formatSize(total);
-    else
-        text += tr("（大小未知）");
+    } else {
+        const qint64 approx =
+            StickerStore::instance()->cachedApproxSize(url);
+        if (approx > 0)
+            text += " / " + tr("约 %1").arg(formatSize(approx));
+        else
+            text += tr("（大小未知）");
+    }
 
     const bool known = (total > 0);
     it->bar->setVisible(true);
