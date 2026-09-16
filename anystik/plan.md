@@ -58,3 +58,4 @@ term2: echo > droid.log && tail -f droid.log |grep -a -i tox
 ### 表情包聚合站
 
 * https://volpeon.ink
+* 斗图DIY表情大师app

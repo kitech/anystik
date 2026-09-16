@@ -2816,6 +2816,18 @@ const BuiltinSource kBuiltinSources[] = {
       "https://gh-proxy.org/https://github.com/GGGeeeooorrrgggeee/nailong-memes/archive/ada8a505e1bfcd40e0c0ad9962b45d20ffda0599.zip",
       153480410L,  // 2026-09-16 实测 GET 全量字节：141 文件 / 136 张 gif+jpg（均在 gif/ ），sha 钉死
       "https://github.com/GGGeeeooorrrgggeee/nailong-memes", true },
+    { "中国社交媒体平台表情合集 (emoji-chinese)",
+      "https://gh-proxy.org/https://github.com/YiJio/emoji-chinese/archive/79c2292b778cf93cb5850f70c3168bcbfe39aeeb.zip",
+      16108164L,   // 2026-09-16 API 树求和（≈15.4MB，1280 png + 698 gif，QQ/微信/抖音/B站/微博等多平台默认表情）
+      "https://github.com/YiJio/emoji-chinese", true },
+    { "EmojiPackage 中文斗图配文合集",
+      "https://gh-proxy.org/https://github.com/getActivity/EmojiPackage/archive/6110519a8340b36ae3497c4b062292ca25291b61.zip",
+      202812407L,   // 2026-09-16 API 树求和（≈193.4MB，302 gif / 1537 jpg / 129 png / 15 webp）
+      "https://github.com/getActivity/EmojiPackage", true },
+    { "smiles 聊天动态表情 (AC娘等)",
+      "https://gh-proxy.org/https://github.com/LiuJi-Jim/smiles/archive/e710ecc1d22e012231175fb88dbc60291de4ce83.zip",
+      30089460L,    // 2026-09-16 API 树求和（≈28.7MB，219 gif / 137 jpg / 13 png）
+      "https://github.com/LiuJi-Jim/smiles", true },
     { "QQ 官方表情全系 (QFace)",
       "https://gh-proxy.org/https://github.com/koishijs/QFace/archive/f835d447fb5eb4aa9ae733f31d90cdd6d5589093.zip",
       143277322L,  // 2026-09-16 API 树求和（≈136.6MB，94 表情 / 949 资源，含 gif/webp/png）
@@ -2876,11 +2888,7 @@ const BuiltinSource kBuiltinSources[] = {
        "https://gh-proxy.org/https://github.com/rento666/douyin-emoji/archive/46f5cba582a70206d79f492908cf8509d8784398.zip",
        35398057L,         // API 求和（≈33.8 MB）
        "https://github.com/rento666/douyin-emoji", true },
-     { "B站/中文平台默认表情（YiJio）",
-       "https://gh-proxy.org/https://github.com/YiJio/emoji-chinese/archive/79c2292b778cf93cb5850f70c3168bcbfe39aeeb.zip",
-       16108164L,         // API 求和（≈15.4 MB）
-       "https://github.com/YiJio/emoji-chinese", true },
-     { "B站表情全归档（ccmuyuu）",
+{ "B站表情全归档（ccmuyuu）",
        "https://gh-proxy.org/https://github.com/ccmuyuu/bilibili-emotes/archive/db3972317ee029f5acf28ba7bbe971cbbc4fd4e9.zip",
        4365762560L,       // 首次预估=API size 4263440KB（≈4.07 GB）
        "https://github.com/ccmuyuu/bilibili-emotes", true },
