@@ -5,69 +5,77 @@
     <name>BundledPacksPage</name>
     <message>
         <location filename="../src/bundledpackspage.cpp" line="+110"/>
-        <location line="+129"/>
+        <location line="+159"/>
         <source>表情包目录</source>
         <translation>貼圖包目錄</translation>
     </message>
     <message>
-        <location line="-112"/>
-        <location line="+113"/>
+        <location line="-142"/>
         <source>已下载</source>
         <translation>已下載</translation>
     </message>
     <message>
-        <location line="-107"/>
-        <location line="+108"/>
+        <location line="+6"/>
         <source>下载源</source>
         <translation>下載來源</translation>
     </message>
     <message>
-        <location line="-66"/>
-        <location line="+77"/>
+        <location line="+72"/>
+        <location line="+76"/>
         <source>预览</source>
         <translation>預覽</translation>
     </message>
     <message>
-        <location line="-70"/>
-        <location line="+291"/>
+        <location line="-69"/>
+        <location line="+292"/>
         <source>继续</source>
         <translation>繼續</translation>
     </message>
     <message>
-        <location line="-291"/>
-        <location line="+291"/>
+        <location line="-292"/>
+        <location line="+292"/>
         <source>下载安装</source>
         <translation>下載安裝</translation>
     </message>
     <message>
-        <location line="-292"/>
-        <location line="+72"/>
+        <location line="-293"/>
+        <location line="+71"/>
         <source>获取</source>
         <translation>取得</translation>
     </message>
     <message>
-        <location line="-70"/>
-        <location line="+71"/>
-        <location line="+85"/>
+        <location line="-98"/>
+        <source>已下载（%1）</source>
+        <translation>已下載（%1）</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>下载源（%1）</source>
+        <translation>下載源（%1）</translation>
+    </message>
+    <message>
+        <location line="+28"/>
+        <location line="+70"/>
+        <location line="+87"/>
         <location line="+16"/>
         <source>取消</source>
         <translation>取消</translation>
     </message>
     <message>
-        <location line="-161"/>
-        <location line="+63"/>
-        <location line="+147"/>
+        <location line="-162"/>
+        <location line="+62"/>
+        <location line="+149"/>
         <source>大小 约 %1</source>
         <translation>大小 約 %1</translation>
     </message>
     <message>
-        <location line="-209"/>
-        <location line="+63"/>
+        <location line="-210"/>
+        <location line="+62"/>
         <source>大小未知</source>
         <translation>大小未知</translation>
     </message>
     <message>
-        <location line="-48"/>
+        <location line="-47"/>
         <source>检测中…</source>
         <translation>偵測中…</translation>
     </message>
@@ -77,12 +85,12 @@
         <translation>準備下載…</translation>
     </message>
     <message>
-        <location line="+52"/>
+        <location line="+51"/>
         <source>尚未下载任何表情包</source>
         <translation>尚未下載任何貼圖包</translation>
     </message>
     <message>
-        <location line="+29"/>
+        <location line="+31"/>
         <source>停用</source>
         <translation>停用</translation>
     </message>
@@ -945,7 +953,7 @@
 <context>
     <name>StickerHomePage</name>
     <message>
-        <location filename="../src/stickerhomepage.cpp" line="+130"/>
+        <location filename="../src/stickerhomepage.cpp" line="+131"/>
         <location line="+197"/>
         <source>粘贴</source>
         <translation>貼上</translation>
@@ -963,12 +971,7 @@
         <translation>搜尋貼圖 / emoji...</translation>
     </message>
     <message>
-        <location line="-114"/>
-        <source>0 个</source>
-        <translation>0 個</translation>
-    </message>
-    <message>
-        <location line="+25"/>
+        <location line="-89"/>
         <location line="+90"/>
         <source>更多分组…</source>
         <translation>更多分組…</translation>
@@ -1017,12 +1020,7 @@
         <translation>剪貼簿</translation>
     </message>
     <message>
-        <location line="+108"/>
-        <source>%1 个</source>
-        <translation>%1 個</translation>
-    </message>
-    <message>
-        <location line="+22"/>
+        <location line="+134"/>
         <source>复制</source>
         <translation>複製</translation>
     </message>
@@ -1086,7 +1084,7 @@
         <translation>已複製中繼資料</translation>
     </message>
     <message>
-        <location line="-434"/>
+        <location line="-438"/>
         <location line="+200"/>
         <source>😐 表情包</source>
         <translation>😐 表情包</translation>
@@ -1129,7 +1127,13 @@
         <translation>同步中...</translation>
     </message>
     <message>
-        <location line="+298"/>
+        <location line="+23"/>
+        <location line="+255"/>
+        <source>%1 个 · %2 包</source>
+        <translation>%1 個 · %2 包</translation>
+    </message>
+    <message>
+        <location line="+24"/>
         <source>缩放拷贝 ›</source>
         <translation>縮放拷貝 ›</translation>
     </message>

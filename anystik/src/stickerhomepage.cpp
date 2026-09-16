@@ -41,6 +41,7 @@
 #include <QSettings>
 #include <QDesktopServices>
 #include <QHoverEvent>
+#include <QSet>
 #include <QUrl>
 
 #ifdef Q_OS_ANDROID
@@ -213,7 +214,7 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     m_searchLine = new MySearchLine(searchRow);
     m_searchLine->setPlaceholderText(tr("搜索贴纸 / emoji..."));
 
-    m_countLabel = new QskTextLabel(tr("0 个"), searchRow);
+    m_countLabel = new QskTextLabel(tr("%1 个 · %2 包").arg(0).arg(0), searchRow);
     m_countLabel->setPreferredWidth(72);
     m_countLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
 
@@ -464,8 +465,12 @@ void StickerHomePage::updateStickerCount()
 {
     if (!m_countLabel || !m_grid)
         return;
-    const int n = m_grid->stickers().size();
-    m_countLabel->setText(tr("%1 个").arg(n));
+    const auto& sticks = m_grid->stickers();
+    QSet<QString> packs;
+    for (const auto& s : sticks)
+        packs.insert(s.packId);
+    m_countLabel->setText(tr("%1 个 · %2 包")
+        .arg(sticks.size()).arg(packs.size()));
 }
 
 // ═══════════════════════════════════════════════════════════════════

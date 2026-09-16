@@ -153,6 +153,36 @@ void BundledPacksPage::buildBody()
     StickerStore::instance()->cleanupAbandonedDownloads(sourceUrls);
 
     rebuildDownloaded();
+    updateTitles();
+}
+
+int BundledPacksPage::downloadedPackCount() const
+{
+    int n = 0;
+    if (m_downloadedBox) {
+        const auto children = m_downloadedBox->childItems();
+        for (const auto* c : children)
+            if (qobject_cast<const QskLinearBox*>(c))
+                ++n;
+    }
+    return n;
+}
+
+int BundledPacksPage::enabledSourceCount() const
+{
+    int n = 0;
+    for (unsigned i = 0; i < kBuiltinSourceCount; ++i)
+        if (kBuiltinSources[i].enabled)
+            ++n;
+    return n;
+}
+
+void BundledPacksPage::updateTitles()
+{
+    if (!m_aTitle || !m_bTitle)
+        return;
+    m_aTitle->setText(tr("已下载（%1）").arg(downloadedPackCount()));
+    m_bTitle->setText(tr("下载源（%1）").arg(enabledSourceCount()));
 }
 
 void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, const QString& url,
@@ -237,8 +267,7 @@ void BundledPacksPage::retranslateUi()
         return;
 
     m_title->setText(tr("表情包目录"));
-    m_aTitle->setText(tr("已下载"));
-    m_bTitle->setText(tr("下载源"));
+    updateTitles();
     refreshSourceTexts();
     rebuildDownloaded();
 }
@@ -271,6 +300,7 @@ void BundledPacksPage::rebuildDownloaded()
     if (ids.isEmpty()) {
         auto* hint = makeInfoLabel(m_downloadedBox);
         hint->setText(tr("尚未下载任何表情包"));
+        updateTitles();
         return;
     }
 
@@ -287,6 +317,7 @@ void BundledPacksPage::rebuildDownloaded()
             }
         }
     }
+    updateTitles();
 }
 
 void BundledPacksPage::addPackRow(QskLinearBox* list, const StickerPackBrief& pack, bool installed)

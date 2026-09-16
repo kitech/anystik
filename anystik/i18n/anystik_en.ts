@@ -5,69 +5,77 @@
     <name>BundledPacksPage</name>
     <message>
         <location filename="../src/bundledpackspage.cpp" line="+110"/>
-        <location line="+129"/>
+        <location line="+159"/>
         <source>表情包目录</source>
         <translation>Sticker Pack Directory</translation>
     </message>
     <message>
-        <location line="-112"/>
-        <location line="+113"/>
+        <location line="-142"/>
         <source>已下载</source>
         <translation>Downloaded</translation>
     </message>
     <message>
-        <location line="-107"/>
-        <location line="+108"/>
+        <location line="+6"/>
         <source>下载源</source>
         <translation>Download Source</translation>
     </message>
     <message>
-        <location line="-66"/>
-        <location line="+77"/>
+        <location line="+72"/>
+        <location line="+76"/>
         <source>预览</source>
         <translation>Preview</translation>
     </message>
     <message>
-        <location line="-70"/>
-        <location line="+291"/>
+        <location line="-69"/>
+        <location line="+292"/>
         <source>继续</source>
         <translation>Resume</translation>
     </message>
     <message>
-        <location line="-291"/>
-        <location line="+291"/>
+        <location line="-292"/>
+        <location line="+292"/>
         <source>下载安装</source>
         <translation>Download &amp; Install</translation>
     </message>
     <message>
-        <location line="-292"/>
-        <location line="+72"/>
+        <location line="-293"/>
+        <location line="+71"/>
         <source>获取</source>
         <translation>Fetch</translation>
     </message>
     <message>
-        <location line="-70"/>
-        <location line="+71"/>
-        <location line="+85"/>
+        <location line="-98"/>
+        <source>已下载（%1）</source>
+        <translation>Downloaded（%1）</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>下载源（%1）</source>
+        <translation>Sources（%1）</translation>
+    </message>
+    <message>
+        <location line="+28"/>
+        <location line="+70"/>
+        <location line="+87"/>
         <location line="+16"/>
         <source>取消</source>
         <translation>Cancel</translation>
     </message>
     <message>
-        <location line="-161"/>
-        <location line="+63"/>
-        <location line="+147"/>
+        <location line="-162"/>
+        <location line="+62"/>
+        <location line="+149"/>
         <source>大小 约 %1</source>
         <translation>Size approx. %1</translation>
     </message>
     <message>
-        <location line="-209"/>
-        <location line="+63"/>
+        <location line="-210"/>
+        <location line="+62"/>
         <source>大小未知</source>
         <translation>Size unknown</translation>
     </message>
     <message>
-        <location line="-48"/>
+        <location line="-47"/>
         <source>检测中…</source>
         <translation>Checking…</translation>
     </message>
@@ -77,12 +85,12 @@
         <translation>Preparing download…</translation>
     </message>
     <message>
-        <location line="+52"/>
+        <location line="+51"/>
         <source>尚未下载任何表情包</source>
         <translation>No sticker packs downloaded yet</translation>
     </message>
     <message>
-        <location line="+29"/>
+        <location line="+31"/>
         <source>停用</source>
         <translation>Disable</translation>
     </message>
@@ -945,7 +953,7 @@ Please check that ntfy is running in the background</translation>
 <context>
     <name>StickerHomePage</name>
     <message>
-        <location filename="../src/stickerhomepage.cpp" line="+130"/>
+        <location filename="../src/stickerhomepage.cpp" line="+131"/>
         <location line="+197"/>
         <source>粘贴</source>
         <translation>Paste</translation>
@@ -963,12 +971,7 @@ Please check that ntfy is running in the background</translation>
         <translation>Search stickers / emoji...</translation>
     </message>
     <message>
-        <location line="-114"/>
-        <source>0 个</source>
-        <translation>0 items</translation>
-    </message>
-    <message>
-        <location line="+25"/>
+        <location line="-89"/>
         <location line="+90"/>
         <source>更多分组…</source>
         <translation>More groups…</translation>
@@ -1017,12 +1020,7 @@ Please check that ntfy is running in the background</translation>
         <translation>Clipboard</translation>
     </message>
     <message>
-        <location line="+108"/>
-        <source>%1 个</source>
-        <translation>%1 items</translation>
-    </message>
-    <message>
-        <location line="+22"/>
+        <location line="+134"/>
         <source>复制</source>
         <translation>Copy</translation>
     </message>
@@ -1086,7 +1084,7 @@ Please check that ntfy is running in the background</translation>
         <translation>Copied metadata</translation>
     </message>
     <message>
-        <location line="-434"/>
+        <location line="-438"/>
         <location line="+200"/>
         <source>😐 表情包</source>
         <translation>😐 Stickers</translation>
@@ -1129,7 +1127,13 @@ Please check that ntfy is running in the background</translation>
         <translation>Syncing...</translation>
     </message>
     <message>
-        <location line="+298"/>
+        <location line="+23"/>
+        <location line="+255"/>
+        <source>%1 个 · %2 包</source>
+        <translation>%1 stickers · %2 packs</translation>
+    </message>
+    <message>
+        <location line="+24"/>
         <source>缩放拷贝 ›</source>
         <translation>Scaled Copy ›</translation>
     </message>

@@ -44,6 +44,9 @@ private:
     void rebuildDownloaded();
     void addPackRow(QskLinearBox* list, const StickerPackBrief& pack, bool installed);
     void refreshButtons(const SourceRow& row);
+    int downloadedPackCount() const;
+    int enabledSourceCount() const;
+    void updateTitles();
 
     void onProbeDone(const QString& url, qint64 size, const QString& version,
                      const QString& versionRaw, bool ok, const QString& error);
