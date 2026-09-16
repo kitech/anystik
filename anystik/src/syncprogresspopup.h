@@ -10,11 +10,9 @@
 class QskProgressBar;
 class QskTextLabel;
 class QskLinearBox;
-class QskTextField;
-class QskComboBox;
-class QskScrollArea;
 class QskPushButton;
 class QskBox;
+class LogListView;
 class LogModel;
 class SyncEngine;
 
@@ -43,11 +41,6 @@ protected:
 
 private:
     void registerEngine(SyncEngine* engine);
-    void addEntryRow(const LogModel& model, int index);
-    void rebuildList();
-    bool matchFilter(const LogModel& model, int index) const;
-    void scrollToBottom();
-    void copyFiltered();
     void applyFinished(int exitCode, const QString& summary);
     void updateGeometry();
 
@@ -55,22 +48,16 @@ private:
     LogModel* m_model = nullptr;
     QskBox* m_panel = nullptr;
     QskLinearBox* m_layout = nullptr;
+    LogListView* m_logList = nullptr;
 
     QskProgressBar* m_progressBar = nullptr;
     QskTextLabel* m_pctLabel = nullptr;
     QskTextLabel* m_detailLabel = nullptr;
     QskTextLabel* m_featureLabel = nullptr;
     QskTextLabel* m_statusLabel = nullptr;
-    QskTextLabel* m_countLabel = nullptr;
-    QskComboBox* m_levelCombo = nullptr;
-    QskTextField* m_searchField = nullptr;
-    QskLinearBox* m_listBox = nullptr;
-    QskScrollArea* m_scrollView = nullptr;
     QskPushButton* m_cancelBtn = nullptr;
     QskPushButton* m_closeBtn = nullptr;
     QskPushButton* m_cornerCloseBtn = nullptr;
-    QTimer* m_debounceTimer = nullptr;
-    QVector<QskTextLabel*> m_rows;
     bool m_finished = false;
     bool m_escFilterInstalled = false;
 };

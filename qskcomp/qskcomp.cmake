@@ -16,6 +16,10 @@ set(QSKCOMP_SOURCES
     ${QSKCOMP_DIR}/dialogpopup.cpp
     ${QSKCOMP_DIR}/menuoverlay.h
     ${QSKCOMP_DIR}/menuoverlay.cpp
+    ${QSKCOMP_DIR}/loglistview.h
+    ${QSKCOMP_DIR}/loglistview.cpp
+    ${QSKCOMP_DIR}/logmodel.h
+    ${QSKCOMP_DIR}/logmodel.cpp
 )
 
 set(QSKCOMP_INCLUDE_DIRS ${QSKCOMP_DIR})

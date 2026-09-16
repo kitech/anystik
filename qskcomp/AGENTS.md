@@ -1,5 +1,20 @@
 # qskcomp 组件注意事项
 
+## 日志组件族（LogModel + LogListView）
+
+- `logmodel.{h,cpp}` 与 `loglistview.{h,cpp}` 自包含于 qskcomp（曾驻 anystik/src，`git mv` 迁入）
+- LogModel 用法不变：`instance()` 单例 / 私有 `new LogModel(this)` / `append/clear` / `entryAdded/cleared`
+- LogListView = 过滤条(级别+搜索) + 滚动列表 + 工具行(计数/复制/清空)；取消/关闭由宿主自摆
+- ✅ 两个滚动坑已固化在组件内：`setScrolledItem(m_listBox)`（滚动内容须显式声明）、
+  内容盒 `setSizePolicy(Expanding, Minimum)`（可长不可缩→内容超视口出滚动条/否则填满）
+- 宿主仅需 `buildRow(LogModel::Entry)` → `LogListView::RowItem`（level/tag/message/text/color），
+  `appendItem` / `clearItems`，`copyClicked(text)`（复制）与 `clearClicked()` 只发信号由宿主处理
+- 计数文案/级别下拉文案经 `setCountLabelFormat("..%1 / %2..")`、`setLevelComboOptions()` 配置
+- 行为开关: `setAutoScroll(false)`（不滚底）、`setListPreferredHeight(-1)`（填满）、
+  `setCopyButtonVisible/setClearButtonVisible/setCountLabelVisible(false)`
+- 宿主实例: anystik/src/logpage.cpp、anystik/src/syncprogresspopup.cpp
+- 注意: `setPlaceholderText` 在 QskTextField 上（非 QskTextInput）；宿主调组件返回控件方法须含对应头文件
+
 ## QSKinny 文本输入信号（易踩坑）
 
 - `QskAbstractTextInput::textChanged()` 是【无参】纯属性通知信号

@@ -40,8 +40,6 @@ qt_add_executable(anystik
     src/page.cpp
     src/pagemanager.h
     src/pagemanager.cpp
-    src/logmodel.h
-    src/logmodel.cpp
     src/logpage.h
     src/logpage.cpp
     src/loginpage.h

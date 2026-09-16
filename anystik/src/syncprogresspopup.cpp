@@ -1,16 +1,11 @@
 #include "syncprogresspopup.h"
 #include "logmodel.h"
 #include "davbisync.h"
-#include "scrollfader.h"
+#include "loglistview.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskProgressBar.h>
-#include <QskComboBox.h>
-#include <QskTextField.h>
 #include <QskPushButton.h>
-#include <QskScrollView.h>
-#include <QskScrollArea.h>
-#include <QskLabelData.h>
 #include <QskFontRole.h>
 #include <QskBox.h>
 #include <QskGradient.h>
@@ -48,6 +43,18 @@ QString levelTag(const LogModel::Entry& e)
     }
 }
 
+LogListView::RowItem buildRow(const LogModel::Entry& e)
+{
+    LogListView::RowItem item;
+    item.level = int(e.level);
+    item.tag = e.tag;
+    item.message = e.message;
+    item.text = e.timestamp + QStringLiteral("  [") + e.tag + QStringLiteral("] ")
+                + levelTag(e) + QStringLiteral("  ") + e.message;
+    item.color = levelColor(e);
+    return item;
+}
+
 QRectF popupParentRect(QQuickItem* parent)
 {
     if (!parent) {
@@ -80,10 +87,6 @@ SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
     : QskPopup(parent)
     , m_model(new LogModel(this))
 {
-    m_debounceTimer = new QTimer(this);
-    m_debounceTimer->setSingleShot(true);
-    m_debounceTimer->setInterval(150);
-
     setModal(true);
     setOverlay(true);
     setPopupFlag(QskPopup::DeleteOnClose, false);
@@ -140,67 +143,36 @@ SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
     m_statusLabel->setWrapMode(QskTextOptions::WrapAnywhere);
     m_statusLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
 
-    // ── 过滤条 ──
-    auto* filterBar = new QskLinearBox(Qt::Horizontal, m_layout);
-    filterBar->setSpacing(8);
+    // ── 日志组件：过滤条 + 滚动列表 + 工具行(计数/复制/清空) ──
+    m_logList = new LogListView(m_layout);
+    m_logList->setLevelComboOptions(
+        { QStringLiteral("全部"), QStringLiteral("Info"),
+          QStringLiteral("Warn"), QStringLiteral("Error") });
+    m_logList->setCountLabelFormat(QStringLiteral("%1 / %2 条"));
+    m_logList->setListPreferredHeight(340);
 
-    m_levelCombo = new QskComboBox(filterBar);
-    m_levelCombo->addOption(QskLabelData(QStringLiteral("全部")));
-    m_levelCombo->addOption(QskLabelData(QStringLiteral("Info")));
-    m_levelCombo->addOption(QskLabelData(QStringLiteral("Warn")));
-    m_levelCombo->addOption(QskLabelData(QStringLiteral("Error")));
-    m_levelCombo->setPreferredWidth(80);
+    connect(m_logList, &LogListView::copyClicked, this, [this](const QString& text) {
+        QGuiApplication::clipboard()->setText(text);
+        m_statusLabel->setText(QStringLiteral("已复制 ")
+            + QString::number(text.isEmpty() ? 0 : text.count(QLatin1Char('\n')) + 1)
+            + QStringLiteral(" 条到剪贴板"));
+    });
+    connect(m_logList, &LogListView::clearClicked, this, [this]() {
+        clearLog();
+    });
 
-    m_searchField = new QskTextField(filterBar);
-    m_searchField->setPlaceholderText(QStringLiteral("过滤标签 / 内容..."));
-    m_searchField->setPreferredHeight(38);
-    m_searchField->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    // ── 宿主按钮行：取消/关闭（不属于日志组件）──
+    auto* buttonRow = new QskLinearBox(Qt::Horizontal, m_layout);
+    buttonRow->setSpacing(6);
+    buttonRow->addSpacer(0, 0);
 
-    connect(m_debounceTimer, &QTimer::timeout, this, &SyncProgressPopup::rebuildList);
-    connect(m_levelCombo, &QskComboBox::currentIndexChanged,
-        this, [this](int) { m_debounceTimer->start(); });
-    connect(m_searchField, &QskTextInput::textChanged,
-        this, [this]() { m_debounceTimer->start(); });
-
-    // ── 滚动日志区 ──
-    m_scrollView = new QskScrollArea(m_layout);
-    m_scrollView->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
-    m_scrollView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_scrollView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_scrollView->setPreferredHeight(340);
-
-    // 桌面 Fusion：滚动条“滚动时短暂显现→空闲淡出”（其他皮肤自动忽略）
-    ScrollFader::attach(m_scrollView);
-
-    m_listBox = new QskLinearBox(Qt::Vertical, m_scrollView);
-    m_listBox->setSpacing(1);
-    // 垂直 Minimum：可长不可缩——内容超出视口时保持内容高以出滚动条，否则填满视口
-    m_listBox->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Minimum);
-    // QskScrollView 不会自动采纳子项为滚动内容，需显式声明
-    m_scrollView->setScrolledItem(m_listBox);
-
-    // ── 工具条 ──
-    auto* tools = new QskLinearBox(Qt::Horizontal, m_layout);
-    tools->setSpacing(6);
-
-    m_countLabel = new QskTextLabel(QStringLiteral("0 条"), tools);
-    m_countLabel->setAlignment(Qt::AlignVCenter);
-
-    auto* copyBtn = new QskPushButton(QStringLiteral("复制"), tools);
-    connect(copyBtn, &QskAbstractButton::clicked, this, &SyncProgressPopup::copyFiltered);
-
-    auto* clearBtn = new QskPushButton(QStringLiteral("清空"), tools);
-    connect(clearBtn, &QskAbstractButton::clicked, this, &SyncProgressPopup::clearLog);
-
-    tools->addSpacer(0, 0);
-
-    m_cancelBtn = new QskPushButton(QStringLiteral("取消"), tools);
+    m_cancelBtn = new QskPushButton(QStringLiteral("取消"), buttonRow);
     connect(m_cancelBtn, &QskAbstractButton::clicked, this, [this]() {
         if (m_engine)
             m_engine->abort();
     });
 
-    m_closeBtn = new QskPushButton(QStringLiteral("关闭"), tools);
+    m_closeBtn = new QskPushButton(QStringLiteral("关闭"), buttonRow);
     m_closeBtn->setEnabled(false);
     connect(m_closeBtn, &QskAbstractButton::clicked, this, &QskPopup::close);
 
@@ -250,14 +222,8 @@ void SyncProgressPopup::registerEngine(SyncEngine* engine)
             [this](int lvl, const QString& tag, const QString& line) {
                 const int idx = qBound(0, lvl, int(davbisync::Error));
                 m_model->append(kLevelMapInt[idx], tag, line);
-                const int last = m_model->count() - 1;
-                if (matchFilter(*m_model, last)) {
-                    addEntryRow(*m_model, last);
-                    scrollToBottom();
-                }
-                m_countLabel->setText(QString::number(m_rows.size())
-                    + QStringLiteral(" / ") + QString::number(m_model->count())
-                    + QStringLiteral(" 条"));
+                const auto& e = m_model->at(m_model->count() - 1);
+                m_logList->appendItem(buildRow(e));
             });
 
     connect(engine, &SyncEngine::progressUpdated, this,
@@ -282,7 +248,7 @@ void SyncProgressPopup::registerEngine(SyncEngine* engine)
 void SyncProgressPopup::resetForRun()
 {
     m_model->clear();
-    rebuildList();
+    m_logList->clearItems();
 
     m_finished = false;
     m_progressBar->setValue(0);
@@ -326,93 +292,7 @@ void SyncProgressPopup::clearLog()
     if (m_model) {
         m_model->clear();
     }
-    rebuildList();
-}
-
-bool SyncProgressPopup::matchFilter(const LogModel& model, int index) const
-{
-    const auto& e = model.at(index);
-    const int li = m_levelCombo ? m_levelCombo->currentIndex() : 0;
-    if (li > 0) {
-        const LogModel::Level target = (li == 1) ? LogModel::Info
-            : (li == 2) ? LogModel::Warn : LogModel::Error;
-        if (e.level != target) {
-            return false;
-        }
-    }
-    if (m_searchField && !m_searchField->text().isEmpty()) {
-        const QString text = m_searchField->text();
-        if (!e.tag.contains(text, Qt::CaseInsensitive) &&
-            !e.message.contains(text, Qt::CaseInsensitive)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-void SyncProgressPopup::addEntryRow(const LogModel& model, int index)
-{
-    auto* row = new QskTextLabel(m_listBox);
-    const auto& e = model.at(index);
-    row->setText(e.timestamp + QStringLiteral("  [") + e.tag + QStringLiteral("] ")
-                     + levelTag(e) + QStringLiteral("  ") + e.message);
-    const QColor c = levelColor(e);
-    if (c.isValid()) {
-        row->setTextColor(c);
-    }
-    row->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
-    m_rows.append(row);
-}
-
-void SyncProgressPopup::rebuildList()
-{
-    qDeleteAll(m_rows);
-    m_rows.clear();
-
-    if (!m_model) {
-        return;
-    }
-    for (int i = 0; i < m_model->count(); ++i) {
-        if (matchFilter(*m_model, i)) {
-            addEntryRow(*m_model, i);
-        }
-    }
-    scrollToBottom();
-    m_countLabel->setText(QString::number(m_rows.size())
-        + QStringLiteral(" / ") + QString::number(m_model->count())
-        + QStringLiteral(" 条"));
-}
-
-void SyncProgressPopup::scrollToBottom()
-{
-    if (m_scrollView) {
-        m_scrollView->setScrollPos(QPointF(0, 0));
-        const QSizeF size = m_scrollView->scrollableSize();
-        m_scrollView->scrollTo(QPointF(0, size.height()));
-    }
-}
-
-void SyncProgressPopup::copyFiltered()
-{
-    if (!m_model) {
-        return;
-    }
-    QString out;
-    for (int i = 0; i < m_model->count(); ++i) {
-        if (!matchFilter(*m_model, i)) {
-            continue;
-        }
-        const auto& e = m_model->at(i);
-        if (!out.isEmpty()) {
-            out += QLatin1Char('\n');
-        }
-        out += e.timestamp + QStringLiteral("  [") + e.tag + QStringLiteral("] ")
-               + levelTag(e) + QStringLiteral("  ") + e.message;
-    }
-    QGuiApplication::clipboard()->setText(out);
-    m_statusLabel->setText(QStringLiteral("已复制 ")
-        + QString::number(out.isEmpty() ? 0 : out.count(QLatin1Char('\n')) + 1)
-        + QStringLiteral(" 条到剪贴板"));
+    m_logList->clearItems();
 }
 
 void SyncProgressPopup::updateLayout()

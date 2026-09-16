@@ -1,15 +1,34 @@
 #include "logpage.h"
 #include "pagemanager.h"
-#include "scrollfader.h"
+#include "loglistview.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskTextField.h>
+#include <QskTextInput.h>
 #include <QskPushButton.h>
 #include <QskComboBox.h>
-#include <QskScrollView.h>
-#include <QskScrollArea.h>
-#include <QskLabelData.h>
 #include <QskSeparator.h>
+
+namespace {
+
+LogListView::RowItem buildRow(const LogModel::Entry& e)
+{
+    LogListView::RowItem item;
+    item.level = int(e.level);
+    item.tag = e.tag;
+    item.message = e.message;
+    QString levelTag;
+    switch (e.level) {
+        case LogModel::Error: levelTag = "🔴 ERR"; break;
+        case LogModel::Warn:  levelTag = "🟡 WRN"; break;
+        case LogModel::Info:  levelTag = "ℹ️ INF"; break;
+        default:             levelTag = "⚪ DBG";
+    }
+    item.text = e.timestamp + "  " + levelTag + "  " + e.tag + "  " + e.message;
+    return item;
+}
+
+} // namespace
 
 LogPage::LogPage(QQuickItem* parent)
     : Page(parent)
@@ -45,129 +64,31 @@ void LogPage::onCreate(const QVariantMap&, const QVariantMap&)
         LogModel::instance().clear();
     });
 
-    // ── Filter bar ──
-    auto* filterBar = new QskLinearBox(Qt::Horizontal, layout);
-    filterBar->setPanel(true);
-    filterBar->setPreferredHeight(48);
-    filterBar->setSpacing(8);
-
-    m_levelCombo = new QskComboBox(filterBar);
-    m_levelCombo->addOption(QskLabelData("All"));
-    m_levelCombo->addOption(QskLabelData("Info"));
-    m_levelCombo->addOption(QskLabelData("Warn"));
-    m_levelCombo->addOption(QskLabelData("Error"));
-    m_levelCombo->setPreferredWidth(100);
-
-    {
-        auto* field = new QskTextField(filterBar);
-        field->setPlaceholderText(QString::fromUtf8("🔍 Search..."));
-        m_searchField = field;
-    }
-    m_searchField->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
-    m_searchField->setPreferredHeight(40);
-
-    m_debounceTimer = new QTimer(this);
-    m_debounceTimer->setSingleShot(true);
-    m_debounceTimer->setInterval(150);
-
-    connect(m_debounceTimer, &QTimer::timeout, this, &LogPage::rebuildList);
-    connect(m_levelCombo, &QskComboBox::currentIndexChanged,
-        this, [this](int) { m_debounceTimer->start(); });
-    connect(m_searchField, &QskTextInput::textChanged,
-        this, [this]() { m_debounceTimer->start(); });
-
-    // ── Scrollable log list ──
-    auto* scrollView = new QskScrollArea(layout);
-    scrollView->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
-    scrollView->setFlickableOrientations(Qt::Vertical);
-
-    // 桌面 Fusion：滚动条“滚动时短暂显现→空闲淡出”（其他皮肤自动忽略）
-    ScrollFader::attach(scrollView);
-
-    m_listBox = new QskLinearBox(Qt::Vertical, scrollView);
-    // 垂直 Minimum：可长不可缩——内容超出视口时保持内容高以出滚动条，否则填满视口
-    m_listBox->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Minimum);
-    // QskScrollView 不会自动采纳子项为滚动内容，需显式声明
-    scrollView->setScrolledItem(m_listBox);
-
-    // ── Status bar ──
-    auto* statusBar = new QskLinearBox(Qt::Horizontal, layout);
-    statusBar->setPanel(true);
-    statusBar->setPreferredHeight(32);
-
-    m_countLabel = new QskTextLabel("0 entries", statusBar);
-    m_countLabel->setAlignment(Qt::AlignCenter);
+    // ── 日志组件：过滤条 + 滚动列表 + 计数（复制/清空按钮隐藏，顶栏 Clear 承担清空）──
+    m_logList = new LogListView(layout);
+    m_logList->setCountLabelFormat(QStringLiteral("%1 / %2 entries"));
+    m_logList->setListPreferredHeight(-1);      // 填满页面
+    m_logList->setCopyButtonVisible(false);
+    m_logList->setClearButtonVisible(false);
+    m_logList->setAutoScroll(false);            // 保持原行为：不自动滚底
+    m_logList->setLevelComboOptions(
+        { QStringLiteral("All"), QStringLiteral("Info"),
+          QStringLiteral("Warn"), QStringLiteral("Error") });
+    m_logList->levelCombo()->setPreferredWidth(100);
+    m_logList->searchField()->setPreferredHeight(40);
 
     // ── Connect to model signals ──
     auto& model = LogModel::instance();
-    connect(&model, &LogModel::entryAdded, this, [this](int) {
+    connect(&model, &LogModel::entryAdded, this, [this]() {
         auto& m = LogModel::instance();
-        int last = m.count() - 1;
-        if (!matchFilter(m.at(last))) return;
-        const auto& e = m.at(last);
-        auto* row = new QskTextLabel(m_listBox);
-        QString levelTag;
-        switch (e.level) {
-            case LogModel::Error: levelTag = "🔴 ERR"; break;
-            case LogModel::Warn:  levelTag = "🟡 WRN"; break;
-            case LogModel::Info:  levelTag = "ℹ️ INF"; break;
-            default:             levelTag = "⚪ DBG";
-        }
-        row->setText(e.timestamp + "  " + levelTag + "  " + e.tag + "  " + e.message);
-        row->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
-        m_rows.append(row);
-        int visible = m_rows.size();
-        m_countLabel->setText(
-            QString::number(visible) + " / " + QString::number(m.count()) + " entries");
+        m_logList->appendItem(buildRow(m.at(m.count() - 1)));
     });
     connect(&model, &LogModel::cleared, this, [this]() {
-        rebuildList();
+        m_logList->clearItems();
     });
 
     // ── Initial population ──
-    rebuildList();
-}
-
-bool LogPage::matchFilter(const LogModel::Entry& e) const
-{
-    int levelIdx = m_levelCombo->currentIndex();
-    if (levelIdx > 0) {
-        static const LogModel::Level levels[] = {
-            LogModel::Debug, LogModel::Info, LogModel::Warn, LogModel::Error
-        };
-        if (levelIdx - 1 < 4 && e.level != levels[levelIdx - 1])
-            return false;
-    }
-    QString text = m_searchField->text();
-    if (!text.isEmpty()) {
-        if (!e.tag.contains(text, Qt::CaseInsensitive) &&
-            !e.message.contains(text, Qt::CaseInsensitive))
-            return false;
-    }
-    return true;
-}
-
-void LogPage::rebuildList()
-{
-    qDeleteAll(m_rows);
-    m_rows.clear();
-
-    auto& model = LogModel::instance();
     for (int i = 0; i < model.count(); ++i) {
-        const auto& e = model.at(i);
-        if (!matchFilter(e)) continue;
-        auto* row = new QskTextLabel(m_listBox);
-        QString levelTag;
-        switch (e.level) {
-            case LogModel::Error: levelTag = "🔴 ERR"; break;
-            case LogModel::Warn:  levelTag = "🟡 WRN"; break;
-            case LogModel::Info:  levelTag = "ℹ️ INF"; break;
-            default:             levelTag = "⚪ DBG";
-        }
-        row->setText(e.timestamp + "  " + levelTag + "  " + e.tag + "  " + e.message);
-        row->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
-        m_rows.append(row);
+        m_logList->appendItem(buildRow(model.at(i)));
     }
-    m_countLabel->setText(
-        QString::number(m_rows.size()) + " / " + QString::number(model.count()) + " entries");
 }
