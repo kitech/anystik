@@ -9,6 +9,14 @@
 - ✅ 用户编辑用 textEdited；仅需"内容变了"用无参 textChanged()
 - 同类实例：anystik/src/settingspage.cpp:657、logpage.cpp:74
 
+## QSKinny 文本输入框后半高字（易踩坑）
+
+- 症状: mac/Android 下 QskTextInput/QskTextField 编辑文字只显下半截（字形顶部被裁）；placeholder 正常，Linux 正常
+- 原因: 编辑态文字由内嵌 QQuickTextInput 渲染，几何=subControlRect(Text)（字段高−两层padding），
+  大字体/高 dpr 下内容区<行高 → 顶裁；setPreferredHeight(40) 不够，必须 setFixedHeight 锁死
+- ✅ 所有输入框统一 `field->setFixedHeight(30)`
+- 同类实例: anystik/src/settingspage.cpp:214/:227/:295/:308/:322（Gotify2 + DAV3）
+
 ## QSKinny 弹出层透明无背景（易踩坑）
 
 - QskPopup 本身透明，内容直接挂 popup 根部 = 完全穿透、无背景
