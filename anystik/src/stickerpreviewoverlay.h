@@ -24,6 +24,7 @@ Q_SIGNALS:
     void deleteRequested(const StickerBrief& brief);
 
 protected:
+    bool eventFilter(QObject* obj, QEvent* ev) override;
     void touchEvent(QTouchEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;

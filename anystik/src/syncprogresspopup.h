@@ -32,12 +32,14 @@ class SyncProgressPopup : public QskPopup
     Q_OBJECT
 public:
     explicit SyncProgressPopup(SyncEngine* engine, QQuickItem* parent = nullptr);
+    ~SyncProgressPopup() override;
 
     void clearLog();
     void resetForRun();
 
 protected:
     void updateLayout() override;
+    bool eventFilter(QObject* obj, QEvent* ev) override;
 
 private:
     void registerEngine(SyncEngine* engine);
@@ -70,6 +72,7 @@ private:
     QTimer* m_debounceTimer = nullptr;
     QVector<QskTextLabel*> m_rows;
     bool m_finished = false;
+    bool m_escFilterInstalled = false;
 };
 
 #endif // SYNC_PROGRESS_POPUP_H

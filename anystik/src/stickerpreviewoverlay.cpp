@@ -172,8 +172,23 @@ StickerPreviewOverlay::StickerPreviewOverlay(QQuickItem* parent)
 
 StickerPreviewOverlay::~StickerPreviewOverlay()
 {
+    if (auto* w = window())
+        w->removeEventFilter(this);
     delete m_movie;
     delete m_reader;
+}
+
+bool StickerPreviewOverlay::eventFilter(QObject*, QEvent* ev)
+{
+    if (ev->type() == QEvent::KeyPress) {
+        auto* ke = static_cast<QKeyEvent*>(ev);
+        if (ke->key() == Qt::Key_Escape) {
+            Q_EMIT closed();
+            deleteLater();
+            return true;
+        }
+    }
+    return false;
 }
 
 void StickerPreviewOverlay::show(const StickerBrief& brief)
@@ -241,6 +256,8 @@ void StickerPreviewOverlay::show(const StickerBrief& brief)
     m_metaText = formatStickerMeta(meta);
 
     setVisible(true);
+    if (auto* w = window())
+        w->installEventFilter(this);
     m_dirty = true;
     update();
 }

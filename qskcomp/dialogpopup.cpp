@@ -27,7 +27,7 @@ namespace
                       parent->width(), parent->height());
     }
 
-    qreal s_defaultPanelOpacity = 0.8;
+    qreal s_defaultPanelOpacity = 0.9;
 
     // 面板不透明度：回读当前皮肤面板填充色，仅改 alpha（保留主题配色）
     void applyPanelOpacity(QskBox* panel, qreal opacity)

@@ -38,6 +38,7 @@ class MsgEnlargeOverlay : public QQuickItem
     Q_OBJECT
 public:
     explicit MsgEnlargeOverlay(QQuickItem* parent = nullptr);
+    ~MsgEnlargeOverlay() override;
 
     void show(const MessageItem& item);
 
@@ -45,6 +46,7 @@ Q_SIGNALS:
     void closed();
 
 protected:
+    bool eventFilter(QObject* obj, QEvent* ev) override;
     void touchEvent(QTouchEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;

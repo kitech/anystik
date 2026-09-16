@@ -12,8 +12,10 @@
 #include <QskLabelData.h>
 #include <QskFontRole.h>
 #include <QskBox.h>
+#include <QskGradient.h>
 #include <QskBoxShapeMetrics.h>
 #include <QClipboard>
+#include <QKeyEvent>
 #include <QGuiApplication>
 #include <QQuickItem>
 #include <QQuickWindow>
@@ -57,6 +59,20 @@ QRectF popupParentRect(QQuickItem* parent)
                   parent->width(), parent->height());
 }
 
+// 面板不透明度：回读当前皮肤面板填充色，仅改 alpha（保留主题配色，对齐 DialogPopup 语义）
+void applyPanelOpacity(QskBox* panel, qreal opacity)
+{
+    if (!panel)
+        return;
+
+    QskGradient g = panel->fillGradient();
+    if (!g.isValid())
+        return;   // 皮肤未提供填充色时保持不透明，不擅自替色
+
+    g.setAlpha(qRound(qBound(0.0, opacity, 1.0) * 255.0));
+    panel->setFillGradient(g);
+}
+
 } // namespace
 
 SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
@@ -76,6 +92,7 @@ SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
     m_panel = new QskBox(this);
     m_panel->setBoxShapeHint(QskBox::Panel,
         QskBoxShapeMetrics(14, Qt::AbsoluteSize));
+    applyPanelOpacity(m_panel, 0.9);
 
     m_layout = new QskLinearBox(Qt::Vertical, m_panel);
     m_layout->setSpacing(8);
@@ -185,7 +202,36 @@ SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
     m_cornerCloseBtn->setEnabled(false);
     registerEngine(engine);
 
+    connect(this, &QskPopup::opened, this, [this]() {
+        if (m_escFilterInstalled)
+            return;
+        if (auto* w = window()) {
+            w->installEventFilter(this);
+            m_escFilterInstalled = true;
+        }
+    });
     QTimer::singleShot(0, this, [this]() { updateGeometry(); });
+}
+
+SyncProgressPopup::~SyncProgressPopup()
+{
+    if (m_escFilterInstalled) {
+        if (auto* w = window())
+            w->removeEventFilter(this);
+        m_escFilterInstalled = false;
+    }
+}
+
+bool SyncProgressPopup::eventFilter(QObject*, QEvent* ev)
+{
+    if (ev->type() == QEvent::KeyPress
+        && static_cast<QKeyEvent*>(ev)->key() == Qt::Key_Escape) {
+        if (m_closeBtn && m_closeBtn->isEnabled()) {   // 关闭按钮可用 → 真关闭
+            close();
+        }
+        return true;   // 任何情况下都吞掉 Esc，禁止底层 QskPopup Esc 处理绕过门控
+    }
+    return false;
 }
 
 void SyncProgressPopup::registerEngine(SyncEngine* engine)

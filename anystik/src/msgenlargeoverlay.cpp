@@ -225,6 +225,25 @@ MsgEnlargeOverlay::MsgEnlargeOverlay(QQuickItem* parent)
     }
 }
 
+MsgEnlargeOverlay::~MsgEnlargeOverlay()
+{
+    if (auto* w = window())
+        w->removeEventFilter(this);
+}
+
+bool MsgEnlargeOverlay::eventFilter(QObject*, QEvent* ev)
+{
+    if (ev->type() == QEvent::KeyPress) {
+        auto* ke = static_cast<QKeyEvent*>(ev);
+        if (ke->key() == Qt::Key_Escape) {
+            Q_EMIT closed();
+            deleteLater();
+            return true;
+        }
+    }
+    return false;
+}
+
 void MsgEnlargeOverlay::show(const MessageItem& item)
 {
     m_item = item;
@@ -262,6 +281,8 @@ void MsgEnlargeOverlay::show(const MessageItem& item)
     }
 
     setVisible(true);
+    if (auto* w = window())
+        w->installEventFilter(this);
     recalcMaxScroll();
     update();
 }
