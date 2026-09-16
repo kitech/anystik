@@ -49,7 +49,7 @@ private:
     void applyFinished(int exitCode, const QString& summary);
     void updateGeometry();
 
-    SyncEngine* m_engine = nullptr;
+    QPointer<SyncEngine> m_engine;
     LogModel* m_model = nullptr;
     QskBox* m_panel = nullptr;
     QskLinearBox* m_layout = nullptr;

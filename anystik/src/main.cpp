@@ -440,8 +440,8 @@ int main(int argc, char* argv[]) {
         [](Qt::ApplicationState state) {
             if (state == Qt::ApplicationInactive
              || state == Qt::ApplicationSuspended) {
-                qDebug() << "[anystik] applicationState:" << state
-                         << "-> syncing QSettings";
+                // qDebug() << "[anystik] applicationState:" << state
+                //         << "-> syncing QSettings";
                 QSettings().sync();
                 trace_settings("lifecycle-sync");
             }

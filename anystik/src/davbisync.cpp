@@ -4,6 +4,7 @@
 #include "qwebdavdirparser.h"
 #include "qwebdavitem.h"
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QTimer>
 #include <QFile>
@@ -75,28 +76,53 @@ bool isConflictRel(const QString& rel)
 
 SyncEngine::SyncEngine(QObject* parent)
     : QObject(parent)
-    , m_webdav(new QWebdav(this))
-    , m_parser(new QWebdavDirParser(this))
 {
-    // 云端目录逐目录扫描状态机：parser 每次列一个目录，finished 后收集并调度下一目录
-    connect(m_parser, &QWebdavDirParser::finished, this,
-            [this]() {
-                if (!m_running) {
-                    return;
-                }
-                if (m_scanCurrentDir.isEmpty()) {
-                    return;    // 非扫描阶段（空闲 finish，忽略）
-                }
-                collectCloudItems();
-            });
+}
 
+SyncEngine::~SyncEngine()
+{
+    qInfo() << "[sync] ~SyncEngine" << this << "destroyed";
+}
+
+// 每轮新建 QWebdav：上一轮 abort 后 QNAM 的 keep-alive 连接/auth 会话可能已坏死，
+// 复用会让本轮首个请求永久挂起；新建 = 与"重启 app"等价的干净连接池。
+void SyncEngine::createConnection()
+{
+    if (m_webdav) {
+        disconnect(m_webdav, nullptr, this, nullptr);
+        m_webdav->deleteLater();
+    }
+    m_webdav = new QWebdav(this);
+    qInfo() << "[sync] QWebdav created" << m_webdav;
+    connect(m_webdav, &QObject::destroyed, qApp,
+            [](QObject* w) { qInfo() << "[sync] QWebdav destroyed" << w; });
+    m_webdav->setConnectionSettings(
+        (m_connectionType == 2) ? QWebdav::HTTPS : QWebdav::HTTP,
+        m_host, m_rootPath, m_username, m_password, m_port);
+    m_webdav->setTransferTimeout(60000);
+}
+
+// 每轮新建 parser：旧 parser 的连接/内部 reply 可能残留，拆旧建新彻底隔离
+void SyncEngine::createParser()
+{
+    if (m_parser) {
+        disconnect(m_parser, nullptr, this, nullptr);
+        m_parser->deleteLater();
+    }
+    m_parser = new QWebdavDirParser(this);
+    qInfo() << "[sync] parser created" << m_parser;
+    connect(m_parser, &QObject::destroyed, qApp,
+            [](QObject* p) { qInfo() << "[sync] parser destroyed" << p; });
+    connect(m_parser, &QWebdavDirParser::finished, this, [this]() {
+        if (!m_running) return;
+        if (m_scanCurrentDir.isEmpty()) return;
+        collectCloudItems();
+    });
     connect(m_parser, &QWebdavDirParser::errorChanged, this,
             [this](const QString& line) {
                 log(davbisync::Warn, QStringLiteral("webdav"), line);
             });
 }
-
-SyncEngine::~SyncEngine() = default;
 
 bool SyncEngine::isCloudAvailable() const
 {
@@ -116,22 +142,19 @@ bool SyncEngine::setConnectionSettings(int connectionType,
     m_username = username;
     m_password = password;
     m_port = port;
+    m_connectionType = connectionType;
     m_useSsl = useSsl;
-
-    const QWebdav::QWebdavConnectionType ctype =
-        (connectionType == 2) ? QWebdav::HTTPS : QWebdav::HTTP;
-
-    m_webdav->setConnectionSettings(ctype, hostname, rootPath,
-                                    username, password, port);
     return true;
 }
 
 bool SyncEngine::startSync()
 {
-    if (!m_webdav || !m_parser) {
+    if (m_running) {
         return false;
     }
-    if (m_running) {
+    createConnection();
+    createParser();
+    if (!m_webdav || !m_parser) {
         return false;
     }
     m_running = true;
@@ -145,6 +168,10 @@ bool SyncEngine::startSync()
     m_davCap.clear();
     m_allowMethods.clear();
     m_serverName.clear();
+    m_cloudMtimeAvail = false;
+    m_putMtimeEcho = false;
+    m_cloudMtimeDecided = false;
+    m_putEchoDecided = false;
 
     m_cloudReady = false;
     m_cloudFiles.clear();
@@ -182,21 +209,6 @@ bool SyncEngine::startSync()
         }
     }
     m_activeReplies.clear();
-    // 重建 parser：旧 parser 的连接/内部 reply 可能残留，拆旧建新彻底隔离
-    if (m_parser) {
-        disconnect(m_parser, nullptr, this, nullptr);
-        m_parser->deleteLater();
-    }
-    m_parser = new QWebdavDirParser(this);
-    connect(m_parser, &QWebdavDirParser::finished, this, [this]() {
-        if (!m_running) return;
-        if (m_scanCurrentDir.isEmpty()) return;
-        collectCloudItems();
-    });
-    connect(m_parser, &QWebdavDirParser::errorChanged, this,
-            [this](const QString& line) {
-                log(davbisync::Warn, QStringLiteral("webdav"), line);
-            });
     m_tempFiles.clear();
 
     emit progressUpdated(0, QStringLiteral("scan"),

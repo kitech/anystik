@@ -1096,6 +1096,12 @@ void StickerHomePage::ensureSyncPopup(bool reset)
         m_syncPopup = new SyncProgressPopup(m_syncEngine, this);
         connect(m_syncPopup, &QskPopup::closed,
                 m_syncPopup, &QObject::deleteLater);
+        connect(m_syncPopup, &QskPopup::closed, this, [this]() {
+            if (m_syncEngine && !m_syncEngine->isRunning()) {
+                m_syncEngine->deleteLater();
+                m_syncEngine = nullptr;
+            }
+        });
     }
     if (reset) {
         m_syncPopup->resetForRun();

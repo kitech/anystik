@@ -132,6 +132,8 @@ private:
     void uploadFile(const QString& localPath, const QString& cloudRel);
     void downloadFile(const QString& cloudRel, const QString& localAbs);
     void removeActiveReply(QNetworkReply* reply);   // 注销并销毁 reply
+    void createConnection();   // 每轮新建 QWebdav（连接池/认证归零，与重启等价）
+    void createParser();       // 每轮新建 parser 并接线
     QUrl cloudUrl(const QString& dbRel) const;
     QString cloudPath(const QString& dbRel) const;  // 业务 dbRel → 传输路径（唯一入云拼根点）
     void persistBaseline();          // 成功操作后增量原子保存基线（防中断重传）
@@ -207,6 +209,7 @@ private:
     QString m_username;
     QString m_password;
     int m_port = 0;
+    int m_connectionType = 1;
     bool m_useSsl = true;
 };
 
