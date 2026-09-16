@@ -9,6 +9,7 @@
 #include <QskTextField.h>
 #include <QskPushButton.h>
 #include <QskScrollView.h>
+#include <QskScrollArea.h>
 #include <QskLabelData.h>
 #include <QskFontRole.h>
 #include <QskBox.h>
@@ -162,7 +163,7 @@ SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
         this, [this]() { m_debounceTimer->start(); });
 
     // ── 滚动日志区 ──
-    m_scrollView = new QskScrollView(m_layout);
+    m_scrollView = new QskScrollArea(m_layout);
     m_scrollView->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
     m_scrollView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_scrollView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -173,6 +174,10 @@ SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
 
     m_listBox = new QskLinearBox(Qt::Vertical, m_scrollView);
     m_listBox->setSpacing(1);
+    // 垂直 Minimum：可长不可缩——内容超出视口时保持内容高以出滚动条，否则填满视口
+    m_listBox->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Minimum);
+    // QskScrollView 不会自动采纳子项为滚动内容，需显式声明
+    m_scrollView->setScrolledItem(m_listBox);
 
     // ── 工具条 ──
     auto* tools = new QskLinearBox(Qt::Horizontal, m_layout);
@@ -276,6 +281,9 @@ void SyncProgressPopup::registerEngine(SyncEngine* engine)
 
 void SyncProgressPopup::resetForRun()
 {
+    m_model->clear();
+    rebuildList();
+
     m_finished = false;
     m_progressBar->setValue(0);
     m_pctLabel->setText(QStringLiteral("0%"));
@@ -378,6 +386,7 @@ void SyncProgressPopup::rebuildList()
 void SyncProgressPopup::scrollToBottom()
 {
     if (m_scrollView) {
+        m_scrollView->setScrollPos(QPointF(0, 0));
         const QSizeF size = m_scrollView->scrollableSize();
         m_scrollView->scrollTo(QPointF(0, size.height()));
     }

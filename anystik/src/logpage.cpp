@@ -7,6 +7,7 @@
 #include <QskPushButton.h>
 #include <QskComboBox.h>
 #include <QskScrollView.h>
+#include <QskScrollArea.h>
 #include <QskLabelData.h>
 #include <QskSeparator.h>
 
@@ -76,7 +77,7 @@ void LogPage::onCreate(const QVariantMap&, const QVariantMap&)
         this, [this]() { m_debounceTimer->start(); });
 
     // ── Scrollable log list ──
-    auto* scrollView = new QskScrollView(layout);
+    auto* scrollView = new QskScrollArea(layout);
     scrollView->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
     scrollView->setFlickableOrientations(Qt::Vertical);
 
@@ -84,6 +85,10 @@ void LogPage::onCreate(const QVariantMap&, const QVariantMap&)
     ScrollFader::attach(scrollView);
 
     m_listBox = new QskLinearBox(Qt::Vertical, scrollView);
+    // 垂直 Minimum：可长不可缩——内容超出视口时保持内容高以出滚动条，否则填满视口
+    m_listBox->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Minimum);
+    // QskScrollView 不会自动采纳子项为滚动内容，需显式声明
+    scrollView->setScrolledItem(m_listBox);
 
     // ── Status bar ──
     auto* statusBar = new QskLinearBox(Qt::Horizontal, layout);

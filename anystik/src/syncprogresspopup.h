@@ -12,7 +12,7 @@ class QskTextLabel;
 class QskLinearBox;
 class QskTextField;
 class QskComboBox;
-class QskScrollView;
+class QskScrollArea;
 class QskPushButton;
 class QskBox;
 class LogModel;
@@ -65,7 +65,7 @@ private:
     QskComboBox* m_levelCombo = nullptr;
     QskTextField* m_searchField = nullptr;
     QskLinearBox* m_listBox = nullptr;
-    QskScrollView* m_scrollView = nullptr;
+    QskScrollArea* m_scrollView = nullptr;
     QskPushButton* m_cancelBtn = nullptr;
     QskPushButton* m_closeBtn = nullptr;
     QskPushButton* m_cornerCloseBtn = nullptr;

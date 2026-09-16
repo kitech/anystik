@@ -9,6 +9,21 @@
 - ✅ 用户编辑用 textEdited；仅需"内容变了"用无参 textChanged()
 - 同类实例：anystik/src/settingspage.cpp:657、logpage.cpp:74
 
+## QSKinny 滚动视图内容不显示（已踩坑）
+
+- 症状: QskScrollView 内容（如 QskLinearBox 行）全部空白，但数据计数正常；无滚动条，所有平台一致
+- 原因: QskScrollView 不会自动采纳子项为滚动内容（scrolledItem==nullptr → scrollableSize 恒 0）
+- ✅ 显式声明 `scrollView->setScrolledItem(m_listBox)`（QskScrollArea 的公开 API）
+- ✅ 若持有的是 QskScrollView*：`static_cast<QskScrollArea*>(sv)->setScrolledItem(box)`
+- 同类实例: anystik/src/syncprogresspopup.cpp（日志区）、anystik/src/logpage.cpp(:86)
+
+### 内容盒尺寸策略（resizable 默认开时仍会压扁）
+
+- 坑: 内容盒默认垂直 Expanding ⇒ 尺寸被钳到视口高 ⇒ 行被压扁重叠、滚动条永不出现（内容高=视口高）
+- ✅ 内容盒（垂直滚动内容）设 `setSizePolicy(Expanding, Minimum)`：可长不可缩
+  → 内容超视口保持内容高（出滚动条）；内容矮时填满视口
+- 同类实例: 同上两文件（m_listBox）
+
 ## QSKinny 文本输入框后半高字（易踩坑）
 
 - 症状: mac/Android 下 QskTextInput/QskTextField 编辑文字只显下半截（字形顶部被裁）；placeholder 正常，Linux 正常
