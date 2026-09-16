@@ -140,14 +140,16 @@ void BundledPacksPage::buildBody()
     connect(store, &StickerStore::dataChanged, this, [this]() { rebuildDownloaded(); });
 
     for (unsigned i = 0; i < kBuiltinSourceCount; ++i)
-        addSourceRow(m_body, QString::fromUtf8(kBuiltinSources[i].name),
-                              QString::fromUtf8(kBuiltinSources[i].url),
-                              QString::fromUtf8(kBuiltinSources[i].previewUrl));
+        if (kBuiltinSources[i].enabled)
+            addSourceRow(m_body, QString::fromUtf8(kBuiltinSources[i].name),
+                                  QString::fromUtf8(kBuiltinSources[i].url),
+                                  QString::fromUtf8(kBuiltinSources[i].previewUrl));
 
     // B2 清理非内置源的残留下载（.part + dlProgress 死条目）
     QStringList sourceUrls;
     for (unsigned i = 0; i < kBuiltinSourceCount; ++i)
-        sourceUrls << QString::fromUtf8(kBuiltinSources[i].url);
+        if (kBuiltinSources[i].enabled)
+            sourceUrls << QString::fromUtf8(kBuiltinSources[i].url);
     StickerStore::instance()->cleanupAbandonedDownloads(sourceUrls);
 
     rebuildDownloaded();

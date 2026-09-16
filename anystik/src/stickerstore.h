@@ -52,11 +52,14 @@ struct StickerMeta {
 QString formatStickerMeta(const StickerMeta& meta);
 
 // 内置下载源唯一表。approxSize 为预告约值（静态，非运行时所得）；-1 = 无实测
+// enabled=false 表示「预留未上线」：表情包目录隐藏该行、不参与残留下载清理、不生成
+// probe 提示；isBuiltinSourcePack 识别不受开关影响（注册过的包仍识别为内置）。
 struct BuiltinSource {
     const char* name;
     const char* url;
     qint64 approxSize;
     const char* previewUrl;  // 在线预览列表页；nullptr = 无预览（不显示预览按钮）
+    bool enabled;            // 开关：true=上线显示，false=预留隐藏
 };
 extern const BuiltinSource kBuiltinSources[];
 extern const unsigned kBuiltinSourceCount;
