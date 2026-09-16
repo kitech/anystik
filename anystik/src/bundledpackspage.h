@@ -35,6 +35,9 @@ private:
         QskPushButton* cancel = nullptr;
         QskProgressBar* bar = nullptr;
         bool probing = false;
+        qint64 lastSpeedBytes = 0;   // 上次回调字节数
+        qint64 lastSpeedMsec = 0;    // 上次回调时刻(ms)
+        qreal smoothSpeedBps = 0;    // EMA 平滑速度(B/s)
     };
 
     void buildBody();

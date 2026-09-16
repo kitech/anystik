@@ -9,6 +9,7 @@
 #include <QSet>
 #include <QDebug>
 #include <QObject>
+#include <QDateTime>
 
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
@@ -466,6 +467,20 @@ void BundledPacksPage::onProgress(const QString& url, qint64 done, qint64 total)
     if (it == m_rows.end())
         return;
 
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (it->lastSpeedMsec > 0) {
+        const qint64 dMs = now - it->lastSpeedMsec;
+        const qint64 dB = done - it->lastSpeedBytes;
+        if (dMs >= 200 && dB >= 0) {
+            const qreal inst = qreal(dB) * 1000.0 / qreal(dMs);
+            it->smoothSpeedBps = it->smoothSpeedBps > 0
+                ? it->smoothSpeedBps * 0.6 + inst * 0.4
+                : inst;
+        }
+    }
+    it->lastSpeedMsec = now;
+    it->lastSpeedBytes = done;
+
     QString text = tr("下载中  %1").arg(formatSize(done));
     if (total > 0) {
         text += " / " + formatSize(total);
@@ -473,18 +488,22 @@ void BundledPacksPage::onProgress(const QString& url, qint64 done, qint64 total)
         const qint64 approx =
             StickerStore::instance()->cachedApproxSize(url);
         if (approx > 0)
-            text += " / " + tr("约 %1").arg(formatSize(approx));
+            text += tr("（大小未知，约 %1）").arg(formatSize(approx));
         else
             text += tr("（大小未知）");
     }
+    if (it->smoothSpeedBps > 0.01)
+        text += " · " + formatSize(qint64(it->smoothSpeedBps)) + "/s";
 
     const bool known = (total > 0);
     it->bar->setVisible(true);
     if (known) {
         it->bar->setIndeterminate(false);
         it->bar->setValueAsRatio(done / double(total));
-        if (done >= total)
+        if (done >= total) {
             text = tr("下载完成，正在安装…");
+            it->smoothSpeedBps = 0;
+        }
     } else {
         it->bar->setIndeterminate(true);
     }

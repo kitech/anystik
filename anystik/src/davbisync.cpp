@@ -1103,6 +1103,28 @@ void SyncEngine::setProgress(const QString& stage, qint64 fileDone,
         ? double(fileDone) / double(fileTotal) : 0.0;
     m_percent = int(100.0 * (double(m_jobsDone) + inFile) / total);
     m_percent = qBound(0, m_percent, 100);
+    if (stage == QStringLiteral("upload")
+            || stage == QStringLiteral("download")) {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (m_speedStage != stage) {
+            m_speedStage = stage;
+            m_speedLastMsec = 0;
+            m_speedBps = 0;
+        }
+        if (m_speedLastMsec > 0) {
+            const qint64 dMs = now - m_speedLastMsec;
+            const qint64 dB = fileDone - m_speedLastBytes;
+            if (dMs >= 300 && dB >= 0) {
+                const qreal inst = qreal(dB) * 1000.0 / qreal(dMs);
+                m_speedBps = m_speedBps > 0 ? m_speedBps * 0.6 + inst * 0.4
+                                            : inst;
+            }
+        }
+        m_speedLastMsec = now;
+        m_speedLastBytes = fileDone;
+    } else {
+        m_speedStage.clear();
+    }
     emit progressUpdated(m_percent, stage, statDetail());
 }
 
@@ -1159,6 +1181,10 @@ QString SyncEngine::statDetail() const
         line << curSizeText;
     }
     line << parts;
+    if (m_speedBps > 0) {
+        line << QStringLiteral("速度 %1/s")
+                 .arg(formatBytes(qint64(m_speedBps)));
+    }
     if (m_lastFileMs > 0) {
         line << QStringLiteral("本次 %1").arg(formatDuration(m_lastFileMs));
     }

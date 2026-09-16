@@ -206,6 +206,11 @@
     </message>
     <message>
         <location line="+4"/>
+        <source>（大小未知，约 %1）</source>
+        <translation>（大小未知，約 %1）</translation>
+    </message>
+    <message>
+        <location line="+4"/>
         <source>（大小未知）</source>
         <translation>（大小未知）</translation>
     </message>

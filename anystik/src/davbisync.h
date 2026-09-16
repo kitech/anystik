@@ -166,6 +166,10 @@ private:
     qint64 m_startMsec = 0;        // 本次同步开始时刻（startSync）
     qint64 m_fileStartMsec = 0;    // 当前文件开始时刻（uploadFile）
     qint64 m_lastFileMs = 0;       // 最近完成的单个文件用时
+    qint64 m_speedLastBytes = 0;   // 上次报告字节数
+    qint64 m_speedLastMsec = 0;    // 上次报告时刻
+    qreal m_speedBps = 0;          // EMA 平滑速度(B/s)
+    QString m_speedStage;          // 当前速度所属阶段(upload/download)
     QString m_cloudRoot = QStringLiteral("anystik");
 
     // ── 扫描状态（阶段 A/B）──
