@@ -948,16 +948,120 @@
 <context>
     <name>StickerGenPage</name>
     <message>
-        <location filename="../src/stickergenpage.cpp" line="+25"/>
-        <location line="+23"/>
         <source>生成表情</source>
         <translation>生成表情</translation>
     </message>
     <message>
-        <location line="-11"/>
-        <location line="+12"/>
-        <source>功能开发中…</source>
-        <translation>功能开发中…</translation>
+        <source>生成器</source>
+        <translation>生成器</translation>
+    </message>
+    <message>
+        <source>例如：一只戴墨镜的沙雕熊猫贴纸</source>
+        <translation>例如：一只戴墨镜的沙雕熊猫贴纸</translation>
+    </message>
+    <message>
+        <source>随机种子</source>
+        <translation>随机种子</translation>
+    </message>
+    <message>
+        <source>贴纸风格</source>
+        <translation>贴纸风格</translation>
+    </message>
+    <message>
+        <source>历史</source>
+        <translation>历史</translation>
+    </message>
+    <message>
+        <source>保存到表情包</source>
+        <translation>保存到表情包</translation>
+    </message>
+    <message>
+        <source>生成</source>
+        <translation>生成</translation>
+    </message>
+    <message>
+        <source>生成中…</source>
+        <translation>生成中…</translation>
+    </message>
+    <message>
+        <source>请稍候（限频）</source>
+        <translation>请稍候（限频）</translation>
+    </message>
+    <message>
+        <source>请输入提示词</source>
+        <translation>请输入提示词</translation>
+    </message>
+    <message>
+        <source>大小 -- · 用时 -- · 下次 --</source>
+        <translation>大小 -- · 用时 -- · 下次 --</translation>
+    </message>
+    <message>
+        <source>生成中… 已用时 %1 s</source>
+        <translation>生成中… 已用时 %1s</translation>
+    </message>
+    <message>
+        <source>生成失败: %1</source>
+        <translation>生成失败: %1</translation>
+    </message>
+    <message>
+        <source>图片解码失败</source>
+        <translation>图片解码失败</translation>
+    </message>
+    <message>
+        <source>生成完成</source>
+        <translation>生成完成</translation>
+    </message>
+    <message>
+        <source>大小 %1 KB · 用时 %2 s · 下次 %3 s</source>
+        <translation>大小 %1 KB · 用时 %2s · 下次 %3s</translation>
+    </message>
+    <message>
+        <source>大小 -- · 用时 %1 s</source>
+        <translation>大小 -- · 用时 %1s</translation>
+    </message>
+    <message>
+        <source>下次 %1s</source>
+        <translation>下次 %1s</translation>
+    </message>
+    <message>
+        <source>大小 %1 KB · 已存</source>
+        <translation>大小 %1 KB · 已存</translation>
+    </message>
+    <message>
+        <source>暂无历史</source>
+        <translation>暂无历史</translation>
+    </message>
+    <message>
+        <source>已填入历史</source>
+        <translation>已填入历史</translation>
+    </message>
+    <message>
+        <source>拷贝</source>
+        <translation>拷贝</translation>
+    </message>
+    <message>
+        <source>另存</source>
+        <translation>另存</translation>
+    </message>
+    <message>
+        <source>已保存</source>
+        <translation>已保存</translation>
+    </message>
+    <message>
+        <source>保存失败</source>
+        <translation>保存失败</translation>
+    </message>
+    <message>
+        <source>已复制</source>
+        <translation>已复制</translation>
+    </message>
+    <message>
+        <source>拷贝失败</source>
+        <translation>拷贝失败</translation>
+    </message>
+    <message>
+        <source>已保存: %1</source>
+        <translation>已保存: %1</translation>
     </message>
 </context>
 <context>

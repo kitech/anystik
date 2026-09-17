@@ -948,16 +948,120 @@ Please check that ntfy is running in the background</translation>
 <context>
     <name>StickerGenPage</name>
     <message>
-        <location filename="../src/stickergenpage.cpp" line="+25"/>
-        <location line="+23"/>
         <source>生成表情</source>
         <translation>Generate Sticker</translation>
     </message>
     <message>
-        <location line="-11"/>
-        <location line="+12"/>
-        <source>功能开发中…</source>
-        <translation>Under development…</translation>
+        <source>生成器</source>
+        <translation>Generator</translation>
+    </message>
+    <message>
+        <source>例如：一只戴墨镜的沙雕熊猫贴纸</source>
+        <translation>e.g. A sticker of a cool panda wearing sunglasses</translation>
+    </message>
+    <message>
+        <source>随机种子</source>
+        <translation>Random Seed</translation>
+    </message>
+    <message>
+        <source>贴纸风格</source>
+        <translation>Sticker Style</translation>
+    </message>
+    <message>
+        <source>历史</source>
+        <translation>History</translation>
+    </message>
+    <message>
+        <source>保存到表情包</source>
+        <translation>Save to Sticker Pack</translation>
+    </message>
+    <message>
+        <source>生成</source>
+        <translation>Generate</translation>
+    </message>
+    <message>
+        <source>生成中…</source>
+        <translation>Generating…</translation>
+    </message>
+    <message>
+        <source>请稍候（限频）</source>
+        <translation>Please wait (rate limited)</translation>
+    </message>
+    <message>
+        <source>请输入提示词</source>
+        <translation>Please enter a prompt</translation>
+    </message>
+    <message>
+        <source>大小 -- · 用时 -- · 下次 --</source>
+        <translation>Size -- · Time -- · Next --</translation>
+    </message>
+    <message>
+        <source>生成中… 已用时 %1 s</source>
+        <translation>Generating… %1 s elapsed</translation>
+    </message>
+    <message>
+        <source>生成失败: %1</source>
+        <translation>Generation failed: %1</translation>
+    </message>
+    <message>
+        <source>图片解码失败</source>
+        <translation>Image decode failed</translation>
+    </message>
+    <message>
+        <source>生成完成</source>
+        <translation>Generated</translation>
+    </message>
+    <message>
+        <source>大小 %1 KB · 用时 %2 s · 下次 %3 s</source>
+        <translation>Size %1 KB · Time %2 s · Next %3 s</translation>
+    </message>
+    <message>
+        <source>大小 -- · 用时 %1 s</source>
+        <translation>Size -- · Time %1 s</translation>
+    </message>
+    <message>
+        <source>下次 %1s</source>
+        <translation>Next %1s</translation>
+    </message>
+    <message>
+        <source>大小 %1 KB · 已存</source>
+        <translation>Size %1 KB · saved</translation>
+    </message>
+    <message>
+        <source>暂无历史</source>
+        <translation>No history yet</translation>
+    </message>
+    <message>
+        <source>已填入历史</source>
+        <translation>Filled from history</translation>
+    </message>
+    <message>
+        <source>拷贝</source>
+        <translation>Copy</translation>
+    </message>
+    <message>
+        <source>另存</source>
+        <translation>Save As</translation>
+    </message>
+    <message>
+        <source>已保存</source>
+        <translation>Saved</translation>
+    </message>
+    <message>
+        <source>保存失败</source>
+        <translation>Save failed</translation>
+    </message>
+    <message>
+        <source>已复制</source>
+        <translation>Copied</translation>
+    </message>
+    <message>
+        <source>拷贝失败</source>
+        <translation>Copy failed</translation>
+    </message>
+    <message>
+        <source>已保存: %1</source>
+        <translation>Saved: %1</translation>
     </message>
 </context>
 <context>
