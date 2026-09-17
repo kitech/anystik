@@ -672,10 +672,11 @@ void StickerHomePage::openSubMenu(QskMenu* parent, int entryIndex)
         const int idxBing = sub->addOption(QskLabelData(tr("Bing")));
         const int idxYandex = sub->addOption(QskLabelData(tr("Yandex")));
         const int idxDdg = sub->addOption(QskLabelData(tr("DuckDuckGo")));
-        fallbackW = QStringLiteral("DuckDuckGo");
+        const int idxLens = sub->addOption(QskLabelData(tr("Google Lens")));
+        fallbackW = QStringLiteral("Google Lens");
         const QString filePath = m_ctxBrief.filePath;
         connect(sub, &QskMenu::triggered, this,
-            [this, sub, parent, idxGoogle, idxBing, idxYandex, idxDdg, filePath](int index) {
+            [this, sub, parent, idxGoogle, idxBing, idxYandex, idxDdg, idxLens, filePath](int index) {
                 parent->close();
                 sub->close();
                 if (index == idxGoogle) {
@@ -688,6 +689,8 @@ void StickerHomePage::openSubMenu(QskMenu* parent, int entryIndex)
                     showToast(tr("DuckDuckGo 需手动上传"));
                     QDesktopServices::openUrl(QUrl(
                         QStringLiteral("https://duckduckgo.com/?iax=images&ia=images")));
+                } else if (index == idxLens) {
+                    startImageSearch(4, filePath);
                 }
             });
     }
@@ -715,7 +718,7 @@ void StickerHomePage::openSubMenu(QskMenu* parent, int entryIndex)
                + sub->paddingHint(QskMenu::Segment).left()
                + sub->paddingHint(QskMenu::Segment).right() + 10);
         const qreal estH = sc.height() > 0 ? sc.height()
-            : (4.0 * rowH + sub->paddingHint(QskMenu::Panel).top()
+            : (5.0 * rowH + sub->paddingHint(QskMenu::Panel).top()
                + sub->paddingHint(QskMenu::Panel).bottom());
 
         const QPointF po = parent->mapToScene(QPointF(0.0, 0.0));
@@ -1159,11 +1162,16 @@ void StickerHomePage::startImageSearch(int engine, const QString& filePath)
         m_searchPopup = new ImageSearchPopup(this);
         connect(m_searchPopup, &QskPopup::closed,
                 m_searchPopup, &QObject::deleteLater);
+        connect(m_searchPopup, &QskPopup::closed, this, [this]() {
+            if (m_search) {
+                m_search->cancel();
+            }
+        });
     }
 
     // 文件名 + 目标引擎（DDG 走降级分支不经此处）
-    static const char* kEngineNames[] = { "Google", "Bing", "Yandex", "DuckDuckGo" };
-    const int engineIdx = qBound(0, engine, 3);
+    static const char* kEngineNames[] = { "Google", "Bing", "Yandex", "DuckDuckGo", "Google Lens" };
+    const int engineIdx = qBound(0, engine, 4);
     m_searchPopup->resetForRun(QFileInfo(filePath).fileName(),
         QString::fromLatin1(kEngineNames[engineIdx]));
     // 弹出的时序让步：父/子菜单刚 close（含淡出），下一事件循环再开浮层更稳
@@ -1178,20 +1186,30 @@ void StickerHomePage::startImageSearch(int engine, const QString& filePath)
 void StickerHomePage::openSearchEngine(int engine, const QString& imageUrl)
 {
     const QString enc = QString::fromLatin1(QUrl::toPercentEncoding(imageUrl));
+    // 固定的图+关键词偏置（后续可替换为弹窗输入框的值）
+    const QString kw = QString::fromLatin1(
+        QUrl::toPercentEncoding(QStringLiteral("相似表情包")));
     QUrl url;
     switch (engine) {
         case 0: // Google
-            url = QUrl(QStringLiteral("https://www.google.com/searchbyimage?image_url=")
-                + enc);
+            url = QUrl(QStringLiteral(
+                "https://www.google.com/searchbyimage?image_url=") + enc
+                + QStringLiteral("&gl=US&hl=en&q=") + kw);
             break;
         case 1: // Bing
             url = QUrl(QStringLiteral(
-                "https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=") + enc);
+                "https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=") + enc
+                + QStringLiteral("&q=") + kw);
+            break;
+        case 4: // Google Lens
+            url = QUrl(QStringLiteral(
+                "https://lens.google.com/uploadbyurl?url=") + enc
+                + QStringLiteral("&gl=US&hl=en&q=") + kw);
             break;
         default: // Yandex
             url = QUrl(QStringLiteral(
                 "https://yandex.com/images/search?url=") + enc
-                + QStringLiteral("&rpt=imageview"));
+                + QStringLiteral("&rpt=imageview&text=") + kw);
             break;
     }
     if (url.isValid()) {

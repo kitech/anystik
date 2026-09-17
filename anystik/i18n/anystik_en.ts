@@ -1178,6 +1178,11 @@ Please check that ntfy is running in the background</translation>
         <translation>DuckDuckGo</translation>
     </message>
     <message>
+        <location line="+1"/>
+        <source>Google Lens</source>
+        <translation>Google Lens</translation>
+    </message>
+    <message>
         <location line="+14"/>
         <source>DuckDuckGo 需手动上传</source>
         <translation>DuckDuckGo requires manual upload</translation>

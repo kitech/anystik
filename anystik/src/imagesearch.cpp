@@ -52,6 +52,8 @@ QNetworkRequest makeRequest(const QUrl& url)
     req.setTransferTimeout(30000);
     req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                      QNetworkRequest::NoLessSafeRedirectPolicy);
+    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+    req.setAttribute(QNetworkRequest::Http2DirectAttribute, false);
     req.setRawHeader("User-Agent", "anystik/1.0");
     return req;
 }
@@ -151,10 +153,22 @@ void ImageSearch::upload(const QString& filePath)
         return;
     }
     m_pending = true;
+    m_cancelling = false;
     m_filePath = filePath;
     m_hostIndex = 0;
     m_lastError.clear();
     startNextHost();
+}
+
+void ImageSearch::cancel()
+{
+    if (!m_pending) {
+        return;
+    }
+    m_cancelling = true;
+    if (m_reply) {
+        m_reply->abort();
+    }
 }
 
 void ImageSearch::startNextHost()
@@ -181,6 +195,7 @@ void ImageSearch::startNextHost()
 
     auto* reply = m_nam->post(makeRequest(hostUrl(host)), multi);
     multi->setParent(reply); // reply delete 时连带释放 file 与 multi
+    m_reply = reply;
 
     connect(reply, &QNetworkReply::uploadProgress, this,
             [this](qint64 sent, qint64 total) {
@@ -195,6 +210,15 @@ void ImageSearch::startNextHost()
             [this, reply, host]() {
                 const QByteArray body = reply->readAll();
                 reply->deleteLater();
+                if (m_reply == reply) {
+                    m_reply = nullptr;
+                }
+
+                if (m_cancelling) {
+                    m_cancelling = false;
+                    m_pending = false;
+                    return;
+                }
 
                 if (reply->error() == QNetworkReply::NoError) {
                     const QString url = parseUrl(host, body);

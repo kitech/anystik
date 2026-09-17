@@ -189,7 +189,7 @@ void ImageSearchPopup::resetForRun(const QString& fileName, const QString& engin
     m_pctLabel->setText(QStringLiteral("0%"));
     m_bytesLabel->setText(QString());
 
-    m_statusLabel->setTextColor(QColor());
+    m_statusLabel->setTextColor(QColor(100, 180, 255));
     m_statusLabel->setText(tr("准备上传"));
 
     m_urlLabel->setText(QString());
@@ -223,6 +223,8 @@ void ImageSearchPopup::setUploadedUrl(const QString& url)
     m_copyBtn->setEnabled(true);
     m_statusLabel->setTextColor(QColor(120, 210, 140));
     m_statusLabel->setText(tr("上传成功，已打开浏览器"));
+    m_progressBar->setValue(100);
+    m_pctLabel->setText(QStringLiteral("100%"));
 }
 
 void ImageSearchPopup::setFailed(const QString& reason)

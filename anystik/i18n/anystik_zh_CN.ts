@@ -1178,6 +1178,11 @@
         <translation>DuckDuckGo</translation>
     </message>
     <message>
+        <location line="+1"/>
+        <source>Google Lens</source>
+        <translation>Google Lens</translation>
+    </message>
+    <message>
         <location line="+14"/>
         <source>DuckDuckGo 需手动上传</source>
         <translation>DuckDuckGo 需手动上传</translation>
