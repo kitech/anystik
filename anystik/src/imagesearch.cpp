@@ -233,6 +233,11 @@ void ImageSearch::startNextHost()
                     m_lastError = QStringLiteral("%1: %2")
                         .arg(hostName(host), reply->errorString());
                 }
+                const int status = reply->attribute(
+                    QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                if (status > 0) {
+                    m_lastError += QStringLiteral(" %1").arg(status);
+                }
                 ++m_hostIndex;
                 startNextHost();
             });

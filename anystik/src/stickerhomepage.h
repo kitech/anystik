@@ -84,6 +84,7 @@ private:
     QskLinearBox* m_bottomBar = nullptr;
     QskPushButton* m_bottomHome = nullptr;
     QskPushButton* m_bottomGen = nullptr;
+    QskPushButton* m_bottomOnline = nullptr;
     QskPushButton* m_bottomSettings = nullptr;
 
     QTimer m_searchDebounce;
@@ -105,6 +106,7 @@ private:
     ImageSearch* m_search = nullptr;       // 图床托管上传（懒创建）
     QPointer<ImageSearchPopup> m_searchPopup; // 上传浮动层（closed → deleteLater）
     int m_pendingEngine = -1;              // 触发时固定的引擎索引（0/1/2）
+    quint64 m_descReqId = 0;               // 图片描述请求令牌（0=无在途）
 };
 
 #endif // STICKER_HOME_PAGE_H

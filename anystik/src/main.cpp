@@ -30,6 +30,7 @@
 #include "loginpage.h"
 #include "settingspage.h"
 #include "stickergenpage.h"
+#include "onlinepackspage.h"
 #include "aboutpage.h"
 #include "myi18n.h"
 #include "logpage.h"
@@ -405,6 +406,10 @@ int main(int argc, char* argv[]) {
 
     pageManager->registerPage("stikergen", []() -> Page* {
         return new StickerGenPage();
+    }, {CachePolicy::Permanent, LaunchMode::SingleInstance});
+
+    pageManager->registerPage("onlinepacks", []() -> Page* {
+        return new OnlinePacksPage();
     }, {CachePolicy::Permanent, LaunchMode::SingleInstance});
 
     // ── Window ──

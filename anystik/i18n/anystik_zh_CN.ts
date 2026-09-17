@@ -961,6 +961,21 @@
     </message>
 </context>
 <context>
+    <name>OnlinePacksPage</name>
+    <message>
+        <location filename="../src/onlinepackspage.cpp" line="+25"/>
+        <location line="+23"/>
+        <source>在线表情</source>
+        <translation>在线表情</translation>
+    </message>
+    <message>
+        <location line="-11"/>
+        <location line="+12"/>
+        <source>功能开发中…</source>
+        <translation>功能开发中…</translation>
+    </message>
+</context>
+<context>
     <name>StickerHomePage</name>
     <message>
         <location filename="../src/stickerhomepage.cpp" line="+131"/>
@@ -1009,8 +1024,14 @@
         <translation>生成表情</translation>
     </message>
     <message>
-        <location line="-32"/>
-        <location line="+33"/>
+        <location line="-10"/>
+        <location line="+11"/>
+        <source>在线表情</source>
+        <translation>在线表情</translation>
+    </message>
+    <message>
+        <location line="-31"/>
+        <location line="+32"/>
         <source>设置</source>
         <translation>设置</translation>
     </message>

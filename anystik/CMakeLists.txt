@@ -72,6 +72,10 @@ qt_add_executable(anystik
     src/imagesearchpopup.cpp
     src/stickergenpage.h
     src/stickergenpage.cpp
+    src/imageaiutil.h
+    src/imageaiutil.cpp
+    src/onlinepackspage.h
+    src/onlinepackspage.cpp
     src/stickerpreviewoverlay.h
     src/stickerpreviewoverlay.cpp
     src/migrationdialog.h

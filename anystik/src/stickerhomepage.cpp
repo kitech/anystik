@@ -3,6 +3,7 @@
 #include "stickerpreviewoverlay.h"
 #include "imagesearch.h"
 #include "imagesearchpopup.h"
+#include "imageaiutil.h"
 #include "menuoverlay.h"
 #include "dialogpopup.h"
 #include "toastpopup.h"
@@ -299,6 +300,13 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
             pageManager()->open("stikergen");
     });
 
+    m_bottomOnline = new QskPushButton(tr("在线表情"), m_bottomBar);
+    m_bottomOnline->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    connect(m_bottomOnline, &QskAbstractButton::clicked, this, [this]() {
+        if (pageManager())
+            pageManager()->open("onlinepacks");
+    });
+
     m_bottomSettings = new QskPushButton(tr("设置"), m_bottomBar);
     m_bottomSettings->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
     connect(m_bottomSettings, &QskAbstractButton::clicked, this, [this]() {
@@ -332,6 +340,7 @@ void StickerHomePage::retranslateUi()
     m_packCombo->setPlaceholderText(tr("更多分组…"));
     m_bottomHome->setText(tr("首页"));
     m_bottomGen->setText(tr("生成表情"));
+    m_bottomOnline->setText(tr("在线表情"));
     m_bottomSettings->setText(tr("设置"));
     refreshTabBar();
     updateStickerCount();
@@ -1149,6 +1158,8 @@ void StickerHomePage::startImageSearch(int engine, const QString& filePath)
                     m_searchPopup->setUploadedUrl(url);
                 }
                 openSearchEngine(m_pendingEngine, url);
+                // 上传成功 → 并发获取图片描述（通用工具，单例排队）
+                m_descReqId = ImageAiUtil::instance()->fetchDescription(url);
             });
         connect(m_search, &ImageSearch::failed, this,
             [this](const QString& reason) {
@@ -1166,7 +1177,26 @@ void StickerHomePage::startImageSearch(int engine, const QString& filePath)
             if (m_search) {
                 m_search->cancel();
             }
+            if (m_descReqId) {
+                ImageAiUtil::instance()->cancelRequest(m_descReqId);
+                m_descReqId = 0;
+            }
         });
+        ImageAiUtil* ai = ImageAiUtil::instance();
+        connect(ai, &ImageAiUtil::descriptionReady, this,
+            [this](quint64 requestId, const QString&, const QString& desc) {
+                if (requestId == m_descReqId && m_searchPopup) {
+                    m_searchPopup->setDescription(desc);
+                    m_descReqId = 0;
+                }
+            });
+        connect(ai, &ImageAiUtil::failed, this,
+            [this](quint64 requestId, const QString&, const QString& reason) {
+                if (requestId == m_descReqId && m_searchPopup) {
+                    m_searchPopup->setDescriptionFailed(reason);
+                    m_descReqId = 0;
+                }
+            });
     }
 
     // 文件名 + 目标引擎（DDG 走降级分支不经此处）

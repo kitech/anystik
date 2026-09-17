@@ -130,6 +130,13 @@ ImageSearchPopup::ImageSearchPopup(QQuickItem* parent)
     m_urlLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
     m_urlLabel->setVisible(false);
 
+    // ── 图片描述（Bing 以图搜图识别，上传成功后异步填充）──
+    m_descLabel = new QskTextLabel(QString(), m_layout);
+    m_descLabel->setFontRole(QskFontRole::Caption);
+    m_descLabel->setWrapMode(QskTextOptions::WrapAnywhere);
+    m_descLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
+    m_descLabel->setVisible(false);
+
     // ── 底部按钮行：复制链接 / 关闭 ──
     auto* buttonRow = new QskLinearBox(Qt::Horizontal, m_layout);
     buttonRow->setSpacing(6);
@@ -195,6 +202,9 @@ void ImageSearchPopup::resetForRun(const QString& fileName, const QString& engin
     m_urlLabel->setText(QString());
     m_urlLabel->setVisible(false);
     m_copyBtn->setEnabled(false);
+
+    m_descLabel->setText(QString());
+    m_descLabel->setVisible(false);
 }
 
 void ImageSearchPopup::setProgress(int percent, qint64 bytesSent, qint64 bytesTotal,
@@ -238,6 +248,28 @@ void ImageSearchPopup::setFailed(const QString& reason)
     m_statusLabel->setText(reason.isEmpty() ? tr("上传失败") : reason);
 }
 
+void ImageSearchPopup::setDescription(const QString& desc)
+{
+    const QString text = desc.trimmed();
+    if (text.isEmpty()) {
+        m_descLabel->setText(QString());
+        m_descLabel->setVisible(false);
+        return;
+    }
+    m_descLabel->setTextColor(QColor(100, 180, 255));
+    m_descLabel->setText(tr("AI 描述：%1").arg(text));
+    m_descLabel->setVisible(true);
+}
+
+void ImageSearchPopup::setDescriptionFailed(const QString& reason)
+{
+    const QString text = reason.trimmed();
+    m_descLabel->setTextColor(QColor(180, 180, 185));
+    m_descLabel->setText(tr("AI 描述：%1")
+        .arg(text.isEmpty() ? tr("未获取到图片描述") : text));
+    m_descLabel->setVisible(true);
+}
+
 void ImageSearchPopup::updateLayout()
 {
     updateGeometry();
@@ -251,9 +283,9 @@ void ImageSearchPopup::updateGeometry()
         return;
     }
 
-    // 1/2 高度浮层，宽 0.9 父宽下限，水平垂直居中
+    // 2/3 高度浮层，宽 0.9 父宽下限，水平垂直居中
     const qreal maxW = 0.9 * parentRect.width();
-    const qreal maxH = parentRect.height() / 2.0;
+    const qreal maxH = parentRect.height() * 2.0 / 3.0;
 
     const auto hint = m_layout->effectiveSizeHint(Qt::PreferredSize, QSizeF());
     const qreal panelW = qMin(qMax(300.0, hint.width() + 36), maxW);
