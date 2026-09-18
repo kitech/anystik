@@ -1143,6 +1143,7 @@ void StickerHomePage::ensureSyncPopup(bool reset)
 void StickerHomePage::startImageSearch(int engine, const QString& filePath)
 {
     m_pendingEngine = engine;
+    m_searchLocalPath = filePath;
 
     if (!m_search) {
         m_search = new ImageSearch(this);
@@ -1159,7 +1160,8 @@ void StickerHomePage::startImageSearch(int engine, const QString& filePath)
                 }
                 openSearchEngine(m_pendingEngine, url);
                 // 上传成功 → 并发获取图片描述（通用工具，单例排队）
-                m_descReqId = ImageAiUtil::instance()->fetchDescription(url);
+                m_descReqId = ImageAiUtil::instance()->fetchDescription(
+                    url, m_searchLocalPath);
             });
         connect(m_search, &ImageSearch::failed, this,
             [this](const QString& reason) {

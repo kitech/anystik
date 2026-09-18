@@ -106,6 +106,7 @@ private:
     ImageSearch* m_search = nullptr;       // 图床托管上传（懒创建）
     QPointer<ImageSearchPopup> m_searchPopup; // 上传浮动层（closed → deleteLater）
     int m_pendingEngine = -1;              // 触发时固定的引擎索引（0/1/2）
+    QString m_searchLocalPath;             // 本次以图搜图的本地图片路径
     quint64 m_descReqId = 0;               // 图片描述请求令牌（0=无在途）
 };
 

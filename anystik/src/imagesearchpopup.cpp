@@ -130,7 +130,7 @@ ImageSearchPopup::ImageSearchPopup(QQuickItem* parent)
     m_urlLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
     m_urlLabel->setVisible(false);
 
-    // ── 图片描述（Bing 以图搜图识别，上传成功后异步填充）──
+    // ── 图片描述（后端可切换，上传成功后异步填充）──
     m_descLabel = new QskTextLabel(QString(), m_layout);
     m_descLabel->setFontRole(QskFontRole::Caption);
     m_descLabel->setWrapMode(QskTextOptions::WrapAnywhere);

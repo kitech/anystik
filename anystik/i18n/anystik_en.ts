@@ -4,7 +4,7 @@
 <context>
     <name>BundledPacksPage</name>
     <message>
-        <location filename="../src/bundledpackspage.cpp" line="+110"/>
+        <location filename="../src/bundledpackspage.cpp" line="+111"/>
         <location line="+159"/>
         <source>表情包目录</source>
         <translation>Sticker Pack Directory</translation>
@@ -27,18 +27,18 @@
     </message>
     <message>
         <location line="-69"/>
-        <location line="+292"/>
+        <location line="+316"/>
         <source>继续</source>
         <translation>Resume</translation>
     </message>
     <message>
-        <location line="-292"/>
-        <location line="+292"/>
+        <location line="-316"/>
+        <location line="+316"/>
         <source>下载安装</source>
         <translation>Download &amp; Install</translation>
     </message>
     <message>
-        <location line="-293"/>
+        <location line="-317"/>
         <location line="+71"/>
         <source>获取</source>
         <translation>Fetch</translation>
@@ -62,9 +62,8 @@
         <translation>Cancel</translation>
     </message>
     <message>
-        <location filename="../src/bundledpackspage.cpp" line="+474"/>
         <source>约 %1</source>
-        <translation>approx. %1</translation>
+        <translation type="vanished">approx. %1</translation>
     </message>
     <message>
         <location line="-162"/>
@@ -169,12 +168,12 @@
     </message>
     <message>
         <location line="+18"/>
-        <location line="+90"/>
+        <location line="+114"/>
         <source>重新下载</source>
         <translation>Re-download</translation>
     </message>
     <message>
-        <location line="-72"/>
+        <location line="-96"/>
         <location line="+31"/>
         <source>获取失败：%1</source>
         <translation>Fetch failed: %1</translation>
@@ -200,27 +199,27 @@
         <translation>  ·  Installed &amp; unchanged</translation>
     </message>
     <message>
-        <location line="+18"/>
+        <location line="+32"/>
         <source>下载中  %1</source>
         <translation>Downloading  %1</translation>
     </message>
     <message>
-        <location line="+4"/>
+        <location line="+7"/>
         <source>（大小未知，约 %1）</source>
         <translation>(size unknown, approx. %1)</translation>
     </message>
     <message>
-        <location line="+4"/>
+        <location line="+2"/>
         <source>（大小未知）</source>
         <translation>(size unknown)</translation>
     </message>
     <message>
-        <location line="+8"/>
+        <location line="+11"/>
         <source>下载完成，正在安装…</source>
         <translation>Download complete, installing…</translation>
     </message>
     <message>
-        <location line="+18"/>
+        <location line="+20"/>
         <source>已安装：%1</source>
         <translation>Installed: %1</translation>
     </message>
@@ -236,9 +235,55 @@
     </message>
 </context>
 <context>
+    <name>ImageAiUtil</name>
+    <message>
+        <location filename="../src/imageaiutil.cpp" line="+267"/>
+        <source>未配置 %1 key</source>
+        <translation>%1 key not configured</translation>
+    </message>
+    <message>
+        <location line="+105"/>
+        <location line="+256"/>
+        <location line="+73"/>
+        <source>未识别出图片描述</source>
+        <translation>No image description recognized</translation>
+    </message>
+    <message>
+        <location line="-244"/>
+        <source>未配置 Cloudflare 账号或 Token</source>
+        <translation>Cloudflare account or token not configured</translation>
+    </message>
+    <message>
+        <location line="+20"/>
+        <source>AI Horde 需要本地图片</source>
+        <translation>AI Horde requires a local image</translation>
+    </message>
+    <message>
+        <location line="+8"/>
+        <source>读取本地图片失败</source>
+        <translation>Failed to read local image</translation>
+    </message>
+    <message>
+        <location line="+67"/>
+        <source>AI Horde 提交失败</source>
+        <translation>AI Horde submission failed</translation>
+    </message>
+    <message>
+        <location line="+20"/>
+        <source>AI Horde 超时（当前可能无在线识别 worker）</source>
+        <translation>AI Horde timed out (no online recognition worker currently)</translation>
+    </message>
+    <message>
+        <location line="+119"/>
+        <location line="+49"/>
+        <source>Bing 重定向过多</source>
+        <translation>Too many Bing redirects</translation>
+    </message>
+</context>
+<context>
     <name>ImageSearch</name>
     <message>
-        <location filename="../src/imagesearch.cpp" line="+164"/>
+        <location filename="../src/imagesearch.cpp" line="+178"/>
         <source>图床不可用</source>
         <translation>Image host unavailable</translation>
     </message>
@@ -248,12 +293,12 @@
         <translation>Cannot open image file</translation>
     </message>
     <message>
-        <location line="+31"/>
+        <location line="+41"/>
         <source>响应解析失败</source>
         <translation>Invalid host response</translation>
     </message>
     <message>
-        <location line="+13"/>
+        <location line="+18"/>
         <source>第 %1/%2 · %3 失败 → %4</source>
         <translation>%3 failed → %4 · %1/%2</translation>
     </message>
@@ -272,7 +317,7 @@
     </message>
     <message>
         <location line="+33"/>
-        <location line="+72"/>
+        <location line="+79"/>
         <source>准备上传</source>
         <translation>Ready to upload</translation>
     </message>
@@ -292,20 +337,31 @@
         <translation>Close</translation>
     </message>
     <message>
-        <location line="+80"/>
+        <location line="+83"/>
         <source>上传成功，已打开浏览器</source>
         <translation>Uploaded, browser opened</translation>
     </message>
     <message>
-        <location line="+11"/>
+        <location line="+13"/>
         <source>上传失败</source>
         <translation>Upload failed</translation>
+    </message>
+    <message>
+        <location line="+12"/>
+        <location line="+8"/>
+        <source>AI 描述：%1</source>
+        <translation>AI description: %1</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>未获取到图片描述</source>
+        <translation>No image description obtained</translation>
     </message>
 </context>
 <context>
     <name>Main</name>
     <message>
-        <location filename="../src/main.cpp" line="+489"/>
+        <location filename="../src/main.cpp" line="+494"/>
         <source>选择推送服务</source>
         <translation>Select push service</translation>
     </message>
@@ -457,6 +513,21 @@ Please check that ntfy is running in the background</translation>
         <location line="+45"/>
         <source>网络状态未知</source>
         <translation>Network status unknown</translation>
+    </message>
+</context>
+<context>
+    <name>OnlinePacksPage</name>
+    <message>
+        <location filename="../src/onlinepackspage.cpp" line="+25"/>
+        <location line="+23"/>
+        <source>在线表情</source>
+        <translation>Online Stickers</translation>
+    </message>
+    <message>
+        <location line="-11"/>
+        <location line="+12"/>
+        <source>功能开发中…</source>
+        <translation>Under development…</translation>
     </message>
 </context>
 <context>
@@ -948,165 +1019,208 @@ Please check that ntfy is running in the background</translation>
 <context>
     <name>StickerGenPage</name>
     <message>
+        <location filename="../src/stickergenpage.cpp" line="+97"/>
+        <location line="+177"/>
         <source>生成表情</source>
         <translation>Generate Sticker</translation>
     </message>
     <message>
+        <location line="-153"/>
+        <location line="+154"/>
         <source>生成器</source>
         <translation>Generator</translation>
     </message>
     <message>
+        <location line="-140"/>
+        <location line="+147"/>
         <source>例如：一只戴墨镜的沙雕熊猫贴纸</source>
         <translation>e.g. A sticker of a cool panda wearing sunglasses</translation>
     </message>
     <message>
+        <location line="-121"/>
+        <location line="+115"/>
         <source>随机种子</source>
         <translation>Random Seed</translation>
     </message>
     <message>
+        <location line="-106"/>
+        <location line="+107"/>
         <source>贴纸风格</source>
         <translation>Sticker Style</translation>
     </message>
     <message>
+        <location line="-135"/>
+        <location line="+136"/>
         <source>历史</source>
         <translation>History</translation>
     </message>
     <message>
+        <location line="-104"/>
+        <location line="+105"/>
         <source>保存到表情包</source>
         <translation>Save to Sticker Pack</translation>
     </message>
     <message>
+        <location line="-130"/>
+        <location line="+114"/>
+        <location line="+17"/>
+        <location line="+133"/>
+        <location line="+30"/>
         <source>生成</source>
         <translation>Generate</translation>
     </message>
     <message>
+        <location line="-163"/>
+        <location line="+57"/>
+        <location line="+2"/>
+        <location line="+50"/>
+        <location line="+14"/>
         <source>生成中…</source>
         <translation>Generating…</translation>
     </message>
     <message>
+        <location line="-112"/>
         <source>请稍候（限频）</source>
         <translation>Please wait (rate limited)</translation>
     </message>
     <message>
+        <location line="+7"/>
         <source>请输入提示词</source>
         <translation>Please enter a prompt</translation>
     </message>
     <message>
+        <location line="-76"/>
+        <location line="+193"/>
         <source>大小 -- · 用时 -- · 下次 --</source>
         <translation>Size -- · Time -- · Next --</translation>
     </message>
     <message>
+        <location line="-75"/>
+        <location line="+65"/>
         <source>生成中… 已用时 %1 s</source>
         <translation>Generating… %1 s elapsed</translation>
     </message>
     <message>
+        <location line="-44"/>
+        <location line="+8"/>
         <source>生成失败: %1</source>
         <translation>Generation failed: %1</translation>
     </message>
     <message>
+        <location line="+0"/>
         <source>图片解码失败</source>
         <translation>Image decode failed</translation>
     </message>
     <message>
+        <location line="+7"/>
         <source>生成完成</source>
         <translation>Generated</translation>
     </message>
     <message>
+        <location line="+2"/>
+        <location line="+52"/>
         <source>大小 %1 KB · 用时 %2 s · 下次 %3 s</source>
         <translation>Size %1 KB · Time %2 s · Next %3 s</translation>
     </message>
     <message>
+        <location line="-67"/>
+        <location line="+7"/>
         <source>大小 -- · 用时 %1 s</source>
         <translation>Size -- · Time %1 s</translation>
     </message>
     <message>
+        <location line="+57"/>
         <source>下次 %1s</source>
         <translation>Next %1s</translation>
     </message>
     <message>
+        <location line="-9"/>
+        <location line="+27"/>
         <source>大小 %1 KB · 已存</source>
         <translation>Size %1 KB · saved</translation>
     </message>
     <message>
+        <location line="-10"/>
+        <source>大小 -- · 用时 %1 s · 下次 %2 s</source>
+        <translation>Size -- · elapsed %1 s · next %2 s</translation>
+    </message>
+    <message>
+        <location line="+17"/>
         <source>暂无历史</source>
         <translation>No history yet</translation>
     </message>
     <message>
+        <location line="+47"/>
         <source>已填入历史</source>
         <translation>Filled from history</translation>
     </message>
     <message>
+        <location line="+18"/>
         <source>拷贝</source>
         <translation>Copy</translation>
     </message>
     <message>
+        <location line="+1"/>
         <source>另存</source>
         <translation>Save As</translation>
     </message>
     <message>
+        <location line="+45"/>
         <source>已保存</source>
         <translation>Saved</translation>
     </message>
     <message>
+        <location line="+2"/>
+        <location line="+17"/>
+        <location line="+6"/>
+        <location line="+16"/>
         <source>保存失败</source>
         <translation>Save failed</translation>
     </message>
     <message>
+        <location line="-28"/>
         <source>已复制</source>
         <translation>Copied</translation>
     </message>
     <message>
+        <location line="-4"/>
         <source>拷贝失败</source>
         <translation>Copy failed</translation>
     </message>
     <message>
+        <location line="+35"/>
         <source>已保存: %1</source>
         <translation>Saved: %1</translation>
     </message>
 </context>
 <context>
-    <name>OnlinePacksPage</name>
-    <message>
-        <location filename="../src/onlinepackspage.cpp" line="+25"/>
-        <location line="+23"/>
-        <source>在线表情</source>
-        <translation>Online Stickers</translation>
-    </message>
-    <message>
-        <location line="-11"/>
-        <location line="+12"/>
-        <source>功能开发中…</source>
-        <translation>Under development…</translation>
-    </message>
-</context>
-<context>
     <name>StickerHomePage</name>
     <message>
-        <location filename="../src/stickerhomepage.cpp" line="+131"/>
-        <location line="+197"/>
+        <location filename="../src/stickerhomepage.cpp" line="+132"/>
+        <location line="+204"/>
         <source>粘贴</source>
         <translation>Paste</translation>
     </message>
     <message>
-        <location line="-190"/>
-        <location line="+191"/>
+        <location line="-197"/>
+        <location line="+198"/>
         <source>导入</source>
         <translation>Import</translation>
     </message>
     <message>
-        <location line="-114"/>
-        <location line="+116"/>
+        <location line="-121"/>
+        <location line="+123"/>
         <source>搜索贴纸 / emoji...</source>
         <translation>Search stickers / emoji...</translation>
     </message>
     <message>
-        <location line="-89"/>
-        <location line="+90"/>
+        <location line="-96"/>
+        <location line="+97"/>
         <source>更多分组…</source>
         <translation>More groups…</translation>
     </message>
     <message>
-        <location line="-62"/>
+        <location line="-69"/>
         <source>已复制到剪贴板 index=%1 size=%2 mime=%3</source>
         <translation>Copied to clipboard index=%1 size=%2 mime=%3</translation>
     </message>
@@ -1117,25 +1231,25 @@ Please check that ntfy is running in the background</translation>
     </message>
     <message>
         <location line="+17"/>
-        <location line="+44"/>
+        <location line="+51"/>
         <source>首页</source>
         <translation>Home</translation>
     </message>
     <message>
-        <location line="-38"/>
-        <location line="+39"/>
+        <location line="-45"/>
+        <location line="+46"/>
         <source>生成表情</source>
         <translation>Generate Sticker</translation>
     </message>
     <message>
-        <location line="-10"/>
-        <location line="+11"/>
+        <location line="-39"/>
+        <location line="+40"/>
         <source>在线表情</source>
         <translation>Online Stickers</translation>
     </message>
     <message>
-        <location line="-31"/>
-        <location line="+32"/>
+        <location line="-33"/>
+        <location line="+34"/>
         <source>设置</source>
         <translation>Settings</translation>
     </message>
@@ -1176,13 +1290,13 @@ Please check that ntfy is running in the background</translation>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+385"/>
+        <location line="+388"/>
         <location line="+188"/>
         <source>删除</source>
         <translation>Delete</translation>
     </message>
     <message>
-        <location line="-521"/>
+        <location line="-524"/>
         <source>已复制</source>
         <translation>Copied</translation>
     </message>
@@ -1219,20 +1333,20 @@ Please check that ntfy is running in the background</translation>
         <translation>Copied metadata</translation>
     </message>
     <message>
-        <location line="-438"/>
-        <location line="+200"/>
+        <location line="-446"/>
+        <location line="+207"/>
         <source>😐 表情包</source>
         <translation>😐 Stickers</translation>
     </message>
     <message>
-        <location line="-182"/>
+        <location line="-189"/>
         <location line="+29"/>
-        <location line="+156"/>
+        <location line="+163"/>
         <source>同步</source>
         <translation>Sync</translation>
     </message>
     <message>
-        <location line="-170"/>
+        <location line="-177"/>
         <source>请先在设置页填写 WebDAV 地址</source>
         <translation>Please set the WebDAV URL in Settings first</translation>
     </message>
@@ -1263,7 +1377,7 @@ Please check that ntfy is running in the background</translation>
     </message>
     <message>
         <location line="+23"/>
-        <location line="+255"/>
+        <location line="+263"/>
         <source>%1 个 · %2 包</source>
         <translation>%1 stickers · %2 packs</translation>
     </message>
@@ -1313,7 +1427,7 @@ Please check that ntfy is running in the background</translation>
         <translation>DuckDuckGo requires manual upload</translation>
     </message>
     <message>
-        <location line="+196"/>
+        <location line="+198"/>
         <source>删除贴纸</source>
         <translation>Delete sticker</translation>
     </message>
@@ -1326,12 +1440,12 @@ Please check that ntfy is running in the background</translation>
         <location line="+1"/>
         <location line="+161"/>
         <location line="+27"/>
-        <location line="+155"/>
+        <location line="+193"/>
         <source>取消</source>
         <translation>Cancel</translation>
     </message>
     <message>
-        <location line="-337"/>
+        <location line="-375"/>
         <source>已删除</source>
         <translation>Deleted</translation>
     </message>
@@ -1459,7 +1573,7 @@ Files will not be deleted.</translation>
         <translation>Paste failed</translation>
     </message>
     <message>
-        <location line="+122"/>
+        <location line="+160"/>
         <source>↑ 上级</source>
         <translation>↑ Up</translation>
     </message>
