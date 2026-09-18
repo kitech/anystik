@@ -1,7 +1,7 @@
 #include "stickerhomepage.h"
 #include "stickerlist.h"
 #include "stickerpreviewoverlay.h"
-#include "imagesearch.h"
+#include "imagetmpuploader.h"
 #include "imagesearchpopup.h"
 #include "imageaiutil.h"
 #include "menuoverlay.h"
@@ -1146,14 +1146,14 @@ void StickerHomePage::startImageSearch(int engine, const QString& filePath)
     m_searchLocalPath = filePath;
 
     if (!m_search) {
-        m_search = new ImageSearch(this);
-        connect(m_search, &ImageSearch::progressChanged, this,
+        m_search = new ImageTmpUploader(this);
+        connect(m_search, &ImageTmpUploader::progressChanged, this,
             [this](int percent, qint64 sent, qint64 total, const QString& status) {
                 if (m_searchPopup) {
                     m_searchPopup->setProgress(percent, sent, total, status);
                 }
             });
-        connect(m_search, &ImageSearch::uploaded, this,
+        connect(m_search, &ImageTmpUploader::uploaded, this,
             [this](const QString& url) {
                 if (m_searchPopup) {
                     m_searchPopup->setUploadedUrl(url);
@@ -1163,7 +1163,7 @@ void StickerHomePage::startImageSearch(int engine, const QString& filePath)
                 m_descReqId = ImageAiUtil::instance()->fetchDescription(
                     url, m_searchLocalPath);
             });
-        connect(m_search, &ImageSearch::failed, this,
+        connect(m_search, &ImageTmpUploader::failed, this,
             [this](const QString& reason) {
                 if (m_searchPopup) {
                     m_searchPopup->setFailed(reason);

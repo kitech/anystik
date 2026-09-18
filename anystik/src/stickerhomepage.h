@@ -17,7 +17,7 @@ class QskPushButton;
 class QskLinearBox;
 class QskMenu;
 class StickerGridWidget;
-class ImageSearch;
+class ImageTmpUploader;
 class ImageSearchPopup;
 
 class StickerHomePage : public Page
@@ -103,7 +103,7 @@ private:
     QTimer m_subCloseTimer;            // 子菜单离开防抖关闭（悬停进入时重启/取消）
     SyncEngine* m_syncEngine = nullptr;  // 懒创建；finished 恢复按钮
     QPointer<SyncProgressPopup> m_syncPopup; // 同步进度浮动窗口（closed → deleteLater）
-    ImageSearch* m_search = nullptr;       // 图床托管上传（懒创建）
+    ImageTmpUploader* m_search = nullptr;  // 图床托管上传（懒创建）
     QPointer<ImageSearchPopup> m_searchPopup; // 上传浮动层（closed → deleteLater）
     int m_pendingEngine = -1;              // 触发时固定的引擎索引（0/1/2）
     QString m_searchLocalPath;             // 本次以图搜图的本地图片路径

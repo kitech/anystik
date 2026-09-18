@@ -62,10 +62,6 @@
         <translation>Cancel</translation>
     </message>
     <message>
-        <source>约 %1</source>
-        <translation type="vanished">approx. %1</translation>
-    </message>
-    <message>
         <location line="-162"/>
         <location line="+62"/>
         <location line="+149"/>
@@ -281,34 +277,6 @@
     </message>
 </context>
 <context>
-    <name>ImageSearch</name>
-    <message>
-        <location filename="../src/imagesearch.cpp" line="+178"/>
-        <source>图床不可用</source>
-        <translation>Image host unavailable</translation>
-    </message>
-    <message>
-        <location line="+12"/>
-        <source>无法打开图片文件</source>
-        <translation>Cannot open image file</translation>
-    </message>
-    <message>
-        <location line="+41"/>
-        <source>响应解析失败</source>
-        <translation>Invalid host response</translation>
-    </message>
-    <message>
-        <location line="+18"/>
-        <source>第 %1/%2 · %3 失败 → %4</source>
-        <translation>%3 failed → %4 · %1/%2</translation>
-    </message>
-    <message>
-        <location line="+5"/>
-        <source>第 %1/%2 · 上传中 %3</source>
-        <translation>Uploading to %3 · %1/%2</translation>
-    </message>
-</context>
-<context>
     <name>ImageSearchPopup</name>
     <message>
         <location filename="../src/imagesearchpopup.cpp" line="+88"/>
@@ -356,6 +324,34 @@
         <location line="+1"/>
         <source>未获取到图片描述</source>
         <translation>No image description obtained</translation>
+    </message>
+</context>
+<context>
+    <name>ImageTmpUploader</name>
+    <message>
+        <location filename="../src/imagetmpuploader.cpp" line="+178"/>
+        <source>图床不可用</source>
+        <translation >Image host unavailable</translation>
+    </message>
+    <message>
+        <location line="+12"/>
+        <source>无法打开图片文件</source>
+        <translation >Cannot open image file</translation>
+    </message>
+    <message>
+        <location line="+41"/>
+        <source>响应解析失败</source>
+        <translation >Invalid host response</translation>
+    </message>
+    <message>
+        <location line="+18"/>
+        <source>第 %1/%2 · %3 失败 → %4</source>
+        <translation >%3 failed → %4 · %1/%2</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>第 %1/%2 · 上传中 %3</source>
+        <translation >Uploading to %3 · %1/%2</translation>
     </message>
 </context>
 <context>

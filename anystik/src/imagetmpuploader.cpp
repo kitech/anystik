@@ -1,4 +1,4 @@
-#include "imagesearch.h"
+#include "imagetmpuploader.h"
 
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
@@ -96,7 +96,7 @@ QHttpMultiPart* buildMultiPart(Host host, const QString& filePath)
             addFile(QStringLiteral("fileToUpload"));
             break;
         case Host::Mhimg:
-            // 国内降级：带 1 小时过期时间，配合“搜索相似”的临时上传语义
+            // 国内降级：带 1 小时过期时间，配合临时上传语义
             addText(QStringLiteral("expired_at"),
                 QDateTime::currentDateTime().addSecs(3600)
                     .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")).toUtf8());
@@ -142,12 +142,12 @@ QString parseUrl(Host host, const QByteArray& body)
 
 } // namespace
 
-ImageSearch::ImageSearch(QObject* parent)
+ImageTmpUploader::ImageTmpUploader(QObject* parent)
     : QObject(parent)
 {
 }
 
-void ImageSearch::upload(const QString& filePath)
+void ImageTmpUploader::upload(const QString& filePath)
 {
     if (m_pending) {
         return;
@@ -160,7 +160,7 @@ void ImageSearch::upload(const QString& filePath)
     startNextHost();
 }
 
-void ImageSearch::cancel()
+void ImageTmpUploader::cancel()
 {
     if (!m_pending) {
         return;
@@ -171,7 +171,7 @@ void ImageSearch::cancel()
     }
 }
 
-void ImageSearch::startNextHost()
+void ImageTmpUploader::startNextHost()
 {
     if (m_hostIndex >= kHostCount) {
         m_pending = false;
@@ -243,7 +243,7 @@ void ImageSearch::startNextHost()
             });
 }
 
-void ImageSearch::emitStatus(int hostIndex)
+void ImageTmpUploader::emitStatus(int hostIndex)
 {
     const QString text = hostIndex > 0
         ? tr("第 %1/%2 · %3 失败 → %4")
