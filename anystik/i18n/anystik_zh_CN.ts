@@ -331,27 +331,27 @@
     <message>
         <location filename="../src/imagetmpuploader.cpp" line="+178"/>
         <source>图床不可用</source>
-        <translation >图床不可用</translation>
+        <translation>图床不可用</translation>
     </message>
     <message>
         <location line="+12"/>
         <source>无法打开图片文件</source>
-        <translation >无法打开图片文件</translation>
+        <translation>无法打开图片文件</translation>
     </message>
     <message>
         <location line="+41"/>
         <source>响应解析失败</source>
-        <translation >响应解析失败</translation>
+        <translation>响应解析失败</translation>
     </message>
     <message>
         <location line="+18"/>
         <source>第 %1/%2 · %3 失败 → %4</source>
-        <translation >第 %1/%2 · %3 失败 → %4</translation>
+        <translation>第 %1/%2 · %3 失败 → %4</translation>
     </message>
     <message>
         <location line="+5"/>
         <source>第 %1/%2 · 上传中 %3</source>
-        <translation >第 %1/%2 · 上传中 %3</translation>
+        <translation>第 %1/%2 · 上传中 %3</translation>
     </message>
 </context>
 <context>
@@ -1192,14 +1192,14 @@
 <context>
     <name>StickerHomePage</name>
     <message>
-        <location filename="../src/stickerhomepage.cpp" line="+132"/>
-        <location line="+204"/>
+        <location filename="../src/stickerhomepage.cpp" line="+133"/>
+        <location line="+220"/>
         <source>粘贴</source>
         <translation>粘贴</translation>
     </message>
     <message>
-        <location line="-197"/>
-        <location line="+198"/>
+        <location line="-213"/>
+        <location line="+214"/>
         <source>导入</source>
         <translation>导入</translation>
     </message>
@@ -1329,25 +1329,20 @@
         <translation>已复制元信息</translation>
     </message>
     <message>
-        <location line="-446"/>
-        <location line="+207"/>
+        <location line="-462"/>
+        <location line="+223"/>
         <source>😐 表情包</source>
         <translation>😐 表情包</translation>
     </message>
     <message>
-        <location line="-189"/>
-        <location line="+29"/>
+        <location line="-205"/>
+        <location line="+45"/>
         <location line="+163"/>
         <source>同步</source>
         <translation>同步</translation>
     </message>
     <message>
-        <location line="-177"/>
-        <source>请先在设置页填写 WebDAV 地址</source>
-        <translation>请先在设置页填写 WebDAV 地址</translation>
-    </message>
-    <message>
-        <location line="+5"/>
+        <location line="-172"/>
         <source>WebDAV 地址无效</source>
         <translation>WebDAV 地址无效</translation>
     </message>

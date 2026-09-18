@@ -2,10 +2,11 @@
 #include "libobfuscate/obfuscate.h"
 
 // format: https://user:pass@path/dav
+// user/pass 含 @ 需写成 %40
 // caller parse URL
 QString davObfusKey()
 {
     // AY_OBFUSCATE 编译期 XOR 加密，明文不出现在二进制；运行时经隐式转换成 char*
     const char* key = AY_OBFUSCATE("AUTHKEY_PLACEHOLDER");
-    return QString::fromLatin1(key);
+    return QString::fromUtf8(key);
 }

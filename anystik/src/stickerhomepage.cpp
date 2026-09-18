@@ -4,6 +4,7 @@
 #include "imagetmpuploader.h"
 #include "imagesearchpopup.h"
 #include "imageaiutil.h"
+#include "davobfus.h"
 #include "menuoverlay.h"
 #include "dialogpopup.h"
 #include "toastpopup.h"
@@ -154,19 +155,35 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
         }
         const QSettings dav;
         trace_settings("home-dav-read");
-        const QString davUrl  = dav.value("davUrl").toString();
-        const QString davUser = dav.value("davUser").toString();
-        const QString davPass = dav.value("davPass").toString();
-        if (davUrl.isEmpty()) {
-            showToast(tr("请先在设置页填写 WebDAV 地址"));
-            return;
+        QString davUrl  = dav.value("davUrl").toString().trimmed();
+        QString davUser = dav.value("davUser").toString().trimmed();
+        QString davPass = dav.value("davPass").toString().trimmed();
+
+        auto validDav = [](const QString& u) {
+            const QUrl url(u);
+            return url.isValid() && !url.host().isEmpty();
+        };
+
+        const bool settingsComplete =
+            !davUrl.isEmpty() && !davUser.isEmpty() && !davPass.isEmpty();
+        // 仅当设置三项齐全且地址有效时才用设置项，否则整体回退内置混淆配置
+        if (!settingsComplete || !validDav(davUrl)) {
+            const QString key = davObfusKey();
+            const QUrl ob(key);
+            davUrl  = key;
+            davUser = ob.userName();
+            davPass = ob.password();
+            qInfo() << "[dav] fallback to built-in config"
+                    << "settingsComplete=" << settingsComplete
+                    << "host=" << ob.host();
         }
+
         const QUrl url(davUrl);
         if (!url.isValid() || url.host().isEmpty()) {
             showToast(tr("WebDAV 地址无效"));
             return;
         }
-        const bool https = QUrl(davUrl).scheme().startsWith(QLatin1String("https"));
+        const bool https = url.scheme().startsWith(QLatin1String("https"));
 
         if (!m_syncEngine) {
             m_syncEngine = new SyncEngine(this);

@@ -331,27 +331,27 @@
     <message>
         <location filename="../src/imagetmpuploader.cpp" line="+178"/>
         <source>图床不可用</source>
-        <translation >Image host unavailable</translation>
+        <translation>Image host unavailable</translation>
     </message>
     <message>
         <location line="+12"/>
         <source>无法打开图片文件</source>
-        <translation >Cannot open image file</translation>
+        <translation>Cannot open image file</translation>
     </message>
     <message>
         <location line="+41"/>
         <source>响应解析失败</source>
-        <translation >Invalid host response</translation>
+        <translation>Invalid host response</translation>
     </message>
     <message>
         <location line="+18"/>
         <source>第 %1/%2 · %3 失败 → %4</source>
-        <translation >%3 failed → %4 · %1/%2</translation>
+        <translation>%3 failed → %4 · %1/%2</translation>
     </message>
     <message>
         <location line="+5"/>
         <source>第 %1/%2 · 上传中 %3</source>
-        <translation >Uploading to %3 · %1/%2</translation>
+        <translation>Uploading to %3 · %1/%2</translation>
     </message>
 </context>
 <context>
@@ -1192,14 +1192,14 @@ Please check that ntfy is running in the background</translation>
 <context>
     <name>StickerHomePage</name>
     <message>
-        <location filename="../src/stickerhomepage.cpp" line="+132"/>
-        <location line="+204"/>
+        <location filename="../src/stickerhomepage.cpp" line="+133"/>
+        <location line="+220"/>
         <source>粘贴</source>
         <translation>Paste</translation>
     </message>
     <message>
-        <location line="-197"/>
-        <location line="+198"/>
+        <location line="-213"/>
+        <location line="+214"/>
         <source>导入</source>
         <translation>Import</translation>
     </message>
@@ -1329,25 +1329,20 @@ Please check that ntfy is running in the background</translation>
         <translation>Copied metadata</translation>
     </message>
     <message>
-        <location line="-446"/>
-        <location line="+207"/>
+        <location line="-462"/>
+        <location line="+223"/>
         <source>😐 表情包</source>
         <translation>😐 Stickers</translation>
     </message>
     <message>
-        <location line="-189"/>
-        <location line="+29"/>
+        <location line="-205"/>
+        <location line="+45"/>
         <location line="+163"/>
         <source>同步</source>
         <translation>Sync</translation>
     </message>
     <message>
-        <location line="-177"/>
-        <source>请先在设置页填写 WebDAV 地址</source>
-        <translation>Please set the WebDAV URL in Settings first</translation>
-    </message>
-    <message>
-        <location line="+5"/>
+        <location line="-172"/>
         <source>WebDAV 地址无效</source>
         <translation>Invalid WebDAV URL</translation>
     </message>
