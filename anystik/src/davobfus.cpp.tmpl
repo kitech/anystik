@@ -1,12 +1,37 @@
 #include "davobfus.h"
 #include "libobfuscate/obfuscate.h"
+#include "advobfuscator/string.h"
+
+// 双轨混淆：
+//   Debug/RelWithDebInfo 等同调试型构建 → libobfuscate AY_OBFUSCATE（全构建生效）
+//   Release 构建 → ADVobfuscator ""_obf（仅 Release 生效，混淆更强）
+// 检测条件取三信号 OR，任一命中即视为调试型，宁保守不回退明文：
+//   - _DEBUG   MSVC 传统调试宏
+//   - !NDEBUG  C/C++ 标准：未定义 NDEBUG 即断言/调试模式
+//   - QT_DEBUG Qt：qtconfigmacros.h 在未定义 QT_NO_DEBUG 时自动定义
+// ADVobfuscator 须用 `_obf` UDL 而非显式构造：
+//   ObfuscatedString("...") 会把字面量当运行时参数留在 .rodata 泄露明文；
+//   "..."_obf 把 ObfuscatedString 整体作为 NTTP 模板实参，仅存编码字节。
+// 勿把 UDL 对象赋给 char*（语句结束析构），须经隐式转换 const char* 后用 QString::fromUtf8。
+using namespace andrivet::advobfuscator;
 
 // format: https://user:pass@path/dav
 // user/pass 含 @ 需写成 %40
 // caller parse URL
+#define DAVOBFUS_KEY "AUTHKEY_PLACEHOLDER"
+
 QString davObfusKey()
 {
-    // AY_OBFUSCATE 编译期 XOR 加密，明文不出现在二进制；运行时经隐式转换成 char*
-    const char* key = AY_OBFUSCATE("AUTHKEY_PLACEHOLDER");
+#if defined(_DEBUG) || !defined(NDEBUG) || defined(QT_DEBUG)
+    // libobfuscate：编译期 XOR 加密，明文不出现在二进制（全构建生效）
+    const char* key = AY_OBFUSCATE(DAVOBFUS_KEY);
     return QString::fromUtf8(key);
+#else
+    // ADVobfuscator：constexpr 加密 + 运行时 FSM 解码（仅 Release 有效）
+    // 不能直接 fromUtf8(key)：ObfuscatedString→QByteArrayView 需两级隐式转换，C++ 不允许；
+    // 先取 const char*（一级 UDC），key 生命周期覆盖函数体，指针有效
+    auto key = DAVOBFUS_KEY""_obf;
+    const char* decoded = key;
+    return QString::fromUtf8(decoded);
+#endif
 }

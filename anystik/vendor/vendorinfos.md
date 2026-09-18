@@ -12,25 +12,46 @@
 - 用途：`src/davobfus.cpp` 用 `AY_OBFUSCATE` 编译期混淆 dav 鉴权 key（占位 `AUTHKEY_PLACEHOLDER`）
 - 注意：单字节 XOR 为缓解非绝对安全；运行时解码后内存仍可被逆向提取。
 
-## libobfuscate（候选替代对比：ADVobfuscator — 未引入）
+## ADVobfuscator（已 vendor，Release 构建实际使用）
 
-> 仅调研记录存档，**未引入/未集成**本库。结论：不采用。
-
-- **Name**: ADVobfuscator (andrivet/ADVobfuscator)，v2.1.1
+- **Name**: ADVobfuscator (andrivet/ADVobfuscator)，**v2.1.2**
 - **Upstream**: https://github.com/andrivet/ADVobfuscator
 - **License**: BSD-3-Clause-Clear（与 libobfuscate 的 Unlicense 不同）
-- **结构**: header-only，但**多文件**——`include/advobfuscator/` 下 8 个头
-  （`aes.h`, `aes_string.h`, `bytes.h`, `fsm.h`, `obj.h`, `random.h`, `string.h`, `format.h`），**非单文件**
-- **加密**: AES-128-CTR（`aes_string.h`）+ 编译期 FSM 混淆运行期解码调用（`call.h`/`fsm.h` 用
-  `ObfuscatedMethodCall`）；比 libobfuscate 的单字节 XOR 强度高
-- **C++ 标准**: **必须 C++20**。源码大量使用 `consteval`（`string.h`/`call.h` 构造）、
-  C++20 class-NTTP 用户自定义字面量（`template<ObfuscatedString str> operator""_obf`）、
-  constexpr 析构。**本项目当前 `-std=gnu++17` 无法直接编译**，需全项目升级 C++20
+- **结构**: header-only、**多文件**——`include/advobfuscator/` 下 9 个头（含相互 include）：
+  `aes.h`, `aes_string.h`, `bytes.h`, `call.h`, `format.h`, `fsm.h`, `obf.h`, `random.h`, `string.h`
+- **加密**: 编译期加密 + FSM 混淆运行期解码调用（`call.h`/`fsm.h` 的 `ObfuscatedMethodCall`、
+  `ObfuscatedCall`）；`string.h` 的多算法链（XOR/CAESAR/ROTATE/SUBSTITUTE）+ `aes_string.h` 的
+  AES-128-CTR，比 libobfuscate 的单字节 XOR 强度高
+- **C++ 标准**: **必须 C++20**（`consteval`、class-NTTP UDL `template<ObfuscatedString str> operator""_obf`、
+  constexpr 析构）。**项目已 `CMAKE_CXX_STANDARD 23`（CMakeLists.txt:4），满足**
+- **Files** (SHA256):
+  - `include/advobfuscator/aes.h` (`6c1efe45a4b1b0e9162e8ffc2c24c73259d9e5b67f360799e5575db5c59b9155`)
+  - `include/advobfuscator/aes_string.h` (`3d495c17dcfaaae1a958cfb4e201b0d8ae8da8c79d8471c5759e39362b323d47`)
+  - `include/advobfuscator/bytes.h` (`6c4eca412b422689f834cd01ed39cfcdabe9bb34511cd9f0f50a0057e80fbbf5`)
+  - `include/advobfuscator/call.h` (`5e11f8d7639475d0284ab05e7263cb6d770799bd78ac3a098fefe31e78ce69c7`)
+  - `include/advobfuscator/format.h` (`46174781ae38b370f75d6b549721fb0249bacafd9c0469914318b94e00217451`)
+  - `include/advobfuscator/fsm.h` (`0be1d216ba50693b26d7a7ff1e015bd290283c884a36e925a7f9ddeb37759492`)
+  - `include/advobfuscator/obf.h` (`07b99a8a2859576e4fecb8756ae43f3f97dc79ec2a0e1182d3a7474133769118`)
+  - `include/advobfuscator/random.h` (`a50caffb578daa7070ebb9bffc28adc03ef543ef984d6275da0d191531275ac6`)
+  - `include/advobfuscator/string.h` (`ec7838c939663fd70bea72a548ef8ede445fca8c4ddc9382e67a66aa3e838ec6`)
+  - 来源：GitHub tag v2.1.2 `include/advobfuscator/`（经 gh-proxy.org 逐文件下载）
+- **用途**: dav 鉴权 key 混淆方案，**双轨实现**——构建期按信号自动选择：
+  - Debug/等同调试型（`_DEBUG` 或 `!NDEBUG` 或 `QT_DEBUG` 任一命中）→ libobfuscate `AY_OBFUSCATE`
+  - Release（三信号均不命中，含 Android `RelWithDebInfo`）→ ADVobfuscator `""_obf`
+  - 见 `src/davobfus.cpp` 与 `src/davobfus.cpp.tmpl`
 - **Debug 构建限制**: upstream README 明确「Obfuscation works only for Release builds」，
-  Debug 下明文照常进二进制。本项目 x64 构建用 `-DCMAKE_BUILD_TYPE=Debug`，
-  即使升 C++20，x64 Debug 下 ADVobfuscator 也不混淆
-- **结论**: 因「需全项目升 C++20」+「Debug 构建不生效」+「多文件」三点，**决定不引入**。
-  维持现有 libobfuscate（单文件、C++14、全构建生效）方案。本段仅作评估记录。
+  Debug 下明文照常进二进制。本项目 x64 构建用 `-DCMAKE_BUILD_TYPE=Debug`（+`-O1`）
+  → 走 libobfuscate 分支；Android 构建 `RelWithDebInfo`（含 `-DNDEBUG -DQT_NO_DEBUG`）
+  → 走 ADVobfuscator 分支
+- **必须用 `_obf` UDL，勿用显式构造**: 实测 `andrivet::advobfuscator::ObfuscatedString("...")`
+  会把字面量当运行时参数留在 `.rodata` 中**泄露明文**（-O1/-O2/-O3 均复现）；
+  `"..."_obf` 把 ObfuscatedString 整体作为 class-NTTP 模板实参，编译期加密后仅存编码字节
+  （g++/clang++ -std=c++23 -O0~-O3 全组合验证 `strings` 无明文）。需 `using namespace andrivet::advobfuscator;`
+  使 UDL 可见。`DAVOBFUS_KEY""_obf`（宏展开后邻接字面量接 UDL）可用，key 保持单源宏定义
+- **决策记录**: x64 Debug 不生效 → 采用**双轨**：Debug 用 libobfuscate（全构建生效），
+  Release/RelWithDebInfo 用 ADVobfuscator（混淆更强）。检测条件取三信号 OR，宁保守不露明文。
+  勿把 UDL 对象赋给 `const char*`（语句结束析构置零导致悬垂指针），
+  须经隐式转换 `const char*` 后 `QString::fromUtf8(key)`
 
 ## cJSON
 
