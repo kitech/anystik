@@ -99,7 +99,13 @@ void SyncEngine::createConnection()
     m_webdav->setConnectionSettings(
         (m_connectionType == 2) ? QWebdav::HTTPS : QWebdav::HTTP,
         m_host, m_rootPath, m_username, m_password, m_port);
-    m_webdav->setTransferTimeout(60000);
+    // 空闲超时：仅在连续无字节传输时计时，且随上传/下载进度重置；大图留余量
+    m_webdav->setTransferTimeout(90000);
+    // 暴露被吞掉的认证/SSL 等内部原因（errorChanged 为 QWebdav 公开 signal）
+    connect(m_webdav, &QWebdav::errorChanged, this,
+            [this](const QString& e) {
+                log(davbisync::Warn, QStringLiteral("webdav"), e);
+            });
 }
 
 // 每轮新建 parser：旧 parser 的连接/内部 reply 可能残留，拆旧建新彻底隔离
@@ -874,8 +880,16 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRel)
                     reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
                 if (reply->error() != QNetworkReply::NoError
                         || (status >= 400)) {
-                    finishWithError(QStringLiteral("upload failed: %1 (%2 status %3)")
-                                        .arg(localPath, reply->errorString()).arg(status));
+                    const qint64 elapsed =
+                        QDateTime::currentMSecsSinceEpoch() - m_fileStartMsec;
+                    if (reply->error() == QNetworkReply::OperationCanceledError) {
+                        log(davbisync::Warn, QStringLiteral("upload"),
+                            QStringLiteral("canceled after %1 ms · timeout=90000 · https=%2 · host=%3")
+                                .arg(elapsed).arg(m_connectionType == 2).arg(m_host));
+                    }
+                    finishWithError(QStringLiteral("upload failed: %1 (%2 status %3, %4 ms)")
+                                        .arg(localPath, reply->errorString())
+                                        .arg(status).arg(elapsed));
                     return;
                 }
                 m_lastFileMs = QDateTime::currentMSecsSinceEpoch() - m_fileStartMsec;
@@ -995,8 +1009,16 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
                         || (status >= 400)) {
                     m_tempFiles.removeOne(tmp);
                     QFile::remove(tmp);
-                    finishWithError(QStringLiteral("download failed: %1 (%2 status %3)")
-                                        .arg(cloudRel, reply->errorString()).arg(status));
+                    const qint64 elapsed =
+                        QDateTime::currentMSecsSinceEpoch() - m_fileStartMsec;
+                    if (reply->error() == QNetworkReply::OperationCanceledError) {
+                        log(davbisync::Warn, QStringLiteral("download"),
+                            QStringLiteral("canceled after %1 ms · timeout=90000 · https=%2 · host=%3")
+                                .arg(elapsed).arg(m_connectionType == 2).arg(m_host));
+                    }
+                    finishWithError(QStringLiteral("download failed: %1 (%2 status %3, %4 ms)")
+                                        .arg(cloudRel, reply->errorString())
+                                        .arg(status).arg(elapsed));
                     return;
                 }
                 QString err;
