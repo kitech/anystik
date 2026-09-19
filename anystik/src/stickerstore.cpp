@@ -5,6 +5,7 @@
 #include "androidutils.h"
 #include "macpasteboard.h"
 #include "macgifconverter.h"
+#include "qnaturalsort.h"
 
 #include <QStandardPaths>
 #include <QDir>
@@ -12,6 +13,7 @@
 #include <QFile>
 #include <QBuffer>
 #include <QFileInfo>
+#include <algorithm>
 #include <QImageReader>
 #include <QClipboard>
 #include <QMimeData>
@@ -1575,6 +1577,15 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
         return false;
     }
     const QString rootAbs = root.absolutePath();
+
+    // 按相对根目录的路径做自然排序（数字感知、稳定保序），
+    // 使 eif 组内序号、多分组 1/2/10、zip 层级与手动目录导入顺序全部确定化
+    std::stable_sort(files.begin(), files.end(),
+                     [&rootAbs](const QString& a, const QString& b) {
+        return QNaturalSort::naturalCompare(
+                   QDir(rootAbs).relativeFilePath(a),
+                   QDir(rootAbs).relativeFilePath(b)) < 0;
+    });
 
     db.begin_write_transaction();
 
