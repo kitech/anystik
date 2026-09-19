@@ -1,5 +1,33 @@
 # Vendor Libraries
 
+## uneif (QQ .eif 解包 CFB 实现)
+
+- **Name**: statementreply/uneif
+- **Upstream**: https://github.com/statementreply/uneif
+- **License**: MIT（`uneif/LICENSE`）
+- **Files**:
+  - `uneif/cfbf.h`（CFB 头结构 + `EifFile` 类声明，134 行）
+  - `uneif/cfbf.cpp`（DIFAT/FAT/MiniFAT/目录/MiniStream 解析 + `unpack` 按目录树落盘，193 行）
+- **限界**: 仅 v3 OLE（`SectSize=512` 硬编码、`checkHeader` 拒 `log2SectorSize!=9`）；
+  QQ 表情包 .eif 均为 v3，实用无碍。不解 Face.dat（组名/排序），按 CFB 树序导出。
+- **C++23 适配**: 上游为 C++17 代码，入库已打补丁（`cfbf.cpp`）：
+  `#include <cstring>`（memcmp）+ `u8string` 拼接改为
+  `std::string(u8string().begin(), u8string().end())`（C++20 起 `u8string()` 返回
+  `basic_string<char8_t>`，`const char* + u8string` 不再编译）。`g++ -std=c++23 -Wall` 通过。
+- **用途**: 应用内 .eif 解析的 CFB 底座候选之一（与 `include/compoundfilereader.h` 并行保留，
+  实施时以真实样本验证钦点一个为主）
+
+## microsoft/compoundfilereader（CFB 单头读器）
+
+- **Name**: microsoft/compoundfilereader
+- **Upstream**: https://github.com/microsoft/compoundfilereader
+- **License**: MIT
+- **Files**:
+  - `include/compoundfilereader.h`（470 行，buffer 原地读，`CFB::CompoundFileReader`）
+- **能力**: 支持 v3(512B) + v4(4096B) sector；`EnumFiles`/`ReadFile`/`GetRootEntry`；
+  异常 `WrongFormat`/`FileCorrupted`；仅 little-endian；需整体读入内存。
+- **用途**: 应用内 .eif 解析的 CFB 底座候选之一（按需读取每个流，便于 Face.dat 驱动命名/排序）
+
 ## libobfuscate
 
 - Name: libobfuscate (adamyaxley/Obfuscate)
