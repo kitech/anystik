@@ -2900,11 +2900,51 @@ const BuiltinSource kBuiltinSources[] = {
        "https://gh-proxy.org/https://github.com/amtoaer/bilibili-stickers/archive/abab458b399659f4ae6d91f3633c3a8365b147ac.zip",
        1686083L,          // API 求和（≈1.6 MB）
        "https://github.com/amtoaer/bilibili-stickers", true },
-     { "B站表情gif全图（rtransformation）",
-       "https://gh-proxy.org/https://github.com/rtransformation/Bilibili-emoticon-collection/archive/a2f0c55a04f689a23382a594791957d8b01aff70.zip",
-       3546883L,          // API 求和（≈3.4 MB）
-       "https://github.com/rtransformation/Bilibili-emoticon-collection", true },
-     // ── ChineseBQB 精选包（来源 zhaoolee/ChineseBQB 仓库 README 直链；本会话并行 HEAD 实测 content-length）──
+{ "B站表情gif全图（rtransformation）",
+        "https://gh-proxy.org/https://github.com/rtransformation/Bilibili-emoticon-collection/archive/a2f0c55a04f689a23382a594791957d8b01aff70.zip",
+        3546883L,          // API 求和（≈3.4 MB）
+        "https://github.com/rtransformation/Bilibili-emoticon-collection", true },
+     { "brd 表情包 (Volpeon)",
+        "https://strapi.volpeon.ink/uploads/brd_560ac976ea.zip",
+        692745L,          // 2026-09-19 HEAD 实测 content-length（≈0.68 MB）
+        "https://volpeon.ink/emojis/brd/", true },
+     { "wlf 表情包 (Volpeon)",
+        "https://strapi.volpeon.ink/uploads/wlf_6b2776ad62.zip",
+        841722L,          // 2026-09-19 HEAD 实测 content-length（≈0.84 MB）
+        "https://volpeon.ink/emojis/wlf/", true },
+     { "Clannad 团子表情 (NaiJi/udongein)",
+        "https://udongein.xyz/emoji-page/dangos/dangos.zip",
+        147315L,          // 2026-09-19 HEAD 实测 content-length
+        "https://udongein.xyz/emoji-page/", true },
+     { "雀魂表情 (NaiJi/udongein)",
+        "https://udongein.xyz/emoji-page/mahjong-soul/mahjong-soul.zip",
+        2487739L,         // 2026-09-19 HEAD 实测 content-length（≈2.5 MB）
+        "https://udongein.xyz/emoji-page/", true },
+     { "moule 角色包 HYPERHYENA",
+        "https://moule.world/media/images/emojis/HYPERHYENA.zip",
+        1024677L,         // 2026-09-19 HEAD 实测 content-length（≈1.0 MB）
+        "https://moule.world/", true },
+     { "moule 角色包 PWNZR",
+        "https://moule.world/media/images/emojis/PWNZR.zip",
+        719654L,          // 2026-09-19 HEAD 实测 content-length（≈0.72 MB）
+        "https://moule.world/", true },
+     { "mutant 表情 (fedi-emojis)",
+        "https://gh-proxy.org/https://raw.githubusercontent.com/SnenxyTengoku/fedi-emojis/main/mutant.zip",
+        21171683L,        // 2026-09-19 HEAD 实测 content-length（≈21 MB）
+        "https://github.com/SnenxyTengoku/fedi-emojis", true },
+     { "mutantremix (fedi-emojis)",
+        "https://gh-proxy.org/https://raw.githubusercontent.com/SnenxyTengoku/fedi-emojis/main/mutantremix.zip",
+        255372L,          // 2026-09-19 HEAD 实测 content-length（≈0.25 MB）
+        "https://github.com/SnenxyTengoku/fedi-emojis", true },
+     { "blobbee (olivvybee)",
+        "https://github.com/olivvybee/emojis/releases/download/2026.08.16.1/blobbee.zip",
+        1836542L,         // 2026-09-19 HEAD 实测 content-length（≈1.8 MB）
+        "https://github.com/olivvybee/emojis", true },
+     { "neobread (olivvybee)",
+        "https://github.com/olivvybee/emojis/releases/download/2026.08.16.1/neobread.zip",
+        1298158L,         // 2026-09-19 HEAD 实测 content-length（≈1.3 MB）
+        "https://github.com/olivvybee/emojis", true },
+      // ── ChineseBQB 精选包（来源 zhaoolee/ChineseBQB 仓库 README 直链；本会话并行 HEAD 实测 content-length）──
     { "ChineseBQB 002 可爱的女孩纸👧",
       "https://gh-proxy.org/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/002CuteGirl_%E5%8F%AF%E7%88%B1%E7%9A%84%E5%A5%B3%E5%AD%A9%E7%BA%B8%F0%9F%91%A7BQB.zip",
       59028547L,
