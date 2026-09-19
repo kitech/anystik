@@ -140,6 +140,7 @@ SyncProgressPopup::SyncProgressPopup(SyncEngine* engine, QQuickItem* parent)
     // ── 状态行 ──
     m_statusLabel = new QskTextLabel(QStringLiteral("同步中..."), m_layout);
     m_statusLabel->setFontRole(QskFontRole::Caption);
+    m_statusLabel->setTextColor(QColor(150, 205, 255));
     m_statusLabel->setWrapMode(QskTextOptions::WrapAnywhere);
     m_statusLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
 
@@ -257,7 +258,7 @@ void SyncProgressPopup::resetForRun()
         m_detailLabel->setText(QStringLiteral("第 0/0 个文件"));
     }
     if (m_statusLabel) {
-        m_statusLabel->setTextColor(QColor());
+        m_statusLabel->setTextColor(QColor(150, 205, 255));
         m_statusLabel->setText(QStringLiteral("同步中..."));
     }
     if (m_featureLabel) {

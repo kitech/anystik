@@ -2860,6 +2860,10 @@ const BuiltinSource kBuiltinSources[] = {
       "https://gh-proxy.org/https://raw.githubusercontent.com/porridgebrother/line-stickers/8480a02a3b74914d70b8763cef77c2a9a86769a5/stickers.zip",
       1490697L,   // 本会话 Range 实测 content-range: bytes 0-0/1490697（raw 偶发超时,重试即可）
       "https://github.com/porridgebrother/line-stickers", true },
+    { "wyv 表情包 (Volpeon)",
+      "https://strapi.volpeon.ink/uploads/wyv_10ef1cb106.zip",
+      680387L,    // 2026-09-19 HEAD 实测 content-length（≈0.68 MB，31 张 png 根目录直达，含 LICENSE/meta.json）
+      "https://volpeon.ink/emojis/wyv/", true },
     { "ChineseBQB 梗图包",
       "https://gh-proxy.org/https://raw.githubusercontent.com/zhaoolee/ChineseBQB/ffd0e2e826e48aac67e8e6e15807e934a77216f6/001Funny_%E6%BB%91%E7%A8%BD%E5%A4%A7%E4%BD%AC%F0%9F%98%8FBQB.zip",
       4691509L,
