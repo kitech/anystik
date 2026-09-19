@@ -30,7 +30,9 @@ private:
         QString url;
         QString updated;
         QskPushButton* preview = nullptr;
-        QskTextLabel* status = nullptr;
+        QskTextLabel* size = nullptr;   // 大小固定行（已下载/未下载一致，Preferred）
+        QskTextLabel* dlhint = nullptr;   // 状态提示行（检测中/下载中/已安装/失败/版本，Expanding）
+        QskTextLabel* check = nullptr;  // 已下载对号 ✓（绿色）
         QskPushButton* fetch = nullptr;
         QskPushButton* dl = nullptr;
         QskPushButton* cancel = nullptr;
@@ -43,10 +45,11 @@ private:
 
     void buildBody();
     void addSourceRow(QskLinearBox* body, const QString& name, const QString& url,
-                      const QString& previewUrl, const QString& updated);
+                      const QString& previewUrl, const QString& updated, int index);
     void refreshSourceTexts();
     void rebuildDownloaded();
-    void addPackRow(QskLinearBox* list, const StickerPackBrief& pack, bool installed);
+    void addPackRow(QskLinearBox* list, const StickerPackBrief& pack, bool installed,
+                    int index);
     void refreshButtons(const SourceRow& row);
     int downloadedPackCount() const;
     int enabledSourceCount() const;
@@ -59,6 +62,7 @@ private:
 
     void showToast(const QString& text);
     static QString formatSize(qint64 bytes);
+    QString givenPackIdForUrl(const QString& url) const;  // 已下载源 → packId，未下载 → 空
 
     MyScrollArea* m_scroll = nullptr;
     QskLinearBox* m_body = nullptr;

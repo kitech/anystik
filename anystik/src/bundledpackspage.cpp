@@ -140,12 +140,14 @@ void BundledPacksPage::buildBody()
     connect(store, &StickerStore::downloadFinished, this, &BundledPacksPage::onDownloadFinished);
     connect(store, &StickerStore::dataChanged, this, [this]() { rebuildDownloaded(); });
 
+    int srcIndex = 0;
     for (unsigned i = 0; i < kBuiltinSourceCount; ++i)
         if (kBuiltinSources[i].enabled)
             addSourceRow(m_body, QString::fromUtf8(kBuiltinSources[i].name),
                                   QString::fromUtf8(kBuiltinSources[i].url),
                                   QString::fromUtf8(kBuiltinSources[i].previewUrl),
-                                  QString::fromUtf8(kBuiltinSources[i].updated));
+                                  QString::fromUtf8(kBuiltinSources[i].updated),
+                                  ++srcIndex);
 
     // B2 清理非内置源的残留下载（.part + dlProgress 死条目）
     QStringList sourceUrls;
@@ -188,7 +190,7 @@ void BundledPacksPage::updateTitles()
 }
 
 void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, const QString& url,
-                                    const QString& previewUrl, const QString& updated)
+                                    const QString& previewUrl, const QString& updated, int index)
 {
     SourceRow row;
     row.url = url;
@@ -201,8 +203,12 @@ void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, con
 
     auto* rTop = new QskLinearBox(Qt::Horizontal, card);
     rTop->setSpacing(8);
-    auto* nameLabel = new QskTextLabel(name, rTop);
+    auto* nameLabel = new QskTextLabel(tr("%1. %2").arg(index).arg(name), rTop);
     nameLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    row.check = new QskTextLabel(tr("✓"), rTop);
+    row.check->setTextColor(QColor(120, 210, 140));
+    row.check->setVisible(!givenPackIdForUrl(url).isEmpty());
 
     if (!previewUrl.isEmpty()) {
         row.preview = new QskPushButton(tr("预览"), rTop);
@@ -226,12 +232,16 @@ void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, con
         updatedLabel->setText(tr("更新时间 %1").arg(updated));
     }
 
-    row.status = makeInfoLabel(card);
-    const qint64 approx =
-        StickerStore::instance()->cachedApproxSize(url);
-    row.status->setText(approx > 0
+    row.size = makeInfoLabel(card);
+    row.size->setSizePolicy(Qt::Horizontal, QskSizePolicy::Preferred);
+    const qint64 approx = StickerStore::instance()->cachedApproxSize(url);
+    row.size->setText(approx > 0
         ? tr("大小 约 %1").arg(formatSize(approx))
         : tr("大小未知"));
+
+    row.dlhint = makeInfoLabel(card);
+    row.dlhint->setSizePolicy(Qt::Horizontal, QskSizePolicy::Expanding);
+    row.dlhint->setText(QString());
 
     row.bar = new QskProgressBar(0.0, 1.0, card);
     row.bar->setVisible(false);
@@ -246,7 +256,7 @@ void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, con
             return;
         it->probing = true;
         it->fetch->setEnabled(false);
-        it->status->setText(tr("检测中…"));
+        it->dlhint->setText(tr("检测中…"));
         StickerStore::instance()->probeRemote(url);
     });
 
@@ -257,7 +267,7 @@ void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, con
         auto it = m_rows.find(url);
         if (it == m_rows.end())
             return;
-        it->status->setText(tr("准备下载…"));
+        it->dlhint->setText(tr("准备下载…"));
         refreshButtons(it.value());
         StickerStore::instance()->downloadPack(url);
     });
@@ -291,9 +301,11 @@ void BundledPacksPage::refreshSourceTexts()
         row.fetch->setText(tr("获取"));
         row.cancel->setText(tr("取消"));
         const qint64 approx = store->cachedApproxSize(row.url);
-        row.status->setText(approx > 0
+        row.size->setText(approx > 0
             ? tr("大小 约 %1").arg(formatSize(approx))
             : tr("大小未知"));
+        if (row.check)
+            row.check->setVisible(!givenPackIdForUrl(row.url).isEmpty());
         refreshButtons(row);
     }
 }
@@ -318,10 +330,12 @@ void BundledPacksPage::rebuildDownloaded()
         installed.insert(p.id);
 
     const auto all = store->packs(-1, "title ASC"); // kPacksAll
+    int idx = 0;
     for (const QString& id : ids) {
+        ++idx;
         for (const auto& p : all) {
             if (p.id == id) {
-                addPackRow(m_downloadedBox, p, installed.contains(id));
+                addPackRow(m_downloadedBox, p, installed.contains(id), idx);
                 break;
             }
         }
@@ -329,7 +343,8 @@ void BundledPacksPage::rebuildDownloaded()
     updateTitles();
 }
 
-void BundledPacksPage::addPackRow(QskLinearBox* list, const StickerPackBrief& pack, bool installed)
+void BundledPacksPage::addPackRow(QskLinearBox* list, const StickerPackBrief& pack, bool installed,
+                                  int index)
 {
     auto* card = new QskLinearBox(Qt::Vertical, list);
     card->setSpacing(6);
@@ -337,7 +352,7 @@ void BundledPacksPage::addPackRow(QskLinearBox* list, const StickerPackBrief& pa
 
     auto* top = new QskLinearBox(Qt::Horizontal, card);
     top->setSpacing(8);
-    auto* name = new QskTextLabel(pack.title, top);
+    auto* name = new QskTextLabel(tr("%1. %2").arg(index).arg(pack.title), top);
     name->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
     auto* toggle = new QskPushButton(installed ? tr("停用") : tr("启用"), top);
 
@@ -404,23 +419,25 @@ void BundledPacksPage::addPackRow(QskLinearBox* list, const StickerPackBrief& pa
     });
 }
 
+QString BundledPacksPage::givenPackIdForUrl(const QString& url) const
+{
+    const QStringList ids = QSettings().value("downloadedPacks").toStringList();
+    for (const QString& id : ids) {
+        const QVariantMap meta = StickerStore::instance()->packMeta(id);
+        if (meta.value("url").toString() == url)
+            return id;
+    }
+    return QString();
+}
+
 void BundledPacksPage::refreshButtons(const SourceRow& row)
 {
     const bool busy = (m_busyUrl == row.url);
     row.cancel->setVisible(busy);
     row.fetch->setEnabled(!busy && !row.probing);
     row.dl->setEnabled(!busy && m_busyUrl.isEmpty());
-    if (!busy) {
-        // 已装包且未在下载时可改名「重新下载」
-        const QStringList ids = QSettings().value("downloadedPacks").toStringList();
-        for (const QString& id : ids) {
-            const QVariantMap meta = StickerStore::instance()->packMeta(id);
-            if (meta.value("url").toString() == row.url) {
-                row.dl->setText(tr("重新下载"));
-                break;
-            }
-        }
-    }
+    if (!busy && !givenPackIdForUrl(row.url).isEmpty())
+        row.dl->setText(tr("重新下载"));
 }
 
 void BundledPacksPage::onProbeDone(const QString& url, qint64 size, const QString& version,
@@ -434,38 +451,31 @@ void BundledPacksPage::onProbeDone(const QString& url, qint64 size, const QStrin
 
     QString text;
     if (!ok) {
-        text = tr("获取失败：%1").arg(error);
-    } else {
-        const qint64 approx =
-            StickerStore::instance()->cachedApproxSize(url);
-        if (size >= 0)
-            text = tr("大小 %1").arg(formatSize(size));
-        else if (approx > 0)
-            text = tr("大小 约 %1").arg(formatSize(approx));
-        else
-            text = tr("大小未知（以下载实计）");
-if (!version.isEmpty() && version != "未知")
-            text += tr("  ·  版本 %1").arg(version);
-        if (!versionRaw.isEmpty()) {
-            // A3：仅当该包仍处于启用态时才提示「已装且未变化」
-            QSet<QString> installed;
-            for (const auto& p : StickerStore::instance()->packs(1))
-                installed.insert(p.id);
-            const QStringList ids = QSettings().value("downloadedPacks").toStringList();
-            for (const QString& id : ids) {
-                const QVariantMap meta = StickerStore::instance()->packMeta(id);
-                if (installed.contains(id)
-                        && meta.value("url").toString() == url
-                        && meta.value("versionRaw").toString() == versionRaw) {
-                    text += tr("  ·  已装且未变化");
-                    break;
-                }
+        it->dlhint->setText(tr("获取失败：%1").arg(error));
+        refreshButtons(it.value());
+        return;
+    }
+    if (!version.isEmpty() && version != "未知")
+        text = tr("版本 %1").arg(version);
+    if (!versionRaw.isEmpty()) {
+        // A3：仅当该包仍处于启用态时才提示「已装且未变化」
+        QSet<QString> installed;
+        for (const auto& p : StickerStore::instance()->packs(1))
+            installed.insert(p.id);
+        const QStringList ids = QSettings().value("downloadedPacks").toStringList();
+        for (const QString& id : ids) {
+            const QVariantMap meta = StickerStore::instance()->packMeta(id);
+            if (installed.contains(id)
+                    && meta.value("url").toString() == url
+                    && meta.value("versionRaw").toString() == versionRaw) {
+                if (!text.isEmpty())
+                    text += "  ";
+                text += tr("已装且未变化");
+                break;
             }
         }
     }
-    it->status->setText(text);
-    if (!ok)
-        it->status->setText(tr("获取失败：%1").arg(error));
+    it->dlhint->setText(text);
     refreshButtons(it.value());
 }
 
@@ -515,7 +525,7 @@ void BundledPacksPage::onProgress(const QString& url, qint64 done, qint64 total)
     } else {
         it->bar->setIndeterminate(true);
     }
-    it->status->setText(text);
+    it->dlhint->setText(text);
     refreshButtons(it.value());
 }
 
@@ -529,11 +539,11 @@ void BundledPacksPage::onDownloadFinished(const QString& url, bool ok, const QSt
     it->bar->setVisible(false);
     it->bar->setValue(0.0);
     if (ok) {
-        it->status->setText(tr("已安装：%1").arg(error));
+        it->dlhint->setText(tr("已安装：%1").arg(error));
         it->dl->setText(tr("重新下载"));
         showToast(tr("已安装 %1").arg(error));
     } else {
-        it->status->setText(tr("下载失败：%1").arg(error));
+        it->dlhint->setText(tr("下载失败：%1").arg(error));
         it->dl->setText(StickerStore::instance()->hasPartialDownload(url) ? tr("继续") : tr("下载安装"));
         showToast(error);
     }
