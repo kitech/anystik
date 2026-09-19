@@ -1,4 +1,5 @@
 #include "stickerstore.h"
+#include "eifreader.h"
 #include "storage.h"
 #include "sticker_db.h"
 #include "androidutils.h"
@@ -7,6 +8,7 @@
 
 #include <QStandardPaths>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QBuffer>
 #include <QFileInfo>
@@ -3466,6 +3468,18 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     // MD5：全量重读 zip（跨续传会话也一致）
     const QByteArray md5 = fileMd5(zipPath);
 
+    // EIF 分流：QQ 表情包 .eif 是 OLE 复合文档（CFB 魔数），
+    // 与 zip 包按头部魔数判别后走不同安装链路。
+    QFile headF(zipPath);
+    QByteArray head8;
+    if (headF.open(QIODevice::ReadOnly)) {
+        head8 = headF.read(8);
+        headF.close();
+    }
+    if (eifreader::isEifFile(head8)) {
+        return runInstallEif(task, zipPath, md5);
+    }
+
     QZipReader zip(zipPath);
     if (!zip.exists() || !zip.isReadable()) {
         zip.close();
@@ -3538,7 +3552,35 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     zip.close();
 
     QString err;
-    if (!importDirectory(targetDir, &err)) {
+    bool imported = importDirectory(targetDir, &err);
+    if (!imported) {
+        // 兼容「zip 包裹 eif」：QQ 表情离线包常见把 .eif 再压一层 zip。
+        // 直接导入找不到图片时，扫描 targetDir 内的 *.eif 展开后再导。
+        QDirIterator eifIt(targetDir,
+            QStringList() << QStringLiteral("*.eif")
+                          << QStringLiteral("*.EIF"),
+            QDir::Files | QDir::NoDotAndDotDot,
+            QDirIterator::Subdirectories);
+        bool expandedAny = false;
+        const QStringList eifs = [&] {
+            QStringList list;
+            while (eifIt.hasNext()) list.append(eifIt.next());
+            return list;
+        }();
+        for (const QString& e : eifs) {
+            const QString stem = sanitizeToken(QFileInfo(e).completeBaseName());
+            const QString out = targetDir + QLatin1Char('/') + stem;
+            QString e2;
+            if (eifreader::extractEif(e, out, &e2)) {
+                expandedAny = true;
+                QFile::remove(e);   // 已展开的 eif 源文件摘除，避免误导入
+            }
+        }
+        if (expandedAny) {
+            imported = importDirectory(targetDir, &err);
+        }
+    }
+    if (!imported) {
         return failNow(QStringLiteral("导入失败：") + (err.isEmpty()
                  ? QStringLiteral("无可用图片") : err), true);
     }
@@ -3573,6 +3615,78 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     }
 
     QFile::remove(zipPath);
+    return r;
+}
+
+StickerStore::InstallResult StickerStore::runInstallEif(
+    DownloadTask* task, const QString& eifPath, const QByteArray& md5)
+{
+    const QString url = task->url;
+    const QString base = stickerBaseDir();
+
+    // 标题同 zip 链路：源显示名优先，回退 URL 派生名
+    QString title = task->name;
+    if (title.isEmpty()) {
+        title = urlDisplayName(url);
+    }
+    title = sanitizeToken(title);
+
+    const QString targetDir = base + QStringLiteral("/packs/") + title;
+    if (QFile::exists(targetDir)) {
+        if (!QDir(targetDir).removeRecursively()) {
+            return {false, QStringLiteral("无法清理旧包目录"), {}, {},
+                    {}, {}, {}};
+        }
+    }
+    if (!QDir().mkpath(targetDir)) {
+        return {false, QStringLiteral("无法创建包目录"), {}, {}, {}, {}, {}};
+    }
+
+    QString err;
+    int imageCount = 0;
+    if (!eifreader::extractEif(eifPath, targetDir, &err, &imageCount)) {
+        QFile::remove(eifPath);
+        return {false, QStringLiteral("导入失败：") + (err.isEmpty()
+                 ? QStringLiteral("无可用图片") : err), {}, {},
+                 {}, {}, {}};
+    }
+
+    if (!importDirectory(targetDir, &err)) {
+        QFile::remove(eifPath);
+        return {false, QStringLiteral("导入失败：") + (err.isEmpty()
+                 ? QStringLiteral("无可用图片") : err), {}, {},
+                 {}, {}, {}};
+    }
+
+    QString packId;
+    for (const auto& p : stickerDb().list_packs(-1)) {
+        if (QString::fromUtf8(p.title.c_str()) == title) {
+            packId = QString::fromStdString(p.id);
+            break;
+        }
+    }
+    if (packId.isEmpty()) {
+        QFile::remove(eifPath);
+        return {false, QStringLiteral("分组标识丢失"), {}, {}, {}, {}, {}};
+    }
+
+    InstallResult r;
+    r.ok = true;
+    r.message = title;
+    r.packId = packId;
+    r.dir = targetDir;
+    r.total = QFileInfo(eifPath).size();
+    r.md5Hex = QString::fromLatin1(md5.toHex());
+
+    const QVariantMap oldMeta = QSettings().value(
+        QStringLiteral("downloadedPackMeta/") + packId).toMap();
+    const QString oldMd5 = oldMeta.value("md5").toString();
+    if (!oldMd5.isEmpty() && oldMeta.value("url").toString() == url
+            && oldMd5 != r.md5Hex) {
+        r.note = QStringLiteral("（远端内容已变化，已覆盖安装）");
+    }
+
+    QFile::remove(eifPath);
     return r;
 }
 

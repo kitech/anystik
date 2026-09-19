@@ -237,6 +237,9 @@ private:
     InstallResult runInstallWork(DownloadTask* task);
     void finalizeInstall(DownloadTask* task, const InstallResult& r);
     void closeOut(DownloadTask* task);
+    // eif 直链安装（工作线程；文件已重命名为 zipPath，仅头部魔数已判别）
+    InstallResult runInstallEif(DownloadTask* task, const QString& eifPath,
+                                const QByteArray& md5);
 
     // 贴纸存储根目录（macOS/Android 通用；默认 = AppLocalDataLocation）。
     // DB 的 file_path/cover_path 存「相对 base」的相对路径；读取时经

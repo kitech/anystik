@@ -60,6 +60,8 @@ qt_add_executable(anystik
     src/phonemonitor.cpp
     src/stickerstore.h
     src/stickerstore.cpp
+    src/eifreader.h
+    src/eifreader.cpp
     src/bundledpackspage.h
     src/bundledpackspage.cpp
     src/stickerlist.h

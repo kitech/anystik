@@ -559,8 +559,11 @@ int main(int argc, char* argv[]) {
 
     // ── 下载安装链路自检（ANYSTIK_SELFTEST=1，offscreen 冒烟用）──
     if (qEnvironmentVariableIntValue("ANYSTIK_SELFTEST") > 0) {
-        const QString url = QString::fromUtf8(
-            "https://gh-proxy.org/https://github.com/WhatsApp/stickers/archive/06144a1f6077bbb346e1230032fc4e0bce996d03.zip");
+        // ANYSTIK_SELFTEST_URL 可覆盖默认包；支持 zip / eif 两种直链
+        const QString url = qEnvironmentVariable("ANYSTIK_SELFTEST_URL").isEmpty()
+            ? QString::fromUtf8(
+                "https://gh-proxy.org/https://github.com/WhatsApp/stickers/archive/06144a1f6077bbb346e1230032fc4e0bce996d03.zip")
+            : qEnvironmentVariable("ANYSTIK_SELFTEST_URL");
         QTimer::singleShot(500, [url]() {
             auto* store = StickerStore::instance();
             if (!store->ensureInit()) {
