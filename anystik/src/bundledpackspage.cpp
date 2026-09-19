@@ -144,7 +144,8 @@ void BundledPacksPage::buildBody()
         if (kBuiltinSources[i].enabled)
             addSourceRow(m_body, QString::fromUtf8(kBuiltinSources[i].name),
                                   QString::fromUtf8(kBuiltinSources[i].url),
-                                  QString::fromUtf8(kBuiltinSources[i].previewUrl));
+                                  QString::fromUtf8(kBuiltinSources[i].previewUrl),
+                                  QString::fromUtf8(kBuiltinSources[i].updated));
 
     // B2 清理非内置源的残留下载（.part + dlProgress 死条目）
     QStringList sourceUrls;
@@ -187,10 +188,11 @@ void BundledPacksPage::updateTitles()
 }
 
 void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, const QString& url,
-                                    const QString& previewUrl)
+                                    const QString& previewUrl, const QString& updated)
 {
     SourceRow row;
     row.url = url;
+    row.updated = updated;
 
     auto* card = new QskLinearBox(Qt::Vertical, body);
     card->setSpacing(6);
@@ -217,6 +219,12 @@ void BundledPacksPage::addSourceRow(QskLinearBox* body, const QString& name, con
     auto* urlLabel = makeInfoLabel(card);
     urlLabel->setSizePolicy(Qt::Horizontal, QskSizePolicy::Preferred);
     urlLabel->setText(url);
+
+    if (!updated.isEmpty()) {
+        auto* updatedLabel = makeInfoLabel(card);
+        updatedLabel->setSizePolicy(Qt::Horizontal, QskSizePolicy::Preferred);
+        updatedLabel->setText(tr("更新时间 %1").arg(updated));
+    }
 
     row.status = makeInfoLabel(card);
     const qint64 approx =

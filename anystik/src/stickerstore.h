@@ -59,6 +59,7 @@ struct BuiltinSource {
     const char* url;
     qint64 approxSize;
     const char* previewUrl;  // 在线预览列表页；nullptr = 无预览（不显示预览按钮）
+    const char* updated;     // 源更新时间（上游发布日期/实测首测日期）；nullptr = 未知
     bool enabled;            // 开关：true=上线显示，false=预留隐藏
 };
 extern const BuiltinSource kBuiltinSources[];

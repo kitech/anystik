@@ -28,6 +28,7 @@ public:
 private:
     struct SourceRow {
         QString url;
+        QString updated;
         QskPushButton* preview = nullptr;
         QskTextLabel* status = nullptr;
         QskPushButton* fetch = nullptr;
@@ -42,7 +43,7 @@ private:
 
     void buildBody();
     void addSourceRow(QskLinearBox* body, const QString& name, const QString& url,
-                      const QString& previewUrl);
+                      const QString& previewUrl, const QString& updated);
     void refreshSourceTexts();
     void rebuildDownloaded();
     void addPackRow(QskLinearBox* list, const StickerPackBrief& pack, bool installed);
