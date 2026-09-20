@@ -1593,6 +1593,51 @@ Files will not be deleted.</translation>
         <source>无法打开贴纸目录</source>
         <translation>Could not open sticker directory</translation>
     </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1021"/>
+        <source>打开目录…</source>
+        <translation>Open folder…</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1041"/>
+        <source>QQ 图片目录</source>
+        <translation>QQ Image Folder</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1043"/>
+        <source>微信图片目录</source>
+        <translation>WeChat Image Folder</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1045"/>
+        <source>WhatsApp 图片目录</source>
+        <translation>WhatsApp Image Folder</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1048"/>
+        <source>Telegram 图片目录</source>
+        <translation>Telegram Image Folder</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1051"/>
+        <source>LINE 图片目录</source>
+        <translation>LINE Image Folder</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1053"/>
+        <source>Matrix 图片目录</source>
+        <translation>Matrix Image Folder</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1384"/>
+        <source>打开</source>
+        <translation>Open</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1484"/>
+        <source>无法打开目录</source>
+        <translation>Cannot open folder</translation>
+    </message>
 </context>
 <context>
     <name>StickerPreviewOverlay</name>

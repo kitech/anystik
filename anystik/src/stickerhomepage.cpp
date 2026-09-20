@@ -33,6 +33,8 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QPair>
+#include <QStringList>
 #include <QTimer>
 #include <QVariantMap>
 #include <QQuickWindow>
@@ -141,8 +143,10 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     m_importBtn->setPreferredWidth(68);
     m_importBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
-    connect(m_importBtn, &QskAbstractButton::clicked,
-        this, &StickerHomePage::requestImportFolder);
+    connect(m_importBtn, &QskAbstractButton::clicked, this, [this]() {
+        showImportMenu(m_importBtn->mapToItem(this,
+            QPointF(0, m_importBtn->height())));
+    });
 
     m_syncBtn = new QskPushButton(tr("同步"), topBar);
     m_syncBtn->setPreferredWidth(68);
@@ -946,14 +950,12 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
     int idxBundled = 1;
     int idxImport = 0;
     int idxPaste = 2;
-    int idxOpenFolder = 3;
     int idxManage = -1;
     menu->addOption(QskLabelData(tr("导入表情包文件夹")));
     menu->addOption(QskLabelData(tr("表情包目录")));
     menu->addOption(QskLabelData(tr("粘贴添加")));
-    menu->addOption(QskLabelData(tr("打开目录")));
     if (!m_packs.isEmpty()) {
-        idxManage = 4;
+        idxManage = 3;
         menu->addOption(QskLabelData(tr("分组管理")));
     }
     menu->addSeparator();
@@ -966,7 +968,7 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
                        : tr("  Keep Screen On")));
     menu->setOrigin(origin);
 
-    connect(menu, &QskMenu::triggered, this, [this, idxBundled, idxImport, idxPaste, idxOpenFolder,
+    connect(menu, &QskMenu::triggered, this, [this, idxBundled, idxImport, idxPaste,
         idxManage, idxLog, idxSettings, idxAbout, idxKeep](int index) {
         if (index == idxImport) {
             requestImportFolder();
@@ -974,8 +976,6 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
             pageManager()->open("bundledpacks");
         } else if (index == idxPaste) {
             requestPasteSticker();
-        } else if (index == idxOpenFolder) {
-            openStickerFolder();
         } else if (idxManage >= 0 && index == idxManage) {
             showPackManageMenu();
         } else if (index == idxLog) {
@@ -995,6 +995,88 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
         if (auto* m = qobject_cast<QskMenu*>(sender()))
             m->close();
     });
+
+    {
+        auto* overlay = new MenuOverlay(menu);
+        connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
+        connect(menu, &QskPopup::closed, overlay, &QObject::deleteLater);
+    }
+    menu->open();
+}
+
+// 导入按钮弹出菜单：导入 / 打开目录… / 各聊天 App 图片目录（单层平级）。
+// 各 App 目录取第一个存在的候选路径，不存在则自动隐藏该项（多系统安全）。
+void StickerHomePage::showImportMenu(const QPointF& origin)
+{
+    for (auto* old : findChildren<QskMenu*>())
+        old->deleteLater();
+    for (auto* old : findChildren<MenuOverlay*>())
+        old->deleteLater();
+
+    auto* menu = new QskMenu(this);
+    menu->setModal(true);
+    menu->setPopupFlag(QskPopup::DeleteOnClose, false);
+
+    const int idxImportFolder = menu->addOption(QskLabelData(tr("导入表情包文件夹")));
+    const int idxOpenDir = menu->addOption(QskLabelData(tr("打开目录…")));
+    menu->addSeparator();
+
+    QVector<QPair<int, QString>> dirItems; // <menu index, 已存在的目录路径>
+    auto addDir = [&](const QString& label, const QStringList& candidates) {
+        QString path;
+        for (const QString& c : candidates) {
+            if (QDir(c).exists()) {
+                path = c;
+                break;
+            }
+        }
+        if (!path.isEmpty()) {
+            const int idx = menu->addOption(QskLabelData(label));
+            dirItems.append(qMakePair(idx, path));
+        }
+    };
+
+#ifdef Q_OS_ANDROID
+    const QString root = QStringLiteral("/storage/emulated/0");
+    addDir(tr("QQ 图片目录"), { root + "/tencent/QQ_Images",
+                                root + "/Pictures/QQ" });
+    addDir(tr("微信图片目录"), { root + "/tencent/MicroMsg/WeiXin",
+                                 root + "/Pictures/WeiXin" });
+    addDir(tr("WhatsApp 图片目录"),
+        { root + "/Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images",
+          root + "/WhatsApp/Media/WhatsApp Images" });
+    addDir(tr("Telegram 图片目录"),
+        { root + "/Telegram/Telegram Images",
+          root + "/Android/media/org.telegram.messenger/Telegram/Telegram Images" });
+    addDir(tr("LINE 图片目录"), { root + "/Pictures/LINE",
+                                  root + "/LINE" });
+    addDir(tr("Matrix 图片目录"), { root + "/Pictures/Element",
+                                    root + "/Element" });
+#else
+    // 桌面端只列出可预测且存在的目录（Telegram Desktop 等）
+    addDir(tr("Telegram 图片目录"),
+        { QDir::homePath() + "/Downloads/Telegram Desktop" });
+#endif
+
+    menu->setOrigin(origin);
+
+    connect(menu, &QskMenu::triggered, this,
+        [this, idxImportFolder, idxOpenDir, dirItems](int index) {
+            if (index == idxImportFolder) {
+                requestImportFolder();
+            } else if (index == idxOpenDir) {
+                showDirPicker(false);
+            } else {
+                for (const auto& it : dirItems) {
+                    if (it.first == index) {
+                        openChatDir(it.second);
+                        break;
+                    }
+                }
+            }
+            if (auto* m = qobject_cast<QskMenu*>(sender()))
+                m->close();
+        });
 
     {
         auto* overlay = new MenuOverlay(menu);
@@ -1119,7 +1201,7 @@ void StickerHomePage::requestImportFolder()
 #ifdef Q_OS_ANDROID
     showToast(tr("Android 请通过「分享到 anystik」导入图片"));
 #else
-    showDirPicker();
+    showDirPicker(true);
 #endif
 }
 
@@ -1267,7 +1349,8 @@ void StickerHomePage::openSearchEngine(int engine, const QString& imageUrl)
 }
 
 // ── 轻量目录选择器（纯 QSkinny，无 QtWidgets 依赖）──
-void StickerHomePage::showDirPicker()
+// forImport=true：用户选目录后导入；false：只把所选目录在文件管理器打开。
+void StickerHomePage::showDirPicker(bool forImport)
 {
     auto* picker = new QskPopup(this);
     picker->setModal(true);
@@ -1297,13 +1380,20 @@ void StickerHomePage::showDirPicker()
     cancelBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
 
-    auto* okBtn = new QskPushButton(tr("导入此目录"), btnBox);
+    auto* okBtn = new QskPushButton(
+        forImport ? tr("导入此目录") : tr("打开"), btnBox);
     okBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     okBtn->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
 
-    auto* currentDir = new QDir(QDir::home().path());
-    Q_UNUSED(currentDir)
+    QString startPath;
+#ifdef Q_OS_ANDROID
+    startPath = QDir(QStringLiteral("/storage/emulated/0")).exists()
+        ? QStringLiteral("/storage/emulated/0") : QDir::home().path();
+#else
+    startPath = QDir::home().path();
+#endif
+    auto* currentDir = new QDir(startPath);
 
     auto refresh = [listBox, pathLabel, currentDir]() {
         pathLabel->setText(currentDir->absolutePath());
@@ -1337,14 +1427,18 @@ void StickerHomePage::showDirPicker()
     });
     connect(cancelBtn, &QskAbstractButton::clicked, picker, &QskPopup::close);
     connect(okBtn, &QskAbstractButton::clicked, picker,
-        [this, currentDir, picker]() {
-            QString err;
-            if (StickerStore::instance()->importDirectory(
-                    currentDir->absolutePath(), &err)) {
-                showToast(tr("导入成功"));
+        [this, currentDir, picker, forImport]() {
+            if (forImport) {
+                QString err;
+                if (StickerStore::instance()->importDirectory(
+                        currentDir->absolutePath(), &err)) {
+                    showToast(tr("导入成功"));
+                } else {
+                    showToast(err.isEmpty() ? tr("导入失败")
+                                            : err);
+                }
             } else {
-                showToast(err.isEmpty() ? tr("导入失败")
-                                        : err);
+                openChatDir(currentDir->absolutePath());
             }
             picker->close();
         });
@@ -1378,6 +1472,21 @@ void StickerHomePage::openStickerFolder()
         showToast(tr("无法打开贴纸目录"));
 #else
     QDesktopServices::openUrl(QUrl::fromLocalFile(baseDir));
+#endif
+}
+
+// 在文件管理器打开任意目录：Android 经 ShareActivity.openDir，桌面走本地 URL。
+void StickerHomePage::openChatDir(const QString& path)
+{
+#ifdef Q_OS_ANDROID
+    if (!path.isEmpty() && jOpenDir(path))
+        return;
+    showToast(tr("无法打开目录"));
+#else
+    if (!path.isEmpty() && QDir(path).exists() &&
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
+        return;
+    showToast(tr("无法打开目录"));
 #endif
 }
 

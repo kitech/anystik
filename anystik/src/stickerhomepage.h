@@ -52,15 +52,17 @@ private:
     void openPreview(const StickerBrief& brief);
     void confirmDeleteSticker(const StickerBrief& brief);
     void showOptionsMenu(const QPointF& origin);
+    void showImportMenu(const QPointF& origin);
     void showPackManageMenu();
 
     void requestImportFolder();
     void requestPasteSticker();
+    void openChatDir(const QString& path);
     void showRenameDialog(const StickerPackBrief& pack);
     void removePack(const StickerPackBrief& pack);
     void openStickerFolder();
 
-    void showDirPicker();
+    void showDirPicker(bool forImport);
     void ensureSyncPopup(bool reset = true);
 
     void showToast(const QString& text);

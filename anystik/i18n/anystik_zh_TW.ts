@@ -1593,6 +1593,51 @@
         <source>无法打开贴纸目录</source>
         <translation>無法開啟貼圖目錄</translation>
     </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1021"/>
+        <source>打开目录…</source>
+        <translation>開啟資料夾…</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1041"/>
+        <source>QQ 图片目录</source>
+        <translation>QQ 圖片目錄</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1043"/>
+        <source>微信图片目录</source>
+        <translation>微信圖片目錄</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1045"/>
+        <source>WhatsApp 图片目录</source>
+        <translation>WhatsApp 圖片目錄</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1048"/>
+        <source>Telegram 图片目录</source>
+        <translation>Telegram 圖片目錄</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1051"/>
+        <source>LINE 图片目录</source>
+        <translation>LINE 圖片目錄</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1053"/>
+        <source>Matrix 图片目录</source>
+        <translation>Matrix 圖片目錄</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1384"/>
+        <source>打开</source>
+        <translation>開啟</translation>
+    </message>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="1484"/>
+        <source>无法打开目录</source>
+        <translation>無法開啟資料夾</translation>
+    </message>
 </context>
 <context>
     <name>StickerPreviewOverlay</name>
