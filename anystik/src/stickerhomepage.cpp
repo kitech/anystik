@@ -1211,12 +1211,26 @@ void StickerHomePage::requestImportFolder()
 
 void StickerHomePage::requestPasteSticker()
 {
-    QString err;
-    if (StickerStore::instance()->pasteFromClipboard(&err)) {
-        showToast(tr("已粘贴到「粘贴板」"));
-    } else {
+    QString err, resurrectId;
+    bool dup = false;
+    if (!StickerStore::instance()->pasteFromClipboard(&err, &dup, &resurrectId)) {
         showToast(err.isEmpty() ? tr("粘贴失败") : err);
+        return;
     }
+    if (!resurrectId.isEmpty()) {
+        ConfirmPopup::show(this, tr("重新添加贴纸"),
+            tr("该图片此前已从「粘贴板」删除，要还原吗？"),
+            tr("还原"), tr("取消"),
+            [this, resurrectId](bool ok) {
+                if (ok && StickerStore::instance()->restoreSticker(resurrectId)) {
+                    showToast(tr("已还原"));
+                    reloadActive();
+                }
+            });
+        return;
+    }
+    showToast(dup ? tr("该图片已在「粘贴板」中")
+                  : tr("已粘贴到「粘贴板」"));
 }
 
 // ── 同步进度浮动窗口：懒创建；closed → deleteLater（QPointer 自动置空）──

@@ -1564,6 +1564,31 @@
         <translation>粘贴失败</translation>
     </message>
     <message>
+        <location line="+1"/>
+        <source>该图片已在「粘贴板」中</source>
+        <translation>该图片已在「粘贴板」中</translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <source>重新添加贴纸</source>
+        <translation>重新添加贴纸</translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>该图片此前已从「粘贴板」删除，要还原吗？</source>
+        <translation>该图片此前已从「粘贴板」删除，要还原吗？</translation>
+    </message>
+    <message>
+        <location line="+2"/>
+        <source>还原</source>
+        <translation>还原</translation>
+    </message>
+    <message>
+        <location line="+3"/>
+        <source>已还原</source>
+        <translation>已还原</translation>
+    </message>
+    <message>
         <location line="+160"/>
         <source>↑ 上级</source>
         <translation>↑ 上级</translation>

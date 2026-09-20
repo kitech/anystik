@@ -88,10 +88,15 @@ public:
 
     // ── 写操作 ──
     bool importDirectory(const QString& dir, QString* errorOut = nullptr);
-    bool pasteFromClipboard(QString* errorOut = nullptr);
+    bool pasteFromClipboard(QString* errorOut = nullptr, bool* dup = nullptr,
+                            QString* resurrectId = nullptr);
     // 由任意字节源（桌面剪贴板 PNG / Android 剪贴板或分享读取的原始图片字节）入库到「粘贴板」，
     // 内部按内容探测格式、sha1 幂等去重
-    bool importImageBytes(const QByteArray& bytes, QString* errorOut = nullptr);
+    // dup: 内容已在「粘贴板」（文件幂等命中）; resurrectId: 非空=该行被软删、可弹窗询问还原
+    bool importImageBytes(const QByteArray& bytes, QString* errorOut = nullptr,
+                          bool* dup = nullptr, QString* resurrectId = nullptr);
+    // 还原一张被移除（软删）的贴纸，保留原 emoji/描述/位置/最近用；成功发 dataChanged
+    bool restoreSticker(const QString& stickerId);
     bool renamePack(const QString& packId, const QString& newTitle);
     bool deletePack(const QString& packId);
     bool deleteSticker(const QString& stickerId);

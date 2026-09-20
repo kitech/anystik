@@ -1785,7 +1785,8 @@ StickerMeta StickerStore::stickerMeta(const QString& filePath) const
     return meta;
 }
 
-bool StickerStore::pasteFromClipboard(QString* errorOut)
+bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
+                                      QString* resurrectId)
 {
     if (!ensureInit()) {
         if (errorOut) *errorOut = QStringLiteral("storage init failed");
@@ -2062,11 +2063,12 @@ bool StickerStore::pasteFromClipboard(QString* errorOut)
               (qint64)bytes.size(),
               vok ? imageAnimationFrames(bytes, vf) : 0, int(vok));
     }
-    return importImageBytes(bytes, errorOut);
+    return importImageBytes(bytes, errorOut, dup, resurrectId);
 }
 
 // ── 图片字节入库（桌面剪贴板 / Android 剪贴板 / Android 分享 共用）──
-bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut)
+bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut,
+                                    bool* dup, QString* resurrectId)
 {
     if (m_migrating) {
         if (errorOut) *errorOut = QStringLiteral("正在迁移，请稍候再添加");
@@ -2124,6 +2126,17 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut)
             if (errorOut) *errorOut = QStringLiteral("图片保存失败");
             return false;
         }
+    } else {
+        // 同内容已在：不重写文件、不 REPLACE、不挪位、不隐式复活，直接视为成功。
+        // 行态三态：-1=无行(孤儿文件)  0=存活  1=软删（可询问还原）。
+        const int st = stickerDb().sticker_deleted_state(idHex.toUtf8().constData());
+        if (resurrectId && st == 1) {
+            *resurrectId = idHex;
+        }
+        if (dup) {
+            *dup = (st != 1);
+        }
+        return true;
     }
 
     auto& db = stickerDb();
@@ -2386,6 +2399,16 @@ bool StickerStore::deleteSticker(const QString& stickerId)
         return false;
     }
     const bool ok = stickerDb().delete_sticker(stickerId.toUtf8().constData());
+    if (ok) emit dataChanged();
+    return ok;
+}
+
+bool StickerStore::restoreSticker(const QString& stickerId)
+{
+    if (!ensureInit()) {
+        return false;
+    }
+    const bool ok = stickerDb().restore_sticker(stickerId.toUtf8().constData());
     if (ok) emit dataChanged();
     return ok;
 }
