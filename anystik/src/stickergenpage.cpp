@@ -241,6 +241,14 @@ void StickerGenPage::onCreate(const QVariantMap&, const QVariantMap&)
     if (m_seedHistory.size() > m_history.size())
         m_seedHistory = m_seedHistory.mid(0, m_history.size());
 
+    // ── 恢复「生成表情」当前提示文本与随机种子 ──
+    // onStop 保存（stickergen_prompt / stickergen_seed）；Transient 回退销毁重建时恢复，
+    // 避免回到「生成表情」页后丢失刚输入的提示与刚随机出的种子。
+    m_promptInput->setText(
+        QSettings().value("stickergen_prompt").toString());
+    m_seedSpin->setValue(
+        QSettings().value("stickergen_seed").toULongLong());
+
     // ── 限频倒计时 ──
     m_countdownTimer = new QTimer(this);
     m_countdownTimer->setInterval(1000);
@@ -252,6 +260,10 @@ void StickerGenPage::onCreate(const QVariantMap&, const QVariantMap&)
 
 void StickerGenPage::onStop()
 {
+    // ── 保存「生成表情」提示文本 + 随机种子（键名见下，onCreate 恢复）──
+    QSettings().setValue("stickergen_prompt", m_promptInput->text());
+    QSettings().setValue("stickergen_seed", m_seedSpin->value());
+
     if (m_reply) {
         auto* reply = m_reply;
         m_reply = nullptr;

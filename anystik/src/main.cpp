@@ -406,11 +406,11 @@ int main(int argc, char* argv[]) {
 
     pageManager->registerPage("stikergen", []() -> Page* {
         return new StickerGenPage();
-    }, {CachePolicy::Permanent, LaunchMode::SingleInstance});
+    }, {CachePolicy::Transient, LaunchMode::Standard});
 
     pageManager->registerPage("onlinepacks", []() -> Page* {
         return new OnlinePacksPage();
-    }, {CachePolicy::Permanent, LaunchMode::SingleInstance});
+    }, {CachePolicy::Transient, LaunchMode::Standard});
 
     // ── Window ──
     QskWindow window;

@@ -1,5 +1,6 @@
 #include "onlinepackspage.h"
 #include "compatcore34.h"
+#include <QSettings>
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
@@ -43,15 +44,15 @@ void OnlinePacksPage::onCreate(const QVariantMap&, const QVariantMap&)
     auto* siteLabel = new QskTextLabel(tr("仅预览站点"), siteRow);
     siteLabel->setPreferredWidth(120);
 
-    auto* siteCombo = new QskComboBox(siteRow);
-    siteCombo->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
-    siteCombo->addOption(QskLabelData(tr("去斗图 (qudoutu.com)")));
-    siteCombo->addOption(QskLabelData(tr("QQ表情网 (qqbiaoqing.com)")));
-    siteCombo->addOption(QskLabelData("sc.chinaz.com"));
-    siteCombo->addOption(QskLabelData("616pic.com"));
-    siteCombo->addOption(QskLabelData("aigei.com"));
-    siteCombo->addOption(QskLabelData(tr("Koishi QFace 预览")));
-    siteCombo->addOption(QskLabelData("blobs.gg"));
+    m_siteCombo = new QskComboBox(siteRow);
+    m_siteCombo->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
+    m_siteCombo->addOption(QskLabelData(tr("去斗图 (qudoutu.com)")));
+    m_siteCombo->addOption(QskLabelData(tr("QQ表情网 (qqbiaoqing.com)")));
+    m_siteCombo->addOption(QskLabelData("sc.chinaz.com"));
+    m_siteCombo->addOption(QskLabelData("616pic.com"));
+    m_siteCombo->addOption(QskLabelData("aigei.com"));
+    m_siteCombo->addOption(QskLabelData(tr("Koishi QFace 预览")));
+    m_siteCombo->addOption(QskLabelData("blobs.gg"));
 
     // 站点主页 URL（与 combo 选项索引 0..6 一一对应）
     static const char* kSiteUrls[] = {
@@ -77,8 +78,8 @@ void OnlinePacksPage::onCreate(const QVariantMap&, const QVariantMap&)
     auto* openBtn = new QskPushButton(QString::fromUtf8("🌐"), siteRow);
     openBtn->setPreferredSize(44, 44);
     connect(openBtn, &QskPushButton::clicked, this,
-            [siteCombo]() {
-        const int idx = siteCombo->currentIndex();
+            [this]() {
+        const int idx = m_siteCombo->currentIndex();
         if (idx >= 0 && idx < static_cast<int>(kSiteCount))
             qOpenUrl(QString::fromUtf8(kSiteUrls[idx]));
     });
@@ -90,7 +91,23 @@ void OnlinePacksPage::onCreate(const QVariantMap&, const QVariantMap&)
     m_hint->setFontRole(QskFontRole::Title);
     m_hint->setAlignment(Qt::AlignCenter);
 
+    // ── 恢复「在线表情」当前选中站点 ──
+    // 键: onlinepacks_site（int, 站点索引 0..6, 默认 0），onStop 保存。
+    // combo 选项数(7)与站点索引一一对应，越界则回退到 0。
+    const int siteIdx = qBound(0, QSettings().value("onlinepacks_site", 0).toInt(),
+                               static_cast<int>(kSiteCount) - 1);
+    m_siteCombo->setCurrentIndex(siteIdx);
+
     layout->addStretch(2);
+}
+
+void OnlinePacksPage::onStop()
+{
+    // ── 保存「在线表情」当前选中站点 ──
+    // 键: onlinepacks_site（int, 站点索引 0..6, 默认 0），onCreate 恢复。
+    if (m_siteCombo)
+        QSettings().setValue("onlinepacks_site", m_siteCombo->currentIndex());
+    Page::onStop();
 }
 
 void OnlinePacksPage::retranslateUi()

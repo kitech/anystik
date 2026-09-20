@@ -158,6 +158,20 @@ void BundledPacksPage::buildBody()
 
     rebuildDownloaded();
     updateTitles();
+
+    // ── 恢复「表情包管理」滚动位置 ──
+    // TODO: 暂未拿到 MyScrollArea 滚动位置的可靠 API；先写 0（回到顶部），后续补充。
+    const double scrollY = QSettings().value("bundledpacks_scroll", 0).toDouble();
+    if (scrollY > 0)
+        m_scroll->scrollToY(scrollY, 0);   // scrollToY 为 MyScrollArea 平滑 API
+}
+
+void BundledPacksPage::onStop()
+{
+    // ── 保存「表情包管理」滚动位置 ──
+    // TODO: 暂未拿到 MyScrollArea 滚动位置的可靠 API；先写 0，后续补充。
+    QSettings().setValue("bundledpacks_scroll", 0);
+    Page::onStop();
 }
 
 int BundledPacksPage::downloadedPackCount() const
