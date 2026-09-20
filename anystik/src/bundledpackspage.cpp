@@ -8,6 +8,7 @@
 #include <QSettings>
 #include <QSet>
 #include <QDebug>
+#include <QTimer>
 #include <QObject>
 #include <QDateTime>
 
@@ -158,19 +159,33 @@ void BundledPacksPage::buildBody()
 
     rebuildDownloaded();
     updateTitles();
+}
 
+void BundledPacksPage::onStart()
+{
+    Page::onStart();
     // ── 恢复「表情包管理」滚动位置 ──
-    // TODO: 暂未拿到 MyScrollArea 滚动位置的可靠 API；先写 0（回到顶部），后续补充。
+    // 构造期布局未 polish（scrollableSize≈0），scrollToY 会把目标钳到 0；
+    // 延迟一拍待页面活动、尺寸定型后再滚动。恢复期间临时关闭信号发射
+    // （避免 scrollPosChanged 触发滚动条/外部监听级联）。
     const double scrollY = QSettings().value("bundledpacks_scroll", 0).toDouble();
-    if (scrollY > 0)
-        m_scroll->scrollToY(scrollY, 0);   // scrollToY 为 MyScrollArea 平滑 API
+    if (scrollY > 0) {
+        QTimer::singleShot(0, this, [this, scrollY]() {
+            if (m_scroll) {
+                const bool prev = m_scroll->blockSignals(true);   // 临时禁发
+                m_scroll->scrollToY(scrollY, 0);                  // duration=0 同步完成
+                m_scroll->blockSignals(prev);                     // 恢复
+            }
+        });
+    }
 }
 
 void BundledPacksPage::onStop()
 {
     // ── 保存「表情包管理」滚动位置 ──
-    // TODO: 暂未拿到 MyScrollArea 滚动位置的可靠 API；先写 0，后续补充。
-    QSettings().setValue("bundledpacks_scroll", 0);
+    // scrollPos() 为 QskScrollBox 公开 API，.y() 即当前纵向滚动偏移（与滚动条值一致）
+    QSettings().setValue("bundledpacks_scroll",
+        m_scroll ? m_scroll->scrollPos().y() : 0.0);
     Page::onStop();
 }
 

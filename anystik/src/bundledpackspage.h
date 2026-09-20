@@ -24,6 +24,7 @@ class BundledPacksPage : public Page
 public:
     BundledPacksPage(QQuickItem* parent = nullptr);
     Q_INVOKABLE void retranslateUi() override;
+    void onStart() override;
     void onStop() override;
 
 private:
