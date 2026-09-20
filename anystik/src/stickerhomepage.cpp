@@ -9,6 +9,7 @@
 #include "dialogpopup.h"
 #include "toastpopup.h"
 #include "pushstatusbar.h"
+#include "phonesmsstatusbar.h"
 #include "settings_trace.h"
 #include "androidutils.h"
 #include "pagemanager.h"
@@ -228,6 +229,9 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
 
     // ── Push 连接状态（Android 可见，桌面包视情况自隐藏）──
     new PushStatusBar(layout);
+
+    // ── 电话/短信状态栏（Android：计数 + 列表浮动框，桌面自隐藏）──
+    new PhoneSmsStatusBar(layout);
 
     // ── 搜索框 + 当前贴纸计数（同一行左右分块）──
     auto* searchRow = new QskLinearBox(Qt::Horizontal, layout);

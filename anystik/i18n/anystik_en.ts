@@ -1668,4 +1668,55 @@ Files will not be deleted.</translation>
         <translation>Copy failed</translation>
     </message>
 </context>
+<context>
+    <name>PhoneSmsStatusBar</name>
+    <message>
+        <source>电话 %1 · 短信 %2</source>
+        <translation>Calls %1 · SMS %2</translation>
+    </message>
+    <message>
+        <source>列表</source>
+        <translation>List</translation>
+    </message>
+    <message>
+        <source>电话</source>
+        <translation>Calls</translation>
+    </message>
+    <message>
+        <source>短信</source>
+        <translation>SMS</translation>
+    </message>
+    <message>
+        <source>关闭</source>
+        <translation>Close</translation>
+    </message>
+    <message>
+        <source>来电</source>
+        <translation>Incoming</translation>
+    </message>
+    <message>
+        <source>通话</source>
+        <translation>In call</translation>
+    </message>
+    <message>
+        <source>挂断</source>
+        <translation>Ended</translation>
+    </message>
+    <message>
+        <source>未知</source>
+        <translation>Unknown</translation>
+    </message>
+    <message>
+        <source>电话事件：%1 (%2)</source>
+        <translation>Phone event: %1 (%2)</translation>
+    </message>
+    <message>
+        <source>新短信：%1</source>
+        <translation>New SMS: %1</translation>
+    </message>
+    <message>
+        <source>暂无记录</source>
+        <translation>No records</translation>
+    </message>
+</context>
 </TS>

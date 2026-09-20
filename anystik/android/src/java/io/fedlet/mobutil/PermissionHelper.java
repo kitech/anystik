@@ -2,6 +2,7 @@ package io.fedlet.mobutil;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -17,6 +18,7 @@ public class PermissionHelper {
     private static final int REQ_PHONE_CALL = 9003;
     private static final int REQ_DOCUMENT_TREE = 9004;
     private static final int REQ_WRITE_STORAGE = 9005;
+    private static final int REQ_CALL_SMS = 9006;
 
     public static boolean hasNotificationPermission(Activity activity) {
         if (Build.VERSION.SDK_INT < 33)
@@ -149,6 +151,33 @@ public class PermissionHelper {
     public static boolean hasReadPhoneStatePermission(Activity activity) {
         return ContextCompat.checkSelfPermission(activity,
             Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    public static boolean hasSmsReceivePermission(Activity activity) {
+        return ContextCompat.checkSelfPermission(activity,
+            Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    // auto=true（启动自动请求）：弹过一次就不再自动弹（SharedPreferences 防重）；
+    // auto=false（点「列表」按钮触发）：强制再请求（系统已永久拒绝则不弹窗）。
+    public static void requestCallSmsPermission(Activity activity, boolean auto) {
+        if (hasReadPhoneStatePermission(activity) && hasSmsReceivePermission(activity))
+            return;
+        String prefsName = "anystik_prefs";
+        if (auto && activity.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+                .getBoolean("permCallSmsAsked", false))
+            return;
+        java.util.List<String> perms = new java.util.ArrayList<>();
+        if (!hasReadPhoneStatePermission(activity))
+            perms.add(Manifest.permission.READ_PHONE_STATE);
+        if (!hasSmsReceivePermission(activity))
+            perms.add(Manifest.permission.RECEIVE_SMS);
+        if (perms.isEmpty())
+            return;
+        activity.getSharedPreferences(prefsName, Context.MODE_PRIVATE).edit()
+            .putBoolean("permCallSmsAsked", true).apply();
+        ActivityCompat.requestPermissions(activity,
+            perms.toArray(new String[0]), REQ_CALL_SMS);
     }
 
     public static void requestPhoneCallPermission(Activity activity) {

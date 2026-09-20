@@ -58,6 +58,8 @@ qt_add_executable(anystik
     src/pushstatusbar.cpp
     src/phonemonitor.h
     src/phonemonitor.cpp
+    src/phonesmsstatusbar.h
+    src/phonesmsstatusbar.cpp
     src/stickerstore.h
     src/stickerstore.cpp
     src/eifreader.h

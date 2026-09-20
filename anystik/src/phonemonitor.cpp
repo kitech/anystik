@@ -10,6 +10,7 @@
 #include <QSettings>
 
 static PhoneMonitor* s_instance = nullptr;
+static const int MaxRecords = 200;
 
 static QString jstringToQString(JNIEnv* env, jstring js)
 {
@@ -20,6 +21,28 @@ static QString jstringToQString(JNIEnv* env, jstring js)
     return s;
 }
 
+void PhoneMonitor::addCallEvent(const QString& state, const QString& number)
+{
+    PhoneCallRecord rec{ state, number, QDateTime::currentMSecsSinceEpoch() };
+    m_calls.append(rec);
+    while (m_calls.size() > MaxRecords)
+        m_calls.removeFirst();
+    if (state == "RINGING")
+        emit incomingCall(number);
+    emit countersChanged();
+    emit callRecorded();
+}
+
+void PhoneMonitor::addSmsEvent(const QString& sender, const QString& body)
+{
+    SmsRecord rec{ sender, body, QDateTime::currentMSecsSinceEpoch() };
+    m_sms.append(rec);
+    while (m_sms.size() > MaxRecords)
+        m_sms.removeFirst();
+    emit countersChanged();
+    emit smsRecorded();
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_io_fedlet_mobutil_PhoneStateReceiver_onCallStateChangedNative(
     JNIEnv* env, jobject /*thiz*/, jstring jState, jstring jPhoneNumber)
@@ -28,11 +51,24 @@ Java_io_fedlet_mobutil_PhoneStateReceiver_onCallStateChangedNative(
     QString number = jstringToQString(env, jPhoneNumber);
     qDebug() << "[PhoneMonitor] call state:" << state << "number:" << number;
 
-    if (state == "RINGING" && s_instance) {
-        QMetaObject::invokeMethod(s_instance, [number]() {
-            emit s_instance->incomingCall(number);
-        }, Qt::QueuedConnection);
-    }
+    QMetaObject::invokeMethod(s_instance, [state, number]() {
+        if (!s_instance) return;
+        s_instance->addCallEvent(state, number);
+    }, Qt::QueuedConnection);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_io_fedlet_mobutil_SmsReceiver_onSmsReceivedNative(
+    JNIEnv* env, jobject /*thiz*/, jstring jSender, jstring jBody)
+{
+    QString sender = jstringToQString(env, jSender);
+    QString body = jstringToQString(env, jBody);
+    qDebug() << "[PhoneMonitor] sms from:" << sender;
+
+    QMetaObject::invokeMethod(s_instance, [sender, body]() {
+        if (!s_instance) return;
+        s_instance->addSmsEvent(sender, body);
+    }, Qt::QueuedConnection);
 }
 
 PhoneMonitor* PhoneMonitor::instance()
@@ -40,9 +76,26 @@ PhoneMonitor* PhoneMonitor::instance()
     return s_instance;
 }
 
+int PhoneMonitor::callCount() const { return m_calls.size(); }
+int PhoneMonitor::smsCount() const { return m_sms.size(); }
+const QList<PhoneCallRecord>& PhoneMonitor::callRecords() const { return m_calls; }
+const QList<SmsRecord>& PhoneMonitor::smsRecords() const { return m_sms; }
+
 int PhoneMonitor::answerMode()
 {
     return QSettings().value("phoneAnswer", 0).toInt();
+}
+
+void PhoneMonitor::requestPermissions(bool force)
+{
+    QNativeInterface::QAndroidApplication::runOnAndroidMainThread([force]() {
+        auto ctx = QNativeInterface::QAndroidApplication::context();
+        QJniObject::callStaticMethod<void>(
+            "io/fedlet/mobutil/PermissionHelper",
+            "requestCallSmsPermission",
+            "(Landroid/app/Activity;Z)V",
+            ctx.object(), force);
+    });
 }
 
 void PhoneMonitor::setAnswerMode(int mode)
@@ -57,21 +110,6 @@ void PhoneMonitor::setAnswerMode(int mode)
             "setPhoneAnswerMode",
             "(Landroid/content/Context;I)V",
             ctx.object(), mode);
-
-        // Dynamic register/unregister receiver
-        if (mode != 0) {
-            QJniObject::callStaticMethod<void>(
-                "io/fedlet/mobutil/PhoneStateReceiver",
-                "registerReceiver",
-                "(Landroid/content/Context;)V",
-                ctx.object());
-        } else {
-            QJniObject::callStaticMethod<void>(
-                "io/fedlet/mobutil/PhoneStateReceiver",
-                "unregisterReceiver",
-                "(Landroid/content/Context;)V",
-                ctx.object());
-        }
     });
 }
 
@@ -80,9 +118,6 @@ void PhoneMonitor::start()
     if (s_instance) return;
     s_instance = new PhoneMonitor();
 
-    int mode = answerMode();
-    if (mode == 0) return;
-
     QNativeInterface::QAndroidApplication::runOnAndroidMainThread([]() {
         auto ctx = QNativeInterface::QAndroidApplication::context();
         QJniObject::callStaticMethod<void>(
@@ -90,6 +125,12 @@ void PhoneMonitor::start()
             "registerReceiver",
             "(Landroid/content/Context;)V",
             ctx.object());
+        QJniObject::callStaticMethod<void>(
+            "io/fedlet/mobutil/SmsReceiver",
+            "registerReceiver",
+            "(Landroid/content/Context;)V",
+            ctx.object());
+        requestPermissions(false);   // 启动自动请求（防重，见 Java）
         qDebug() << "[PhoneMonitor] started (Android)";
     });
 }
@@ -102,6 +143,11 @@ void PhoneMonitor::stop()
         auto ctx = QNativeInterface::QAndroidApplication::context();
         QJniObject::callStaticMethod<void>(
             "io/fedlet/mobutil/PhoneStateReceiver",
+            "unregisterReceiver",
+            "(Landroid/content/Context;)V",
+            ctx.object());
+        QJniObject::callStaticMethod<void>(
+            "io/fedlet/mobutil/SmsReceiver",
             "unregisterReceiver",
             "(Landroid/content/Context;)V",
             ctx.object());
@@ -119,5 +165,12 @@ int PhoneMonitor::answerMode() { return 0; }
 void PhoneMonitor::setAnswerMode(int) {}
 void PhoneMonitor::start() {}
 void PhoneMonitor::stop() {}
+void PhoneMonitor::requestPermissions(bool) {}
+void PhoneMonitor::addCallEvent(const QString&, const QString&) {}
+void PhoneMonitor::addSmsEvent(const QString&, const QString&) {}
+int PhoneMonitor::callCount() const { return 0; }
+int PhoneMonitor::smsCount() const { return 0; }
+const QList<PhoneCallRecord>& PhoneMonitor::callRecords() const { static QList<PhoneCallRecord> e; return e; }
+const QList<SmsRecord>& PhoneMonitor::smsRecords() const { static QList<SmsRecord> e; return e; }
 
 #endif

@@ -1668,4 +1668,55 @@
         <translation>复制失败</translation>
     </message>
 </context>
+<context>
+    <name>PhoneSmsStatusBar</name>
+    <message>
+        <source>电话 %1 · 短信 %2</source>
+        <translation>电话 %1 · 短信 %2</translation>
+    </message>
+    <message>
+        <source>列表</source>
+        <translation>列表</translation>
+    </message>
+    <message>
+        <source>电话</source>
+        <translation>电话</translation>
+    </message>
+    <message>
+        <source>短信</source>
+        <translation>短信</translation>
+    </message>
+    <message>
+        <source>关闭</source>
+        <translation>关闭</translation>
+    </message>
+    <message>
+        <source>来电</source>
+        <translation>来电</translation>
+    </message>
+    <message>
+        <source>通话</source>
+        <translation>通话</translation>
+    </message>
+    <message>
+        <source>挂断</source>
+        <translation>挂断</translation>
+    </message>
+    <message>
+        <source>未知</source>
+        <translation>未知</translation>
+    </message>
+    <message>
+        <source>电话事件：%1 (%2)</source>
+        <translation>电话事件：%1 (%2)</translation>
+    </message>
+    <message>
+        <source>新短信：%1</source>
+        <translation>新短信：%1</translation>
+    </message>
+    <message>
+        <source>暂无记录</source>
+        <translation>暂无记录</translation>
+    </message>
+</context>
 </TS>

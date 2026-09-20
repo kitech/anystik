@@ -19,6 +19,8 @@ public class PhoneStateReceiver extends BroadcastReceiver {
     private static final String KEY_PHONE_ANSWER = "phoneAnswer";
     private static final int NOTIF_ID = 2001;
 
+    private static String s_lastCallNumber = "";   // 最近来电号码，供 OFFHOOK/IDLE 复用
+
     private static native void onCallStateChangedNative(String state, String phoneNumber);
 
     @Override
@@ -43,8 +45,13 @@ public class PhoneStateReceiver extends BroadcastReceiver {
         String state = intent.getStringExtra(TelephonyManager.EXTRA_STATE);
         if (state == null) return;
 
+        // 每次电话状态变化都回传原生层统计（不依赖接听开关）
+        String number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER);
+        if (number != null && !number.isEmpty())
+            s_lastCallNumber = number;   // 仅 RINGING 有号码时刷新
+        onCallStateChangedNative(state, number != null ? number : s_lastCallNumber);
+
         if (TelephonyManager.EXTRA_STATE_RINGING.equals(state)) {
-            String number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER);
             SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             int mode = prefs.getInt(KEY_PHONE_ANSWER, 0);
 
