@@ -74,6 +74,10 @@ qt_add_executable(anystik
     src/imagetmpuploader.cpp
     src/imagesearchpopup.h
     src/imagesearchpopup.cpp
+    src/imagesearchclient.h
+    src/imagesearchclient.cpp
+    src/searchresultgrid.h
+    src/searchresultgrid.cpp
     src/stickergenpage.h
     src/stickergenpage.cpp
     src/imageaiutil.h

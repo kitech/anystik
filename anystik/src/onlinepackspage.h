@@ -5,9 +5,18 @@
 
 class QskTextLabel;
 class QskComboBox;
+class QskTextField;
+class QskPushButton;
+class SearchResultGrid;
+class ImageSearchClient;
+class RemoteImagePreview;
 
-// 在线表情占位页：入口为贴纸主页底部导航「在线表情」，
-// 当前仅有标题与「功能开发中」提示，后续在此填充在线表情包浏览/下载逻辑。
+// 在线表情页：
+//  - 第一行 combo：仅预览站点(0..6) + 搜索引擎 Google图片(7)/Bing图片(8)/Yandex图片(9)
+//    ；🌐 打开所选：站点→主页，搜索引擎→带关键词的图片搜索页
+//  - 第二行：关键词输入（默认/持久化「斗图表情最新最热」）+ 搜索按钮
+//    ；Google 反爬强、无法应用内解析 → 浏览器打开；Bing/Yandex → 应用内后台
+//    搜索（隐藏 GET + 解析原图 URL），结果网格展示，点击=页内预览（不导入）
 class OnlinePacksPage : public Page
 {
     Q_OBJECT
@@ -22,11 +31,17 @@ protected:
     void onStop() override;
 
 private:
+    void doSearch();
+    void openCurrentInBrowser();
+
     QskTextLabel* m_title = nullptr;
-    QskTextLabel* m_hint = nullptr;
-    // 当前选中的站点 combo（在线表情页），onStop 保存、onCreate 恢复，键:
-    // onlinepacks_site（int, 站点索引 0..6，默认 0）
     QskComboBox* m_siteCombo = nullptr;
+    QskTextField* m_keywordEdit = nullptr;
+    QskPushButton* m_searchBtn = nullptr;
+    QskTextLabel* m_statusLabel = nullptr;
+    SearchResultGrid* m_resultGrid = nullptr;
+    ImageSearchClient* m_searchClient = nullptr;
+    RemoteImagePreview* m_preview = nullptr;
 };
 
 #endif // ONLINE_PACKS_PAGE_H
