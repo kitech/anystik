@@ -43,6 +43,7 @@ private:
     void onReplyFinished();
     void updateRateLimitBar();
     void openHistoryMenu(const QPointF& scenePos);
+    void openExamplesMenu(const QPointF& scenePos);
     void showPreviewMenu(const QPointF& scenePos);
     void importToStore();
     void copyResult();
@@ -55,6 +56,7 @@ private:
     QskComboBox* m_engineCombo = nullptr;
     QskTextLabel* m_engineLabel = nullptr;
     QskTextField* m_promptInput = nullptr;
+    QskPushButton* m_examplesBtn = nullptr;
     QskPushButton* m_historyBtn = nullptr;
     QskTextLabel* m_seedLabel = nullptr;
     QskSpinBox* m_seedSpin = nullptr;

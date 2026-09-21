@@ -43,7 +43,27 @@ namespace {
 
 const int kRateLimitSecs = 15;   // Pollinations 匿名层：1 次 / 15s
 const int kHistoryMax = 20;
+const int kExampleMaxShown = 22; // 示例菜单项正文截取长度
 const int kImageSize = 512;      // 生成尺寸（宽高）
+
+// 文生图示例提示词（网上搜集，混合表情包/贴纸向与通用艺术向）
+const QStringList kExamples = {
+    QStringLiteral("一只戴墨镜的沙雕熊猫贴纸，简约涂鸦风格，白色背景"),
+    QStringLiteral("一只刺猬穿着充气服走在人群中，周围的人都离它很远，衣服上写着“社恐模式：请勿靠近，内有恶犬”"),
+    QStringLiteral("黄金时刻，一只巨大的半透明蓝鲸在洁白蓬松的云海中游动，鲸鱼身体由海水构成，阳光穿透折射出彩虹"),
+    QStringLiteral("微型立体场景，运用移轴摄影技法，呈现Q版孙悟空三打白骨精场景"),
+    QStringLiteral("一只戴黑框眼镜的猫坐在桌子上的可爱3D渲染，柔和粉彩配色，方形构图"),
+    QStringLiteral("tiny psychedelic lion toy, standing character, soft smooth lighting, soft pastel colors, 3d blender render, square image"),
+    QStringLiteral("Funko pop superman figurine, made of plastic, product studio shot, on a white background, diffused lighting, centered"),
+    QStringLiteral("a red bird drinking water from a lake, children's book painting"),
+    QStringLiteral("cascading 3D waterfall of vibrant candies flowing down the canvas, with gummy worms wiggling out into the real space"),
+    QStringLiteral("gradient blob abstract background with bokeh, soft focus"),
+    QStringLiteral("cute 3D Pop Mart style blind box character, C4D render, soft studio lighting, pastel colors, plain matte background"),
+    QStringLiteral("一只柴犬穿唐装拜年，红色背景，金色烟花，手绘表情包风格"),
+    QStringLiteral("复古治愈风插画，一只狐狸坐在咖啡馆窗边喝抹茶拿铁，黄昏光线"),
+    QStringLiteral("4K贴纸页，9个不同夸张表情的Q版Chibi角色贴纸，3×3网格，白色背景，透明间隙"),
+    QStringLiteral("light rays shining through clouds in bright shades of pink and orange, ethereal"),
+};
 
 QString engineUrl()
 {
@@ -138,6 +158,13 @@ void StickerGenPage::onCreate(const QVariantMap&, const QVariantMap&)
     // ── 行1：历史 / 生成（等宽撑满）──
     auto* actionRow = new QskLinearBox(Qt::Horizontal, layout);
     actionRow->setSpacing(10);
+
+    m_examplesBtn = new QskPushButton(tr("示例"), actionRow);
+    m_examplesBtn->setBoxShapeHint(QskPushButton::Panel,
+        QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+    m_examplesBtn->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
+    connect(m_examplesBtn, &QskPushButton::clicked, this,
+            [this]() { openExamplesMenu(QPointF()); });
 
     m_historyBtn = new QskPushButton(tr("历史"), actionRow);
     m_historyBtn->setBoxShapeHint(QskPushButton::Panel,
@@ -287,6 +314,7 @@ void StickerGenPage::retranslateUi()
     m_engineLabel->setText(tr("生成器"));
     m_seedLabel->setText(tr("随机种子"));
     m_styleCheck->setText(tr("贴纸风格"));
+    m_examplesBtn->setText(tr("示例"));
     m_historyBtn->setText(tr("历史"));
     m_saveBtn->setText(tr("保存到表情包"));
     m_genBtn->setText(m_reply ? tr("生成中…") : tr("生成"));
@@ -509,6 +537,66 @@ void StickerGenPage::openHistoryMenu(const QPointF&)
                     m_promptInput->setText(m_history.at(index));
                     m_seedSpin->setValue(m_seedHistory.at(index));
                     showToast(tr("已填入历史"));
+                }
+                menu->close();
+            });
+
+    menu->open();
+}
+
+void StickerGenPage::openExamplesMenu(const QPointF&)
+{
+    if (kExamples.isEmpty()) {
+        showToast(tr("暂无示例"));
+        return;
+    }
+
+    auto* menu = new QskMenu(this);
+    menu->setModal(true);
+    menu->setPopupFlag(QskPopup::DeleteOnClose, true);
+
+    QString fallbackW;
+    for (const QString& entry : kExamples) {
+        QString body = entry;
+        const bool cut = body.size() > kExampleMaxShown;
+        if (cut)
+            body = body.left(kExampleMaxShown) + QStringLiteral("…");
+        const QString label = QStringLiteral("[%1] %2")
+            .arg(entry.size()).arg(body);
+        menu->addOption(QskLabelData(label));
+        if (fallbackW.size() < label.size())
+            fallbackW = label;
+    }
+
+    // 定位：示例按钮场景位置；越界翻转钳制同主菜单
+    QPointF origin;
+    if (m_examplesBtn && m_examplesBtn->window()) {
+        const QPointF center(
+            m_examplesBtn->x() + m_examplesBtn->width() / 2,
+            m_examplesBtn->y() + m_examplesBtn->height() / 2);
+        origin = m_examplesBtn->mapToScene(center);
+    }
+    {
+        const QFontMetricsF fm(menu->effectiveFont(QskMenu::Text));
+        const qreal pad = menu->paddingHint(QskMenu::Segment).left()
+                        + menu->paddingHint(QskMenu::Segment).right();
+        const qreal minW = qskHorizontalAdvance(fm, fallbackW) + pad + 24;
+        menu->setStrutSizeHint(QskMenu::Panel, QSizeF(minW, 0));
+    }
+    if (origin.isNull()) {
+        origin = m_examplesBtn->mapToScene(QPointF(0, 0));
+    }
+    menu->setOrigin(origin);
+
+    auto* overlay = new MenuOverlay(menu);
+    connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
+    connect(menu, &QskPopup::closed, overlay, &QObject::deleteLater);
+
+    connect(menu, &QskMenu::triggered, this,
+            [this, menu](int index) {
+                if (index >= 0 && index < kExamples.size()) {
+                    m_promptInput->setText(kExamples.at(index));
+                    showToast(tr("已填入示例"));
                 }
                 menu->close();
             });

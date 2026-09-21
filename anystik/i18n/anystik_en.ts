@@ -535,12 +535,12 @@ Please check that ntfy is running in the background</translation>
     <name>OnlinePacksPage</name>
     <message>
         <location filename="../src/onlinepackspage.cpp" line="+62"/>
-        <location line="+182"/>
+        <location line="+186"/>
         <source>在线表情</source>
         <translation>Online Stickers</translation>
     </message>
     <message>
-        <location line="-167"/>
+        <location line="-171"/>
         <source>仅预览站点</source>
         <translation>Preview Sites</translation>
     </message>
@@ -581,12 +581,12 @@ Please check that ntfy is running in the background</translation>
     </message>
     <message>
         <location line="+12"/>
-        <location line="+131"/>
+        <location line="+135"/>
         <source>搜索</source>
         <translation>Search</translation>
     </message>
     <message>
-        <location line="-125"/>
+        <location line="-129"/>
         <source>输入关键词点搜索：Bing/Yandex 应用内展示，Google 打开浏览器</source>
         <translation>Enter a keyword and search: Bing/Yandex show results in-app, Google opens the browser</translation>
     </message>
@@ -596,7 +596,7 @@ Please check that ntfy is running in the background</translation>
         <translation>%1 results</translation>
     </message>
     <message>
-        <location line="+34"/>
+        <location line="+38"/>
         <source>请输入关键词</source>
         <translation>Please enter a keyword</translation>
     </message>
@@ -758,7 +758,7 @@ Please check that ntfy is running in the background</translation>
 <context>
     <name>RemoteImagePreview</name>
     <message>
-        <location filename="../src/searchresultgrid.cpp" line="+426"/>
+        <location filename="../src/searchresultgrid.cpp" line="+428"/>
         <source>预览</source>
         <translation>Preview</translation>
     </message>
@@ -1202,25 +1202,25 @@ Please check that ntfy is running in the background</translation>
 <context>
     <name>StickerGenPage</name>
     <message>
-        <location filename="../src/stickergenpage.cpp" line="+97"/>
-        <location line="+189"/>
+        <location filename="../src/stickergenpage.cpp" line="+117"/>
+        <location line="+196"/>
         <source>生成表情</source>
         <translation>Generate Sticker</translation>
     </message>
     <message>
-        <location line="-165"/>
-        <location line="+166"/>
+        <location line="-172"/>
+        <location line="+173"/>
         <source>生成器</source>
         <translation>Generator</translation>
     </message>
     <message>
-        <location line="-152"/>
-        <location line="+159"/>
+        <location line="-159"/>
+        <location line="+167"/>
         <source>例如：一只戴墨镜的沙雕熊猫贴纸</source>
         <translation>e.g. A sticker of a cool panda wearing sunglasses</translation>
     </message>
     <message>
-        <location line="-133"/>
+        <location line="-134"/>
         <location line="+127"/>
         <source>随机种子</source>
         <translation>Random Seed</translation>
@@ -1233,20 +1233,20 @@ Please check that ntfy is running in the background</translation>
     </message>
     <message>
         <location line="-147"/>
-        <location line="+148"/>
+        <location line="+149"/>
         <source>历史</source>
         <translation>History</translation>
     </message>
     <message>
-        <location line="-116"/>
-        <location line="+117"/>
+        <location line="-117"/>
+        <location line="+118"/>
         <source>保存到表情包</source>
         <translation>Save to Sticker Pack</translation>
     </message>
     <message>
-        <location line="-142"/>
+        <location line="-143"/>
         <location line="+126"/>
-        <location line="+17"/>
+        <location line="+18"/>
         <location line="+133"/>
         <location line="+30"/>
         <source>生成</source>
@@ -1272,8 +1272,8 @@ Please check that ntfy is running in the background</translation>
         <translation>Please enter a prompt</translation>
     </message>
     <message>
-        <location line="-88"/>
-        <location line="+205"/>
+        <location line="-89"/>
+        <location line="+206"/>
         <source>大小 -- · 用时 -- · 下次 --</source>
         <translation>Size -- · Time -- · Next --</translation>
     </message>
@@ -1323,7 +1323,13 @@ Please check that ntfy is running in the background</translation>
         <translation>Size %1 KB · saved</translation>
     </message>
     <message>
-        <location line="-10"/>
+        <location line="-323"/>
+        <location line="+155"/>
+        <source>示例</source>
+        <translation type="unfinished">Examples</translation>
+    </message>
+    <message>
+        <location line="+158"/>
         <source>大小 -- · 用时 %1 s · 下次 %2 s</source>
         <translation>Size -- · elapsed %1 s · next %2 s</translation>
     </message>
@@ -1336,6 +1342,16 @@ Please check that ntfy is running in the background</translation>
         <location line="+47"/>
         <source>已填入历史</source>
         <translation>Filled from history</translation>
+    </message>
+    <message>
+        <location line="+11"/>
+        <source>暂无示例</source>
+        <translation type="unfinished">No example prompts</translation>
+    </message>
+    <message>
+        <location line="+49"/>
+        <source>已填入示例</source>
+        <translation type="unfinished">Filled</translation>
     </message>
     <message>
         <location line="+18"/>

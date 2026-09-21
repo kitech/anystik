@@ -535,12 +535,12 @@
     <name>OnlinePacksPage</name>
     <message>
         <location filename="../src/onlinepackspage.cpp" line="+62"/>
-        <location line="+182"/>
+        <location line="+186"/>
         <source>在线表情</source>
         <translation>線上表情</translation>
     </message>
     <message>
-        <location line="-167"/>
+        <location line="-171"/>
         <source>仅预览站点</source>
         <translation>僅預覽站台</translation>
     </message>
@@ -581,12 +581,12 @@
     </message>
     <message>
         <location line="+12"/>
-        <location line="+131"/>
+        <location line="+135"/>
         <source>搜索</source>
         <translation>搜尋</translation>
     </message>
     <message>
-        <location line="-125"/>
+        <location line="-129"/>
         <source>输入关键词点搜索：Bing/Yandex 应用内展示，Google 打开浏览器</source>
         <translation>輸入關鍵詞後搜尋：Bing/Yandex 於應用內展示，Google 開啟瀏覽器</translation>
     </message>
@@ -596,7 +596,7 @@
         <translation>%1 個結果</translation>
     </message>
     <message>
-        <location line="+34"/>
+        <location line="+38"/>
         <source>请输入关键词</source>
         <translation>請輸入關鍵詞</translation>
     </message>
@@ -758,7 +758,7 @@
 <context>
     <name>RemoteImagePreview</name>
     <message>
-        <location filename="../src/searchresultgrid.cpp" line="+426"/>
+        <location filename="../src/searchresultgrid.cpp" line="+428"/>
         <source>预览</source>
         <translation>預覽</translation>
     </message>
@@ -1202,25 +1202,25 @@
 <context>
     <name>StickerGenPage</name>
     <message>
-        <location filename="../src/stickergenpage.cpp" line="+97"/>
-        <location line="+189"/>
+        <location filename="../src/stickergenpage.cpp" line="+117"/>
+        <location line="+196"/>
         <source>生成表情</source>
         <translation>生成表情</translation>
     </message>
     <message>
-        <location line="-165"/>
-        <location line="+166"/>
+        <location line="-172"/>
+        <location line="+173"/>
         <source>生成器</source>
         <translation>生成器</translation>
     </message>
     <message>
-        <location line="-152"/>
-        <location line="+159"/>
+        <location line="-159"/>
+        <location line="+167"/>
         <source>例如：一只戴墨镜的沙雕熊猫贴纸</source>
         <translation>例如：一隻戴墨鏡的沙雕熊貓貼紙</translation>
     </message>
     <message>
-        <location line="-133"/>
+        <location line="-134"/>
         <location line="+127"/>
         <source>随机种子</source>
         <translation>隨機種子</translation>
@@ -1233,20 +1233,20 @@
     </message>
     <message>
         <location line="-147"/>
-        <location line="+148"/>
+        <location line="+149"/>
         <source>历史</source>
         <translation>歷史</translation>
     </message>
     <message>
-        <location line="-116"/>
-        <location line="+117"/>
+        <location line="-117"/>
+        <location line="+118"/>
         <source>保存到表情包</source>
         <translation>儲存到表情包</translation>
     </message>
     <message>
-        <location line="-142"/>
+        <location line="-143"/>
         <location line="+126"/>
-        <location line="+17"/>
+        <location line="+18"/>
         <location line="+133"/>
         <location line="+30"/>
         <source>生成</source>
@@ -1272,8 +1272,8 @@
         <translation>請輸入提示詞</translation>
     </message>
     <message>
-        <location line="-88"/>
-        <location line="+205"/>
+        <location line="-89"/>
+        <location line="+206"/>
         <source>大小 -- · 用时 -- · 下次 --</source>
         <translation>大小 -- · 用時 -- · 下次 --</translation>
     </message>
@@ -1323,7 +1323,13 @@
         <translation>大小 %1 KB · 已存</translation>
     </message>
     <message>
-        <location line="-10"/>
+        <location line="-323"/>
+        <location line="+155"/>
+        <source>示例</source>
+        <translation type="unfinished">示例</translation>
+    </message>
+    <message>
+        <location line="+158"/>
         <source>大小 -- · 用时 %1 s · 下次 %2 s</source>
         <translation>大小 -- · 用時 %1 s · 下次 %2 s</translation>
     </message>
@@ -1336,6 +1342,16 @@
         <location line="+47"/>
         <source>已填入历史</source>
         <translation>已填入歷史</translation>
+    </message>
+    <message>
+        <location line="+11"/>
+        <source>暂无示例</source>
+        <translation type="unfinished">暂无示例</translation>
+    </message>
+    <message>
+        <location line="+49"/>
+        <source>已填入示例</source>
+        <translation type="unfinished">已填入示例</translation>
     </message>
     <message>
         <location line="+18"/>
