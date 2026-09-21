@@ -18,6 +18,7 @@ public:
 
 private:
     void updateStatus();
+    void attachPhoneMonitor();
     void openListsPopup();
     void refreshList();
     QString stateLabel(const QString& state) const;
@@ -25,6 +26,7 @@ private:
     QskTextLabel* m_statusLabel = nullptr;
     QskPushButton* m_listBtn = nullptr;
     PhoneSmsListPopup* m_popup = nullptr;
+    bool m_attached = false;
 };
 
 #endif

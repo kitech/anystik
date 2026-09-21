@@ -34,11 +34,23 @@ public class NetworkMonitor {
 
             @Override
             public void onLost(Network network) {
+                // 立即复核当前活跃网络：若已自愈/回调乱序（如恢复前台瞬间），
+                // 提前取消离线判定，避免误报
+                if (hasValidatedNetwork()) {
+                    if (pendingOffline != null) {
+                        handler.removeCallbacks(pendingOffline);
+                        pendingOffline = null;
+                    }
+                    return;
+                }
                 if (pendingOffline != null) return;
                 pendingOffline = new Runnable() {
                     @Override
                     public void run() {
                         pendingOffline = null;
+                        // 到点重新实测：后台冻结的 delay 任务会随前台恢复一起补跑，
+                        // 此时 WiFi 往往已可用，不得只凭 lastConnected 判离线
+                        if (hasValidatedNetwork()) return;
                         if (lastConnected) {
                             lastConnected = false;
                             lastType = "Unknown";
@@ -107,6 +119,17 @@ public class NetworkMonitor {
             lastType = type;
             onNetworkChanged(connected, type);
         }
+    }
+
+    // 活跃网络是否具备已验证的互联网能力（与 updateStateFromCaps 判定一致）
+    private static boolean hasValidatedNetwork() {
+        if (connectivityManager == null) return false;
+        Network active = connectivityManager.getActiveNetwork();
+        if (active == null) return false;
+        NetworkCapabilities caps = connectivityManager.getNetworkCapabilities(active);
+        return caps != null
+            && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
     }
 
     public static void checkCurrentNetwork(Context ctx) {

@@ -132,28 +132,42 @@ PhoneSmsStatusBar::PhoneSmsStatusBar(QQuickItem* parent)
     setVisible(false);
 
 #ifdef Q_OS_ANDROID
-    if (auto* ph = PhoneMonitor::instance()) {
-        connect(ph, &PhoneMonitor::countersChanged, this,
-            [this]() { updateStatus(); });
-        connect(ph, &PhoneMonitor::callRecorded, this, [this]() {
-            refreshList();
-            if (auto* p = PhoneMonitor::instance()) {
-                const auto& rec = p->callRecords().constLast();
-                ToastPopup::show(this, tr("电话事件：%1 (%2)")
-                    .arg(stateLabel(rec.state), rec.number));
-            }
-        });
-        connect(ph, &PhoneMonitor::smsRecorded, this, [this]() {
-            refreshList();
-            if (auto* p = PhoneMonitor::instance()) {
-                const auto& rec = p->smsRecords().constLast();
-                const QString from = rec.sender.isEmpty()
-                    ? tr("未知") : rec.sender;
-                ToastPopup::show(this, tr("新短信：%1").arg(from));
-            }
-        });
-    }
-    updateStatus();
+    if (PhoneMonitor::instance())
+        attachPhoneMonitor();
+    else
+        // 构造可能先于 PhoneMonitor::start()（main 尾部）执行，实例创建后再补连
+        QTimer::singleShot(0, this, [this]() { attachPhoneMonitor(); });
+#endif
+}
+
+// ── 挂接 PhoneMonitor：实例创建晚于本控件时也要能连上，避免计数永远停在 0 ──
+void PhoneSmsStatusBar::attachPhoneMonitor()
+{
+#ifdef Q_OS_ANDROID
+    auto* ph = PhoneMonitor::instance();
+    if (!ph || m_attached)
+        return;
+    m_attached = true;   // 只连一次（构造函数 + 延迟补连只命中一次）
+    connect(ph, &PhoneMonitor::countersChanged, this,
+        [this]() { updateStatus(); });
+    connect(ph, &PhoneMonitor::callRecorded, this, [this]() {
+        refreshList();
+        if (auto* p = PhoneMonitor::instance()) {
+            const auto& rec = p->callRecords().constLast();
+            ToastPopup::show(this, tr("电话事件：%1 (%2)")
+                .arg(stateLabel(rec.state), rec.number));
+        }
+    });
+    connect(ph, &PhoneMonitor::smsRecorded, this, [this]() {
+        refreshList();
+        if (auto* p = PhoneMonitor::instance()) {
+            const auto& rec = p->smsRecords().constLast();
+            const QString from = rec.sender.isEmpty()
+                ? tr("未知") : rec.sender;
+            ToastPopup::show(this, tr("新短信：%1").arg(from));
+        }
+    });
+    updateStatus();   // 连上后立即按当前计数刷新一次
 #endif
 }
 
