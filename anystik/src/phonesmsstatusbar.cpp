@@ -252,8 +252,10 @@ void PhoneSmsStatusBar::refreshList()
             for (auto it = calls.crbegin(); it != calls.crend(); ++it) {
                 const QString t = QDateTime::fromMSecsSinceEpoch(
                     it->timestamp).toString("HH:mm");
+                const QString num = it->number.isEmpty()
+                    ? tr("未知") : it->number;
                 entries.append(tr("%1 [%2] %3")
-                    .arg(t, stateLabel(it->state), it->number));
+                    .arg(t, stateLabel(it->state), num));
             }
         }
         if (entries.isEmpty())
