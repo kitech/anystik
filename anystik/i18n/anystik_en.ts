@@ -1537,6 +1537,22 @@ Please check that ntfy is running in the background</translation>
         <translation>Copy metadata</translation>
     </message>
     <message>
+        <source>编辑描述简介</source>
+        <translation>Edit description</translation>
+    </message>
+    <message>
+        <source>已保存描述</source>
+        <translation>Description saved</translation>
+    </message>
+    <message>
+        <source>保存描述失败：%1</source>
+        <translation>Failed to save description: %1</translation>
+    </message>
+    <message>
+        <source>%1/%2</source>
+        <translation>%1/%2</translation>
+    </message>
+    <message>
         <location line="+1"/>
         <source>分享</source>
         <translation>Share</translation>

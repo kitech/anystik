@@ -20,6 +20,12 @@
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
 #include <QskTextField.h>
+#include <QskTextInput.h>
+#include <QskFontRole.h>
+#include <QskGraphicLabel.h>
+#include <QskGraphic.h>
+#include <QskBox.h>
+#include <QskGradient.h>
 #include <QskTabBar.h>
 #include <QskTabButton.h>
 #include <QskComboBox.h>
@@ -45,8 +51,226 @@
 #include <QClipboard>
 #include <QSettings>
 #include <QDesktopServices>
+#include <QImageReader>
+#include <QKeyEvent>
 #include <QHoverEvent>
 #include <QSet>
+
+// QskTextInput 构造函数受保护（面向子类）；此子类仅开放构造，供三行描述编辑
+class MultiLineTextInput : public QskTextInput
+{
+public:
+    explicit MultiLineTextInput(QQuickItem* parent = nullptr)
+        : QskTextInput(parent) {}
+};
+
+// 面板不透明度：回读皮肤面板填充色、仅改 alpha（对齐 ImageSearchPopup/SyncProgressPopup）
+void applyDescPanelOpacity(QskBox* panel, qreal opacity)
+{
+    if (!panel) return;
+    QskGradient g = panel->fillGradient();
+    if (!g.isValid()) return;
+    g.setAlpha(qRound(qBound(0.0, opacity, 1.0) * 255.0));
+    panel->setFillGradient(g);
+}
+
+QRectF descParentRect(QQuickItem* parent)
+{
+    if (!parent) return {};
+    if (auto* w = parent->window())
+        return QRectF(QPointF(), w->size());
+    return QRectF(-parent->x(), -parent->y(),
+                  parent->width(), parent->height());
+}
+
+// 编辑描述浮层：QskBox 面板(alpha 0.9, 圆角14) + 固定 2/3 窗口高居中
+class DescEditPopup : public QskPopup
+{
+public:
+    QskLinearBox* m_layout = nullptr;
+    MultiLineTextInput* m_input = nullptr;
+    QskTextLabel* m_count = nullptr;
+    QskTextField* m_threeInput = nullptr;    // 3 行 QskTextField（镜像 stickergen 可见组合）
+    QskTextLabel* m_threeCount = nullptr;
+    QskTextField* m_backupInput = nullptr;   // 备用单行输入（多行文字不可见时用）
+    QskTextLabel* m_backupCount = nullptr;
+
+    explicit DescEditPopup(QQuickItem* parent = nullptr)
+        : QskPopup(parent)
+    {
+        setModal(true);
+        setOverlay(true);
+        setPopupFlag(QskPopup::DeleteOnClose, true);
+        setPolishOnResize(true);
+        setPolishOnParentResize(true);
+
+        auto* panel = new QskBox(this);
+        panel->setBoxShapeHint(QskBox::Panel,
+            QskBoxShapeMetrics(14, Qt::AbsoluteSize));
+        applyDescPanelOpacity(panel, 0.9);   // 面板透明度，对齐项目其它弹窗（窗口级 opacity 会致输入框文本不渲染）
+
+        m_layout = new QskLinearBox(Qt::Vertical, panel);
+        m_layout->setMargins(18);
+        m_layout->setSpacing(10);
+
+        auto* title = new QskTextLabel(tr("编辑描述简介"), m_layout);
+        title->setFontRole(QskFontRole::Title);
+        title->setAlignment(Qt::AlignCenter);
+
+        m_thumb = new QskGraphicLabel(m_layout);
+        m_thumb->setFillMode(QskGraphicLabel::PreserveAspectFit);
+        m_thumb->setPreferredSize(200, 150);   // 对齐当前实际弹窗的缩略图尺寸
+
+        m_meta = new QskTextLabel(m_layout);
+        m_meta->setWrapMode(QskTextOptions::WrapAnywhere);
+        m_meta->setSizePolicy(QskSizePolicy::Expanding,
+                             QskSizePolicy::Constrained);
+
+        m_input = new MultiLineTextInput(m_layout);
+        m_input->setMaxLength(60);
+        m_input->setWrapMode(QskTextOptions::WrapAnywhere);
+        m_input->setFixedHeight(72);           // 对齐当前实际弹窗约 3 行
+
+        // 字数计数跟随输入实时更新（QskTextInput::textChanged 无参）
+        connect(m_input, &QskTextInput::textChanged, this, [this]() {
+            m_count->setText(tr("%1/%2").arg(m_input->text().size()).arg(60));
+        });
+
+        m_count = new QskTextLabel(m_layout);
+        m_count->setAlignment(Qt::AlignRight);
+        m_count->setFontRole(QskFontRole::Caption);
+
+        // 3 行 QskTextField 输入：镜像 stickergen 提示词框（QskTextField+WordWrap+76），
+        // 与备用单行同为已验证可见的渲染路径（原生 QskTextInput 多行不显示，见 AGENTS.md）
+        m_threeInput = new QskTextField(m_layout);
+        m_threeInput->setPlaceholderText(tr("输入描述(最多60字)"));
+        m_threeInput->setMaxLength(60);
+        m_threeInput->setFixedHeight(72);
+        m_threeInput->setWrapMode(QskTextOptions::WordWrap);
+        m_threeInput->setBoxShapeHint(QskTextField::Panel,
+            QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+
+        m_threeCount = new QskTextLabel(m_layout);
+        m_threeCount->setAlignment(Qt::AlignRight);
+        m_threeCount->setFontRole(QskFontRole::Caption);
+        m_threeCount->setText(tr("%1/%2").arg(0).arg(60));
+
+        connect(m_threeInput, &QskTextInput::textChanged, this, [this]() {
+            m_threeCount->setText(
+                tr("%1/%2").arg(m_threeInput->text().size()).arg(60));
+        });
+
+        // 备用单行输入：放在多行输入下方，渲染路径与重命名弹窗 QskTextField 一致
+        m_backupInput = new QskTextField(m_layout);
+        m_backupInput->setPlaceholderText(tr("备用单行输入"));
+        m_backupInput->setMaxLength(60);
+        m_backupInput->setFixedHeight(32);
+        m_backupInput->setBoxShapeHint(QskTextField::Panel,
+            QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+
+        m_backupCount = new QskTextLabel(m_layout);
+        m_backupCount->setAlignment(Qt::AlignRight);
+        m_backupCount->setFontRole(QskFontRole::Caption);
+        m_backupCount->setText(tr("%1/%2").arg(0).arg(60));
+
+        connect(m_backupInput, &QskTextInput::textChanged, this, [this]() {
+            m_backupCount->setText(
+                tr("%1/%2").arg(m_backupInput->text().size()).arg(60));
+        });
+
+        auto* btnBox = new QskLinearBox(Qt::Horizontal, m_layout);
+        btnBox->setSpacing(10);
+        auto* cancelBtn = new QskPushButton(tr("取消"), btnBox);
+        cancelBtn->setBoxShapeHint(QskPushButton::Panel,
+            QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+        connect(cancelBtn, &QskAbstractButton::clicked,
+                this, &QskPopup::close);
+        m_saveBtn = new QskPushButton(tr("确定"), btnBox);
+        m_saveBtn->setBoxShapeHint(QskPushButton::Panel,
+            QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+        m_saveBtn->setSizePolicy(QskSizePolicy::Expanding,
+                                 QskSizePolicy::Preferred);
+
+        // open 后补一次几何布局（对齐 ImageSearchPopup L167 范式）
+        QTimer::singleShot(0, this, [this]() { updateGeometry(); });
+    }
+
+    void setBrief(const StickerBrief& brief)
+    {
+        m_input->setText(brief.description);
+        m_count->setText(tr("%1/%2").arg(brief.description.size()).arg(60));
+
+        QImageReader reader(brief.filePath);
+        reader.setAutoTransform(true);
+        const QImage img = reader.read();
+        if (!img.isNull()) {
+            m_thumb->setGraphic(QskGraphic::fromImage(
+                img.scaled(200, 150, Qt::KeepAspectRatio,
+                           Qt::SmoothTransformation)));
+            m_thumb->setVisible(true);
+        } else {
+            m_thumb->setVisible(false);
+        }
+
+        const StickerMeta meta =
+            StickerStore::instance()->stickerMeta(brief.filePath);
+        m_meta->setText(formatStickerMeta(meta));
+    }
+
+    MultiLineTextInput* input() const { return m_input; }
+    QskTextField* threeInput() const { return m_threeInput; }
+    QskTextField* backupInput() const { return m_backupInput; }
+    QskPushButton* saveButton() const { return m_saveBtn; }
+
+    // 保存取值优先级：3 行 QskTextField → 备用单行 → 旧多行(保留原文兜底)
+    QString validText() const
+    {
+        if (m_threeInput) {
+            const QString three = m_threeInput->text().trimmed();
+            if (!three.isEmpty()) return three;
+        }
+        if (m_backupInput) {
+            const QString backup = m_backupInput->text().trimmed();
+            if (!backup.isEmpty()) return backup;
+        }
+        return m_input ? m_input->text().trimmed() : QString();
+    }
+
+protected:
+    void updateLayout() override
+    {
+        updateGeometry();
+        m_layout->setGeometry(layoutRect());
+    }
+
+private:
+    void updateGeometry()
+    {
+        const auto parentRect = descParentRect(parentItem());
+        if (parentRect.isEmpty()) return;
+
+        const auto hint = m_layout->effectiveSizeHint(
+            Qt::PreferredSize, QSizeF());
+        const qreal maxW = 0.9 * parentRect.width();
+
+        const qreal panelW = qMin(qMax(300.0, hint.width() + 36), maxW);
+        const qreal panelH = parentRect.height() * 2.0 / 3.0;   // 固定占 2/3 窗口高
+
+        QRectF r(0, 0, panelW, panelH);
+        r.moveCenter(parentRect.center());
+        setGeometry(r);
+        for (auto* c : childItems()) {
+            if (auto* box = qobject_cast<QskBox*>(c)) {
+                box->setGeometry(r.translated(-r.topLeft()));
+                break;
+            }
+        }
+    }
+
+    QskGraphicLabel* m_thumb = nullptr;
+    QskTextLabel* m_meta = nullptr;
+    QskPushButton* m_saveBtn = nullptr;
+};
 #include <QUrl>
 
 #ifdef Q_OS_ANDROID
@@ -531,6 +755,7 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
     m_ctxScaleSubIdx = idxScaleSub;
     const int idxPreview = menu->addOption(QskLabelData(tr("预览")));
     const int idxCopyMeta = menu->addOption(QskLabelData(tr("复制元信息")));
+    const int idxEditDesc = menu->addOption(QskLabelData(tr("编辑描述简介")));
     const int idxShare = menu->addOption(QskLabelData(tr("分享")));
     const int idxDelete = menu->addOption(QskLabelData(tr("删除")));
     const int idxSearch = menu->addOption(QskLabelData(tr("搜索相似 ›")));
@@ -566,7 +791,7 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
         const QFontMetricsF fm(menu->effectiveFont(QskMenu::Text));
         const qreal pad = menu->paddingHint(QskMenu::Segment).left()
                         + menu->paddingHint(QskMenu::Segment).right();
-        const qreal minW = qskHorizontalAdvance(fm, QString::fromUtf8("复制元信息"))
+        const qreal minW = qskHorizontalAdvance(fm, QString::fromUtf8("编辑描述简介"))
                          + pad + 10;
         menu->setStrutSizeHint(QskMenu::Panel, QSizeF(minW, 0));
     }
@@ -580,7 +805,7 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
     };
 
     connect(menu, &QskMenu::triggered, this,
-        [this, menu, idxCopy, idxScaleSub, idxPreview, idxCopyMeta, idxShare, idxDelete, idxSearch](int index) {
+        [this, menu, idxCopy, idxScaleSub, idxPreview, idxCopyMeta, idxEditDesc, idxShare, idxDelete, idxSearch](int index) {
         if (index == idxCopy) {
             StickerStore::instance()->touchSticker(m_ctxBrief.id);
             bool ok = StickerStore::instance()->copyStickerToClipboard(m_ctxBrief.filePath);
@@ -597,6 +822,8 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
                 StickerStore::instance()->stickerMeta(m_ctxBrief.filePath);
             QGuiApplication::clipboard()->setText(formatStickerMeta(meta));
             showToast(tr("已复制元信息"));
+        } else if (index == idxEditDesc) {
+            editStickerDescription(m_ctxBrief);
         } else if (index == idxShare) {
             if (!StickerStore::instance()->shareStickerFile(m_ctxBrief.filePath)) {
                 showToast(tr("桌面暂不支持分享"));
@@ -864,6 +1091,15 @@ void StickerHomePage::cancelSubClose()
 
 bool StickerHomePage::eventFilter(QObject* watched, QEvent* event)
 {
+    // 编辑描述输入框：第 4 行前吞回车，强制最多三行
+    if (m_descEditInput && watched == m_descEditInput
+        && event->type() == QEvent::KeyPress) {
+        const auto* key = static_cast<QKeyEvent*>(event);
+        if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
+            && m_descEditInput->text().count(QLatin1Char('\n')) >= 2) {
+            return true;
+        }
+    }
     if (watched == m_ctxMenu) {
         switch (event->type()) {
         case QEvent::HoverMove: {
@@ -1180,6 +1416,41 @@ void StickerHomePage::showRenameDialog(const StickerPackBrief& pack)
     popup->open();
 
     field->setFocus(true);
+}
+
+// 长按菜单「编辑描述简介」：弹窗同时展示图片预览 + 元信息 + 三行/60字描述输入
+void StickerHomePage::editStickerDescription(const StickerBrief& brief)
+{
+    auto* popup = new DescEditPopup(this);
+    popup->setBrief(brief);
+
+    auto* input = popup->input();
+    input->installEventFilter(this);     // eventFilter 在第 4 行前吞回车
+    m_descEditInput = input;             // eventFilter 对照用（close 时置空）
+
+    connect(popup->saveButton(), &QskAbstractButton::clicked, popup,
+        [this, popup, brief]() {
+            const QString text = popup->validText();
+            const bool ok = StickerStore::instance()
+                ->setStickerDescription(brief.id, text);
+            showToast(ok ? tr("已保存描述")
+                         : tr("保存描述失败：%1").arg(brief.id));
+            popup->close();
+        });
+
+    connect(popup, &QskPopup::closed, this, [this]() {
+        m_descEditInput = nullptr;
+    });
+    connect(popup, &QskPopup::closed, popup, &QObject::deleteLater);
+    popup->open();
+
+    // F1：焦点/编辑态延迟到几何与内嵌编辑器 polish 定形之后。过早
+    // setFocus/setEditing 会让内嵌 QQuickTextInput 在过时几何下进入
+    // clip 且不再重绘 → 文本不可见但右下角字数照常变化。
+    QTimer::singleShot(50, input, [input]() {
+        input->setEditing(true);
+        input->setFocus(true);
+    });
 }
 
 void StickerHomePage::removePack(const StickerPackBrief& pack)

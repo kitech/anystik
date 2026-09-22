@@ -47,6 +47,19 @@
 - ✅ 所有输入框统一 `field->setFixedHeight(30)`
 - 同类实例: anystik/src/settingspage.cpp:214/:227/:295/:308/:322（Gotify2 + DAV3）
 
+## QSKinny 原生 QskTextInput 多行文字不显示（易踩坑）
+
+- 症状: `QskTextInput`（原生控件，非 QskTextField 子类）+ `setWrapMode(WrapAnywhere)`
+  + `setFixedHeight(72)` 在弹窗内 → 编辑文字完全不可见，但右下角字数实时更新
+  （内嵌单行 QQuickTextInput"活着但不绘制"）；同弹窗中的单行 QskTextField 一切正常
+- 已排除: 窗口级 setOpacity / 面板 alpha 0.9 / 弹窗手动几何 / 文本颜色
+- 原因: 本地 qskinny 构建无 QskTextArea（master 专有的多行输入控件）；多行只能压在内嵌
+  单行 QQuickTextInput 上，其 wrap/updateClip 渲染路径在本环境不显示（社区同类事故）
+- ✅ 正解: 文本输入一律基于 `QskTextField`（设置页 30px、重命名、stickergen 76px+WordWrap
+  均可见，弹窗内同样已验证可见）
+- 同类实例: anystik/src/stickerhomepage.cpp（DescEditPopup：3 行 QskTextField 主输入 +
+  备用单行框，旧的 QskTextInput 多行保留未删）、anystik/src/stickergenpage.cpp:151
+
 ## QSKinny 弹出层透明无背景（易踩坑）
 
 - QskPopup 本身透明，内容直接挂 popup 根部 = 完全穿透、无背景

@@ -2413,6 +2413,18 @@ bool StickerStore::restoreSticker(const QString& stickerId)
     return ok;
 }
 
+bool StickerStore::setStickerDescription(const QString& stickerId,
+                                         const QString& description)
+{
+    if (!ensureInit()) {
+        return false;
+    }
+    const bool ok = stickerDb().update_sticker_description(
+        stickerId.toUtf8().constData(), description.toUtf8().constData());
+    if (ok) emit dataChanged();
+    return ok;
+}
+
 void StickerStore::touchSticker(const QString& stickerId)
 {
     if (!ensureInit()) {

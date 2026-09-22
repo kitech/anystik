@@ -100,6 +100,9 @@ public:
     bool renamePack(const QString& packId, const QString& newTitle);
     bool deletePack(const QString& packId);
     bool deleteSticker(const QString& stickerId);
+    // 更新贴纸描述（简介）；成功发 dataChanged
+    bool setStickerDescription(const QString& stickerId,
+                               const QString& description);
     void touchSticker(const QString& stickerId);
 
     // 复制图片到剪贴板（Desktop: QClipboard 位图；Android: FileProvider content URI(image/*) + toast）

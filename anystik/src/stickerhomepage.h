@@ -16,6 +16,7 @@ class QskTextLabel;
 class QskPushButton;
 class QskLinearBox;
 class QskMenu;
+class QskTextInput;
 class StickerGridWidget;
 class ImageTmpUploader;
 class ImageSearchPopup;
@@ -59,6 +60,7 @@ private:
     void requestPasteSticker();
     void openChatDir(const QString& path);
     void showRenameDialog(const StickerPackBrief& pack);
+    void editStickerDescription(const StickerBrief& brief);
     void removePack(const StickerPackBrief& pack);
     void openStickerFolder();
 
@@ -110,6 +112,7 @@ private:
     int m_pendingEngine = -1;              // 触发时固定的引擎索引（0/1/2）
     QString m_searchLocalPath;             // 本次以图搜图的本地图片路径
     quint64 m_descReqId = 0;               // 图片描述请求令牌（0=无在途）
+    QPointer<QskTextInput> m_descEditInput; // 编辑描述弹窗输入框（锁3行用）
 };
 
 #endif // STICKER_HOME_PAGE_H

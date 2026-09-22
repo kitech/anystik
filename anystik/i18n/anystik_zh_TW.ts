@@ -1537,6 +1537,22 @@
         <translation>複製中繼資料</translation>
     </message>
     <message>
+        <source>编辑描述简介</source>
+        <translation>編輯描述簡介</translation>
+    </message>
+    <message>
+        <source>已保存描述</source>
+        <translation>已儲存描述</translation>
+    </message>
+    <message>
+        <source>保存描述失败：%1</source>
+        <translation>儲存描述失敗：%1</translation>
+    </message>
+    <message>
+        <source>%1/%2</source>
+        <translation>%1/%2</translation>
+    </message>
+    <message>
         <location line="+1"/>
         <source>分享</source>
         <translation>分享</translation>
