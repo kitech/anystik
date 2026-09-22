@@ -37,6 +37,7 @@
 #include <QskSimpleListBox.h>
 #include <QskFunctions.h>
 #include <QFontMetricsF>
+#include <private/qquicktextedit_p.h>   // 真多行编辑：QskTextInput/TextField 内嵌单行不可换行
 
 #include <QDir>
 #include <QFileInfo>
@@ -56,12 +57,92 @@
 #include <QHoverEvent>
 #include <QSet>
 
-// QskTextInput 构造函数受保护（面向子类）；此子类仅开放构造，供三行描述编辑
-class MultiLineTextInput : public QskTextInput
+// 真多行编辑器：内嵌 QQuickTextEdit。回车/Ctrl+回车 插 \n、显式几何下自动折行、
+// 光标/中文 IME 全原生（QskTextInput/QskTextField 内嵌单行 QQuickTextInput 做不到）。
+class MultiLineTextEdit : public QskControl
 {
+    Q_OBJECT
 public:
-    explicit MultiLineTextInput(QQuickItem* parent = nullptr)
-        : QskTextInput(parent) {}
+    explicit MultiLineTextEdit(QQuickItem* parent = nullptr)
+        : QskControl(parent)
+    {
+        setPolishOnResize(true);
+        setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
+
+        m_background = new QskBox(this);
+        m_background->setBoxShapeHint(QskBox::Panel,
+            QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+
+        m_placeholder = new QskTextLabel(this);
+        m_placeholder->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        m_placeholder->setFontRole(QskFontRole::Caption);
+
+        m_edit = new QQuickTextEdit(this);
+        m_edit->setWrapMode(QQuickTextEdit::WrapAnywhere);
+        m_edit->setClip(true);
+        m_edit->setFocusOnPress(true);
+
+        connect(m_edit, &QQuickTextEdit::textChanged, this, [this]() {
+            if (m_maxLength > 0) {
+                const QString t = m_edit->text();
+                if (t.size() > m_maxLength) {
+                    m_edit->setText(t.left(m_maxLength));
+                    m_edit->setCursorPosition(m_maxLength);
+                }
+            }
+            updatePlaceholder();
+            Q_EMIT textEdited();
+        });
+        connect(m_edit, &QQuickItem::activeFocusChanged,
+                this, [this]() { updatePlaceholder(); });
+    }
+
+    void setText(const QString& text) { m_edit->setText(text); if (!text.isEmpty()) m_edit->setCursorPosition(text.size()); updatePlaceholder(); }
+    QString text() const { return m_edit->text(); }
+    void setMaxLength(int max) { m_maxLength = max; }
+    void setPlaceholderText(const QString& text)
+    {
+        m_placeholder->setText(text);
+        updatePlaceholder();
+    }
+    void activate() { m_edit->forceActiveFocus(); }
+
+signals:
+    void textEdited();
+
+protected:
+    void updateLayout() override
+    {
+        if (!m_colorApplied) {
+            // 文字色对齐皮肤（placeholder 为 QskTextLabel，默认生效皮肤文本色）
+            const QColor c = m_placeholder->textColor();
+            if (c.isValid()) {
+                m_edit->setColor(c);
+                m_colorApplied = true;
+            }
+        }
+        const QRectF r = contentsRect();
+        m_background->setGeometry(r);
+        const QRectF textRect = r.adjusted(8, 4, -8, -4);   // 显式几何 → 折行成立
+        m_edit->setX(textRect.x());                          // QQuickTextEdit 为裸 QQuickItem，无 setGeometry
+        m_edit->setY(textRect.y());
+        m_edit->setWidth(textRect.width());
+        m_edit->setHeight(textRect.height());
+        m_placeholder->setGeometry(textRect);
+    }
+
+private:
+    void updatePlaceholder()
+    {
+        m_placeholder->setVisible(
+            m_edit->text().isEmpty() && !m_edit->hasActiveFocus());
+    }
+
+    QskBox* m_background = nullptr;
+    QskTextLabel* m_placeholder = nullptr;
+    QQuickTextEdit* m_edit = nullptr;
+    int m_maxLength = 0;
+    bool m_colorApplied = false;
 };
 
 // 面板不透明度：回读皮肤面板填充色、仅改 alpha（对齐 ImageSearchPopup/SyncProgressPopup）
@@ -88,12 +169,8 @@ class DescEditPopup : public QskPopup
 {
 public:
     QskLinearBox* m_layout = nullptr;
-    MultiLineTextInput* m_input = nullptr;
-    QskTextLabel* m_count = nullptr;
-    QskTextField* m_threeInput = nullptr;    // 3 行 QskTextField（镜像 stickergen 可见组合）
-    QskTextLabel* m_threeCount = nullptr;
-    QskTextField* m_backupInput = nullptr;   // 备用单行输入（多行文字不可见时用）
-    QskTextLabel* m_backupCount = nullptr;
+    MultiLineTextEdit* m_editInput = nullptr;   // 真多行主输入（QQuickTextEdit 封装）
+    QskTextLabel* m_editCount = nullptr;
 
     explicit DescEditPopup(QQuickItem* parent = nullptr)
         : QskPopup(parent)
@@ -126,56 +203,21 @@ public:
         m_meta->setSizePolicy(QskSizePolicy::Expanding,
                              QskSizePolicy::Constrained);
 
-        m_input = new MultiLineTextInput(m_layout);
-        m_input->setMaxLength(60);
-        m_input->setWrapMode(QskTextOptions::WrapAnywhere);
-        m_input->setFixedHeight(72);           // 对齐当前实际弹窗约 3 行
+        // 主编辑：QQuickTextEdit 封装——文字可见、自动折行、回车/Ctrl+回车换行、
+        // 中文 IME 全原生（已替代 QskTextInput/QskTextField，见 AGENTS.md）
+        m_editInput = new MultiLineTextEdit(m_layout);
+        m_editInput->setPlaceholderText(tr("输入描述(最多60字)"));
+        m_editInput->setMaxLength(60);
+        m_editInput->setFixedHeight(72);
 
-        // 字数计数跟随输入实时更新（QskTextInput::textChanged 无参）
-        connect(m_input, &QskTextInput::textChanged, this, [this]() {
-            m_count->setText(tr("%1/%2").arg(m_input->text().size()).arg(60));
-        });
+        m_editCount = new QskTextLabel(m_layout);
+        m_editCount->setAlignment(Qt::AlignRight);
+        m_editCount->setFontRole(QskFontRole::Caption);
+        m_editCount->setText(tr("%1/%2").arg(0).arg(60));
 
-        m_count = new QskTextLabel(m_layout);
-        m_count->setAlignment(Qt::AlignRight);
-        m_count->setFontRole(QskFontRole::Caption);
-
-        // 3 行 QskTextField 输入：镜像 stickergen 提示词框（QskTextField+WordWrap+76），
-        // 与备用单行同为已验证可见的渲染路径（原生 QskTextInput 多行不显示，见 AGENTS.md）
-        m_threeInput = new QskTextField(m_layout);
-        m_threeInput->setPlaceholderText(tr("输入描述(最多60字)"));
-        m_threeInput->setMaxLength(60);
-        m_threeInput->setFixedHeight(72);
-        m_threeInput->setWrapMode(QskTextOptions::WordWrap);
-        m_threeInput->setBoxShapeHint(QskTextField::Panel,
-            QskBoxShapeMetrics(8, Qt::AbsoluteSize));
-
-        m_threeCount = new QskTextLabel(m_layout);
-        m_threeCount->setAlignment(Qt::AlignRight);
-        m_threeCount->setFontRole(QskFontRole::Caption);
-        m_threeCount->setText(tr("%1/%2").arg(0).arg(60));
-
-        connect(m_threeInput, &QskTextInput::textChanged, this, [this]() {
-            m_threeCount->setText(
-                tr("%1/%2").arg(m_threeInput->text().size()).arg(60));
-        });
-
-        // 备用单行输入：放在多行输入下方，渲染路径与重命名弹窗 QskTextField 一致
-        m_backupInput = new QskTextField(m_layout);
-        m_backupInput->setPlaceholderText(tr("备用单行输入"));
-        m_backupInput->setMaxLength(60);
-        m_backupInput->setFixedHeight(32);
-        m_backupInput->setBoxShapeHint(QskTextField::Panel,
-            QskBoxShapeMetrics(8, Qt::AbsoluteSize));
-
-        m_backupCount = new QskTextLabel(m_layout);
-        m_backupCount->setAlignment(Qt::AlignRight);
-        m_backupCount->setFontRole(QskFontRole::Caption);
-        m_backupCount->setText(tr("%1/%2").arg(0).arg(60));
-
-        connect(m_backupInput, &QskTextInput::textChanged, this, [this]() {
-            m_backupCount->setText(
-                tr("%1/%2").arg(m_backupInput->text().size()).arg(60));
+        connect(m_editInput, &MultiLineTextEdit::textEdited, this, [this]() {
+            m_editCount->setText(
+                tr("%1/%2").arg(m_editInput->text().size()).arg(60));
         });
 
         auto* btnBox = new QskLinearBox(Qt::Horizontal, m_layout);
@@ -197,8 +239,9 @@ public:
 
     void setBrief(const StickerBrief& brief)
     {
-        m_input->setText(brief.description);
-        m_count->setText(tr("%1/%2").arg(brief.description.size()).arg(60));
+        // 主输入预填原文（有则可见显示，placeholder 自动隐藏）
+        m_editInput->setText(brief.description);
+        m_editCount->setText(tr("%1/%2").arg(brief.description.size()).arg(60));
 
         QImageReader reader(brief.filePath);
         reader.setAutoTransform(true);
@@ -217,23 +260,13 @@ public:
         m_meta->setText(formatStickerMeta(meta));
     }
 
-    MultiLineTextInput* input() const { return m_input; }
-    QskTextField* threeInput() const { return m_threeInput; }
-    QskTextField* backupInput() const { return m_backupInput; }
+    MultiLineTextEdit* editInput() const { return m_editInput; }
     QskPushButton* saveButton() const { return m_saveBtn; }
 
-    // 保存取值优先级：3 行 QskTextField → 备用单行 → 旧多行(保留原文兜底)
+    // 保存取值：主输入内容（空 → 空串 → 清除 desc）
     QString validText() const
     {
-        if (m_threeInput) {
-            const QString three = m_threeInput->text().trimmed();
-            if (!three.isEmpty()) return three;
-        }
-        if (m_backupInput) {
-            const QString backup = m_backupInput->text().trimmed();
-            if (!backup.isEmpty()) return backup;
-        }
-        return m_input ? m_input->text().trimmed() : QString();
+        return m_editInput ? m_editInput->text().trimmed() : QString();
     }
 
 protected:
@@ -1091,15 +1124,6 @@ void StickerHomePage::cancelSubClose()
 
 bool StickerHomePage::eventFilter(QObject* watched, QEvent* event)
 {
-    // 编辑描述输入框：第 4 行前吞回车，强制最多三行
-    if (m_descEditInput && watched == m_descEditInput
-        && event->type() == QEvent::KeyPress) {
-        const auto* key = static_cast<QKeyEvent*>(event);
-        if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
-            && m_descEditInput->text().count(QLatin1Char('\n')) >= 2) {
-            return true;
-        }
-    }
     if (watched == m_ctxMenu) {
         switch (event->type()) {
         case QEvent::HoverMove: {
@@ -1418,15 +1442,11 @@ void StickerHomePage::showRenameDialog(const StickerPackBrief& pack)
     field->setFocus(true);
 }
 
-// 长按菜单「编辑描述简介」：弹窗同时展示图片预览 + 元信息 + 三行/60字描述输入
+// 长按菜单「编辑描述简介」：弹窗同时展示图片预览 + 元信息 + 多行/60字描述输入
 void StickerHomePage::editStickerDescription(const StickerBrief& brief)
 {
     auto* popup = new DescEditPopup(this);
     popup->setBrief(brief);
-
-    auto* input = popup->input();
-    input->installEventFilter(this);     // eventFilter 在第 4 行前吞回车
-    m_descEditInput = input;             // eventFilter 对照用（close 时置空）
 
     connect(popup->saveButton(), &QskAbstractButton::clicked, popup,
         [this, popup, brief]() {
@@ -1438,18 +1458,13 @@ void StickerHomePage::editStickerDescription(const StickerBrief& brief)
             popup->close();
         });
 
-    connect(popup, &QskPopup::closed, this, [this]() {
-        m_descEditInput = nullptr;
-    });
     connect(popup, &QskPopup::closed, popup, &QObject::deleteLater);
     popup->open();
 
-    // F1：焦点/编辑态延迟到几何与内嵌编辑器 polish 定形之后。过早
-    // setFocus/setEditing 会让内嵌 QQuickTextInput 在过时几何下进入
-    // clip 且不再重绘 → 文本不可见但右下角字数照常变化。
-    QTimer::singleShot(50, input, [input]() {
-        input->setEditing(true);
-        input->setFocus(true);
+    // 真多行编辑器：等几何 polish 定形后，让内嵌 QQuickTextEdit 持主动焦点
+    // （回车换行/自动折行/中文 IME 全原生，无需 setEditing 强制编辑态）
+    QTimer::singleShot(80, popup->editInput(), [popup]() {
+        popup->editInput()->activate();
     });
 }
 
@@ -1780,3 +1795,4 @@ void StickerHomePage::openChatDir(const QString& path)
 }
 
 #include "moc_stickerhomepage.cpp"
+#include "stickerhomepage.moc"   // 本文件内 Q_OBJECT 局部类（DescEditPopup/MultiLineTextEdit）

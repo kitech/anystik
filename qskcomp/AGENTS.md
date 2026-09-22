@@ -53,12 +53,18 @@
   + `setFixedHeight(72)` 在弹窗内 → 编辑文字完全不可见，但右下角字数实时更新
   （内嵌单行 QQuickTextInput"活着但不绘制"）；同弹窗中的单行 QskTextField 一切正常
 - 已排除: 窗口级 setOpacity / 面板 alpha 0.9 / 弹窗手动几何 / 文本颜色
-- 原因: 本地 qskinny 构建无 QskTextArea（master 专有的多行输入控件）；多行只能压在内嵌
-  单行 QQuickTextInput 上，其 wrap/updateClip 渲染路径在本环境不显示（社区同类事故）
+- 原因: qskinny 全系（含 master）只有单行输入 QskTextInput/QskTextField，无任何多行输入控件；
+  多行只能压在内嵌单行 QQuickTextInput 上，其 wrap/updateClip 渲染路径在本环境不显示（社区同类事故）
 - ✅ 正解: 文本输入一律基于 `QskTextField`（设置页 30px、重命名、stickergen 76px+WordWrap
-  均可见，弹窗内同样已验证可见）
-- 同类实例: anystik/src/stickerhomepage.cpp（DescEditPopup：3 行 QskTextField 主输入 +
-  备用单行框，旧的 QskTextInput 多行保留未删）、anystik/src/stickergenpage.cpp:151
+  均可见，弹窗内同样已验证可见）；但该路径不可换行，真正的多行编辑见下条 QQuickTextEdit 封装
+- 进阶: QskTextInput/QskTextField 内嵌单行 QQuickTextInput——回车=提交+移焦（源码 keyPressEvent
+  仅 ImhMultiLine 时不跳焦，仍不插 \n）；折行需显式宽（subControlRect(Text) 未赋予 → WordWrap 不生效）
+- ✅ 真多行编辑: 自封装 QQuickTextEdit（`#include <private/qquicktextedit_p.h>`，工程已链
+  `Qt6::QuickPrivate`，仓库已有 `<private/qquicktaphandler_p.h>` 先例）——回车/Ctrl+回车 插 \n、
+  显式几何下自动折行、光标/中文 IME 全原生（实例: stickerhomepage.cpp MultiLineTextEdit）
+- 同类实例: anystik/src/stickerhomepage.cpp（DescEditPopup 仅剩主输入 = MultiLineTextEdit——
+  QQuickTextEdit 封装，文字色取皮肤 textColor、有值预填且光标落文末；旧 QskTextInput / QskTextField
+  输入均已删除）、anystik/src/stickergenpage.cpp:151
 
 ## QSKinny 弹出层透明无背景（易踩坑）
 
