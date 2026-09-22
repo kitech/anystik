@@ -7,24 +7,59 @@
 #include "androidutils.h"
 #include <jni.h>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QJniObject>
 
-extern "C" JNIEXPORT void JNICALL
-Java_io_fedlet_mobutil_NetworkMonitor_onNetworkChanged(
-    JNIEnv* env, jobject /*thiz*/, jboolean isConnected, jstring jNetworkType)
-{
-    const char* raw = env->GetStringUTFChars(jNetworkType, nullptr);
-    QString networkType = QString::fromUtf8(raw);
-    env->ReleaseStringUTFChars(jNetworkType, raw);
+namespace {
+bool s_foreground = true;               // 启动即前台
+bool s_last[3] = {false, false, false}; // 上次上报三态：WiFi/移动数据/以太网
+QString s_lastMsg;
+qint64 s_lastMsgAt = 0;
+}
 
-    QString msg;
-    if (isConnected) {
-        msg = QCoreApplication::translate("NetworkMonitor", "网络已连接: %1").arg(networkType);
-    } else {
-        msg = QCoreApplication::translate("NetworkMonitor", "网络已断开");
+void NetworkMonitor::setForeground(bool isForeground)
+{
+    s_foreground = isForeground;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_io_fedlet_mobutil_NetworkMonitor_onTransportChanged(
+    JNIEnv* /*env*/, jobject /*thiz*/,
+    jboolean wifi, jboolean mobile, jboolean ethernet)
+{
+    const bool now[3] = { wifi == JNI_TRUE, mobile == JNI_TRUE, ethernet == JNI_TRUE };
+
+    static const char* upText[3] = {
+        QT_TRANSLATE_NOOP("NetworkMonitor", "WiFi 已连接"),
+        QT_TRANSLATE_NOOP("NetworkMonitor", "移动数据已连接"),
+        QT_TRANSLATE_NOOP("NetworkMonitor", "以太网已连接"),
+    };
+    static const char* downText[3] = {
+        QT_TRANSLATE_NOOP("NetworkMonitor", "WiFi 已断开"),
+        QT_TRANSLATE_NOOP("NetworkMonitor", "移动数据已断开"),
+        QT_TRANSLATE_NOOP("NetworkMonitor", "以太网已断开"),
+    };
+
+    QStringList changes;
+    for (int i = 0; i < 3; ++i) {
+        if (now[i] != s_last[i]) {
+            changes << QCoreApplication::translate("NetworkMonitor",
+                now[i] ? upText[i] : downText[i]);
+            s_last[i] = now[i];
+        }
     }
+    if (changes.isEmpty()) return;
+
+    const QString msg = changes.join('\n');
     qDebug() << "[NetworkMonitor]" << msg;
-    showAndroidToast(msg);
+
+    // 同一文案 10s 内去重
+    const qint64 t = QDateTime::currentMSecsSinceEpoch();
+    if (msg == s_lastMsg && t - s_lastMsgAt < 10000) return;
+    s_lastMsg = msg;
+    s_lastMsgAt = t;
+
+    if (s_foreground) showAndroidToast(msg);
 }
 
 void NetworkMonitor::checkNetwork()

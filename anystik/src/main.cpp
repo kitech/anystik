@@ -452,7 +452,10 @@ int main(int argc, char* argv[]) {
             }
 #ifdef Q_OS_ANDROID
             if (state == Qt::ApplicationActive) {
+                NetworkMonitor::setForeground(true);
                 NetworkMonitor::checkNetwork();
+            } else {
+                NetworkMonitor::setForeground(false);
             }
 #endif
         });

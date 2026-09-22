@@ -504,9 +504,28 @@ Please check that ntfy is running in the background</translation>
 <context>
     <name>NetworkMonitor</name>
     <message>
-        <location filename="../src/networkmonitor.cpp" line="+22"/>
-        <source>网络已连接: %1</source>
-        <translation>Connected: %1</translation>
+        <source>WiFi 已连接</source>
+        <translation>WiFi connected</translation>
+    </message>
+    <message>
+        <source>WiFi 已断开</source>
+        <translation>WiFi disconnected</translation>
+    </message>
+    <message>
+        <source>移动数据已连接</source>
+        <translation>Mobile data connected</translation>
+    </message>
+    <message>
+        <source>移动数据已断开</source>
+        <translation>Mobile data disconnected</translation>
+    </message>
+    <message>
+        <source>以太网已连接</source>
+        <translation>Ethernet connected</translation>
+    </message>
+    <message>
+        <source>以太网已断开</source>
+        <translation>Ethernet disconnected</translation>
     </message>
     <message>
         <location line="+2"/>

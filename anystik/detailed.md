@@ -254,7 +254,7 @@ Android 分享接收：Java `ShareActivity` → 静态队列 → 主线程 `Stic
 | `KeepAlive::stop()` | `KeepAliveService.stopService()` | C++ → Java |
 | `NetworkMonitor::start()` | `NetworkMonitor.startMonitoring()` | C++ → Java |
 | `NetworkMonitor::stop()` | `NetworkMonitor.stopMonitoring()` | C++ → Java |
-| `Java_..._onNetworkChanged()` | `NetworkMonitor.onNetworkChanged()` | Java → C++ |
+| `Java_..._onTransportChanged()` (wifi/mobile/ethernet 三布尔) | `NetworkMonitor.onTransportChanged()` | Java → C++ |
 | `Java_..._onShareIntentReceived()` | `ShareActivity.onShareIntentReceived()` | Java → C++ |
 
 ---

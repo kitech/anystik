@@ -10,6 +10,7 @@ public:
     static void start();
     static void stop();
     static void checkNetwork();
+    static void setForeground(bool isForeground);
 };
 
 #endif
