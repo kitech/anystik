@@ -61,10 +61,31 @@
   仅 ImhMultiLine 时不跳焦，仍不插 \n）；折行需显式宽（subControlRect(Text) 未赋予 → WordWrap 不生效）
 - ✅ 真多行编辑: 自封装 QQuickTextEdit（`#include <private/qquicktextedit_p.h>`，工程已链
   `Qt6::QuickPrivate`，仓库已有 `<private/qquicktaphandler_p.h>` 先例）——回车/Ctrl+回车 插 \n、
-  显式几何下自动折行、光标/中文 IME 全原生（实例: stickerhomepage.cpp MultiLineTextEdit）
+  显式几何下自动折行、光标全原生；中文 IME 为应用级部署问题（见下节）
+  （实例: stickerhomepage.cpp MultiLineTextEdit）
 - 同类实例: anystik/src/stickerhomepage.cpp（DescEditPopup 仅剩主输入 = MultiLineTextEdit——
   QQuickTextEdit 封装，文字色取皮肤 textColor、有值预填且光标落文末；旧 QskTextInput / QskTextField
   输入均已删除）、anystik/src/stickergenpage.cpp:151
+
+## anystik 中文输入法（IME）激活（部署易踩坑）
+
+- 症状: 应用内所有输入框（搜索框/重命名/设置/描述弹窗）都只能打英文 ASCII，无法唤起中文候选框；
+  `QT_DEBUG_PLUGINS=1` 只见 libcompose/libibus 加载、回退 compose，无 fcitx
+- 原因: Qt6 在 Linux 由 platforminputcontexts 插件接 IME（QFactoryLoader(接口, "/platforminputcontexts")
+  按 library path 找 `QT_IM_MODULE=fcitx` 指名的插件）。本机跑 fcitx 4.2.9.9（fcitx4，非 fcitx5），
+  但 /mnt/sda5/osopt/qt/6.7.3 与系统 Qt6 的插件目录都只有 compose+ibus，全机无 fcitx-Qt6 插件 →
+  任何输入框都连不上 fcitx。**与 MultiLineTextEdit/QskTextInput 控件无关**
+- ✅ 正解: 提供 fcitx4 的 Qt6 输入上下文插件 `libfcitxplatforminputcontextplugin.so`
+  （fcitx-qt 仓库 ENABLE_QT6 产物 / AUR `fcitx-qt6`），放 Qt 插件搜索路径之一:
+  · 应用可执行目录 `build-x64/platforminputcontexts/`（Qt 插件搜索基目录，实测 factoryloader 会扫它）
+  · 或 `QT_PLUGIN_PATH=<本地目录>`（不碰系统、不碰 /opt）
+  依赖的 `libFcitxQtDBusAddons.so*` 需挂 `LD_LIBRARY_PATH`
+- ⚠️ ABI: 插件必须与运行 Qt 同/更旧版本编译；跨小版本会因 `Qt_6_PRIVATE_API` 符号未定义崩溃
+  （fcitx-qt issue#56）。AUR 包按系统 Qt6.11 构建，加载进 Qt6.7.3 应用有风险；
+  稳妥法: fcitx-qt 源码 + `-DCMAKE_PREFIX_PATH=/mnt/sda5/osopt/qt/6.7.3/gcc_64` 重建
+- 验证: `QT_DEBUG_PLUGINS=1 ./build-x64/anystik` 应见 `Got keys from plugin meta data QList(…,"fcitx")`；
+  GUI 上切中文输入法即可候选与上屏
+- 同类实例: anystik 全部输入框；参考: Qt Deploying Plugins / 银河麒麟 Qt6 fcitx 适配（QT_DEBUG_PLUGINS 诊断）
 
 ## QSKinny 弹出层透明无背景（易踩坑）
 
