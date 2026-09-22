@@ -1,4 +1,5 @@
 #include "imagesearchclient.h"
+#include "httpua.h"
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -64,9 +65,7 @@ public:
             break;
         }
         req.setUrl(url);
-        req.setRawHeader("User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        req.setRawHeader("User-Agent", kHttpUserAgent());
         req.setRawHeader("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
         req.setRawHeader("Accept",
             "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8");

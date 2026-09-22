@@ -1,4 +1,5 @@
 #include "searchresultgrid.h"
+#include "httpua.h"
 
 #include <QPainter>
 #include <QPainterPath>
@@ -30,10 +31,6 @@
 static constexpr qreal SEARCH_TILE_SIZE = 96;
 static constexpr qreal SEARCH_TILE_GAP  = 10;
 static constexpr qreal SEARCH_STEP      = SEARCH_TILE_SIZE + SEARCH_TILE_GAP;
-
-static const QByteArray kSearchUA(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
 
 // ═══════════════════════════════════════════════════════════════════
 // SearchResultTileNode — 单个结果瓦片绘制
@@ -247,7 +244,7 @@ void SearchResultGrid::ensureLoaded(const QString& url)
     m_inFlight.insert(url);
 
     QNetworkRequest req{ QUrl(url) };
-    req.setRawHeader("User-Agent", kSearchUA);
+    req.setRawHeader("User-Agent", kHttpUserAgent());
     QNetworkReply* reply = m_nam->get(req);
     m_replies.insert(url, reply);
     connect(reply, &QNetworkReply::finished, this,
@@ -494,7 +491,7 @@ void RemoteImagePreview::showImage(const QString& url)
 void RemoteImagePreview::startFetch(const QString& url)
 {
     QNetworkRequest req{ QUrl(url) };
-    req.setRawHeader("User-Agent", kSearchUA);
+    req.setRawHeader("User-Agent", kHttpUserAgent());
     QNetworkReply* reply = m_nam.get(req);
     m_reply = reply;
     connect(reply, &QNetworkReply::finished, this, [this, reply, url]() {

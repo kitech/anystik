@@ -638,6 +638,41 @@
         <source>功能开发中…</source>
         <translation type="vanished">功能開發中…</translation>
     </message>
+    <message>
+        <source>站点</source>
+        <translation>站台</translation>
+    </message>
+    <message>
+        <source>浏览</source>
+        <translation>瀏覽</translation>
+    </message>
+    <message>
+        <source>加载更多</source>
+        <translation>載入更多</translation>
+    </message>
+    <message>
+        <source>已载入 %1 项</source>
+        <translation>已載入 %1 項</translation>
+    </message>
+    <message>
+        <source>加载中…</source>
+        <translation>載入中…</translation>
+    </message>
+    <message>
+        <source>当前站点请用「浏览」加载，搜索引擎用「搜索」</source>
+        <translation>本站請用「瀏覽」載入，搜尋引擎請用「搜尋」</translation>
+    </message>
+    <message>
+        <source>搜索引擎请用「搜索」</source>
+        <translation>搜尋引擎請用「搜尋」</translation>
+    </message>
+</context>
+<context>
+    <name>SiteListClient</name>
+    <message>
+        <source>站点加载失败：%1</source>
+        <translation>站台載入失敗：%1</translation>
+    </message>
 </context>
 <context>
     <name>PhoneSmsStatusBar</name>

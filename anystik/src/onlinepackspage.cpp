@@ -1,6 +1,7 @@
 #include "onlinepackspage.h"
 #include "searchresultgrid.h"
 #include "imagesearchclient.h"
+#include "sitelistclient.h"
 #include "compatcore34.h"
 #include <QSettings>
 #include <QUrl>
@@ -14,7 +15,7 @@
 
 namespace {
 
-// combo 选项索引：0..6 仅预览站点，7/8/9 搜索引擎
+// combo 选项索引：0..6 站点（可「浏览」应用内加载），7/8/9 搜索引擎
 constexpr int kPreviewCount = 7;
 constexpr int kGoogleIdx = 7;
 constexpr int kBingIdx   = 8;
@@ -23,7 +24,7 @@ constexpr int kComboCount = 10;
 
 const char* const kDefaultKeyword = "斗图表情最新最热";
 
-// 仅预览站点主页（与 combo 0..6 一一对应）
+// 站点主页（与 combo 0..6 一一对应；与 SiteListClient 站点表一致）
 const char* const kSiteUrls[] = {
     "https://www.qudoutu.com/",
     "https://www.qqbiaoqing.com/",
@@ -70,11 +71,11 @@ void OnlinePacksPage::onCreate(const QVariantMap&, const QVariantMap&)
 
     layout->addSpacer(8, 0);
 
-    // ── 第一行：选择 combo（预览站 0..6 + 搜索引擎 7..9）+ 浏览器打开 ──
+    // ── 第一行：选择 combo（站点 0..6 + 搜索引擎 7..9）+ 浏览器打开 + 浏览 ──
     auto* siteRow = new QskLinearBox(Qt::Horizontal, layout);
     siteRow->setSpacing(12);
 
-    auto* siteLabel = new QskTextLabel(tr("仅预览站点"), siteRow);
+    auto* siteLabel = new QskTextLabel(tr("站点"), siteRow);
     siteLabel->setPreferredWidth(120);
 
     m_siteCombo = new QskComboBox(siteRow);
@@ -95,6 +96,12 @@ void OnlinePacksPage::onCreate(const QVariantMap&, const QVariantMap&)
     openBtn->setPreferredSize(44, 44);
     connect(openBtn, &QskPushButton::clicked, this,
             &OnlinePacksPage::openCurrentInBrowser);
+
+    // 浏览：对站点(0..6) 免关键词做应用内列表加载
+    m_browseBtn = new QskPushButton(tr("浏览"), siteRow);
+    m_browseBtn->setPreferredSize(64, 44);
+    connect(m_browseBtn, &QskPushButton::clicked, this,
+            &OnlinePacksPage::doBrowse);
 
     // ── 第二行：关键词 + 搜索 ──
     auto* kwRow = new QskLinearBox(Qt::Horizontal, layout);
@@ -118,7 +125,7 @@ void OnlinePacksPage::onCreate(const QVariantMap&, const QVariantMap&)
             &OnlinePacksPage::doSearch);
 
     // ── 状态行 ──
-    m_statusLabel = new QskTextLabel(tr("输入关键词点搜索：Bing/Yandex 应用内展示，Google 打开浏览器"), layout);
+    m_statusLabel = new QskTextLabel(tr("站点可点「浏览」加载；搜索引擎用关键词「搜索」"), layout);
     m_statusLabel->setFontRole(QskFontRole::Caption);
     m_statusLabel->setWrapMode(QskTextOptions::WrapAnywhere);
     m_statusLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
@@ -126,6 +133,14 @@ void OnlinePacksPage::onCreate(const QVariantMap&, const QVariantMap&)
     // ── 结果网格 ──
     m_resultGrid = new SearchResultGrid(layout);
     m_resultGrid->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
+
+    // ── 加载更多：UI 预留，暂时空响应 ──
+    m_loadMoreBtn = new QskPushButton(tr("加载更多"), layout);
+    m_loadMoreBtn->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Fixed);
+    connect(m_loadMoreBtn, &QskPushButton::clicked, this,
+        [this]() {
+            // 预留：加载更多暂为空响应
+        });
 
     // ── 后台图片搜索客户端（Bing/Yandex 应用内）──
     m_searchClient = new ImageSearchClient(this);
@@ -137,6 +152,21 @@ void OnlinePacksPage::onCreate(const QVariantMap&, const QVariantMap&)
         });
     connect(m_searchClient, &ImageSearchClient::errorOccurred, this,
         [this](ImageSearchClient::Engine, const QString& message) {
+            m_resultGrid->clear();
+            m_statusLabel->setTextColor(QColor(255, 91, 91));
+            m_statusLabel->setText(message);
+        });
+
+    // ── 后台站点列表客户端（非搜索站「浏览」）──
+    m_siteClient = new SiteListClient(this);
+    connect(m_siteClient, &SiteListClient::resultsReady, this,
+        [this](SiteListClient::Site, const QStringList& urls) {
+            m_resultGrid->setResults(urls);
+            m_statusLabel->setTextColor(QColor(200, 200, 210));
+            m_statusLabel->setText(tr("已载入 %1 项").arg(urls.size()));
+        });
+    connect(m_siteClient, &SiteListClient::errorOccurred, this,
+        [this](SiteListClient::Site, const QString& message) {
             m_resultGrid->clear();
             m_statusLabel->setTextColor(QColor(255, 91, 91));
             m_statusLabel->setText(message);
@@ -197,7 +227,21 @@ void OnlinePacksPage::doSearch()
     }
 
     m_statusLabel->setTextColor(QColor(240, 190, 90));
-    m_statusLabel->setText(tr("当前为仅预览站点，请选择 Google / Bing / Yandex 图片搜索"));
+    m_statusLabel->setText(tr("当前站点请用「浏览」加载，搜索引擎用「搜索」"));
+}
+
+void OnlinePacksPage::doBrowse()
+{
+    const int idx = m_siteCombo->currentIndex();
+    if (idx >= kPreviewCount) { // 搜索引擎项
+        m_statusLabel->setTextColor(QColor(240, 190, 90));
+        m_statusLabel->setText(tr("搜索引擎请用「搜索」"));
+        return;
+    }
+    m_resultGrid->clear();
+    m_statusLabel->setTextColor(QColor(100, 180, 255));
+    m_statusLabel->setText(tr("加载中…"));
+    m_siteClient->load(static_cast<SiteListClient::Site>(idx), 40);
 }
 
 void OnlinePacksPage::openCurrentInBrowser()
@@ -238,6 +282,8 @@ void OnlinePacksPage::onStop()
         QSettings().setValue("onlinepacks_kw", m_keywordEdit->text().trimmed());
     if (m_searchClient)
         m_searchClient->abortAll();
+    if (m_siteClient)
+        m_siteClient->abortAll();
     Page::onStop();
 }
 
@@ -248,4 +294,8 @@ void OnlinePacksPage::retranslateUi()
     m_title->setText(tr("在线表情"));
     if (m_searchBtn)
         m_searchBtn->setText(tr("搜索"));
+    if (m_browseBtn)
+        m_browseBtn->setText(tr("浏览"));
+    if (m_loadMoreBtn)
+        m_loadMoreBtn->setText(tr("加载更多"));
 }

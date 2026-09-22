@@ -76,6 +76,8 @@ qt_add_executable(anystik
     src/imagesearchpopup.cpp
     src/imagesearchclient.h
     src/imagesearchclient.cpp
+    src/sitelistclient.h
+    src/sitelistclient.cpp
     src/searchresultgrid.h
     src/searchresultgrid.cpp
     src/stickergenpage.h
