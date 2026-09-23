@@ -1,4 +1,5 @@
 #include "imageaiutil.h"
+#include "davobfus.h"
 
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
@@ -19,7 +20,8 @@ namespace {
 const int kMaxHops = 8;
 
 // 图片描述后端开关（全局变量，if(1) 风格手动切换）：
-//   0 = Bing（默认，无需 key；以图搜图重定向 URL 取描述）
+//  16 = Z.ai 智谱国际版 glm-4.6v-flash（默认；key 由 davobfus 内嵌混淆提供，邮箱注册免手机号）
+//   0 = Bing（以图搜图重定向 URL 取描述，无需 key；已非默认）
 //   1 = Pollinations 视觉接口（已失效：仅文本 openai-fast，勿选）
 //   2 = 智谱 GLM-4.6V-Flash（需填 kZhipuApiKey，域名国内直连）
 //   3 = 硅基流动 DeepSeek-OCR（需填 kSiliconFlowApiKey）
@@ -34,9 +36,8 @@ const int kMaxHops = 8;
 //  12 = 火山方舟豆包视觉（预置推理接入点，新用户送 token，需填 kVolcengineApiKey）
 //  14 = Google Gemini Flash 免费档（需填 kGeminiApiKey，免费额度大）
 //  15 = Ollama 本地视觉（localhost:11434，零 key/零限流，需先装 Ollama + ollama pull）
-//  16 = Z.ai 智谱国际版 glm-4.6v-flash（需填 kZaiApiKey，邮箱注册免手机号；与 bigmodel.cn 不互通，大陆直连自行确认）
 // 失败不回退：所选后端失败即 emit failed，不会自动尝试其他后端。
-int g_imageDescBackend = 0;
+int g_imageDescBackend = 16;
 
 // Pollinations API key（申请：https://enter.pollinations.ai/keys）
 // 注意：视觉已失效（现仅文本 openai-fast），此后端勿选
@@ -115,8 +116,7 @@ const int kOllamaMaxTokens = 512;
 
 // Z.ai 智谱国际版（申请：https://z.ai ，邮箱注册免手机号；账号/Key 与 bigmodel.cn 不互通）
 // 免费视觉模型永久免费（官方价格页大写 GLM-4.6V-Flash，接口用小写同为该模型），
-// 免费档 1 并发 ≈1 req/s；大陆直连性需自行确认
-const char* const kZaiApiKey = "";
+// 免费档 1 并发 ≈1 req/s；大陆直连性需自行确认；key 由 davobfus 的 zaiApiKey() 提供
 const char* const kZaiVisionModel = "glm-4.6v-flash";
 const int kZaiMaxTokens = 1024;
 
@@ -616,12 +616,12 @@ void ImageAiUtil::startOllama()
 
 void ImageAiUtil::startZai()
 {
-    // 国际版独立端点；未填 key 时沿用「未配置 key」提示
+    // 国际版独立端点；key 由 davobfus 内嵌混淆提供（zaiApiKey()）
     startOpenAiVision(QStringLiteral("Z.ai(国际)"),
                       QUrl(QStringLiteral(
                           "https://api.z.ai/api/paas/v4/chat/completions")),
                       QString::fromLatin1(kZaiVisionModel),
-                      QByteArray(kZaiApiKey).trimmed(),
+                      QByteArray(zaiApiKey().toUtf8()).trimmed(),
                       kZaiMaxTokens);
 }
 

@@ -20,6 +20,9 @@ using namespace andrivet::advobfuscator;
 // caller parse URL
 #define DAVOBFUS_KEY "AUTHKEY_PLACEHOLDER"
 
+// Z.ai 智谱国际版 API key（stub 示例；真实值替换 ZAI_OBFUS_KEY 一处即可）
+#define ZAI_OBFUS_KEY "ZAI_KEY_PLACEHOLDER"
+
 QString davObfusKey()
 {
 #if defined(_DEBUG) || !defined(NDEBUG) || defined(QT_DEBUG)
@@ -31,6 +34,18 @@ QString davObfusKey()
     // 不能直接 fromUtf8(key)：ObfuscatedString→QByteArrayView 需两级隐式转换，C++ 不允许；
     // 先取 const char*（一级 UDC），key 生命周期覆盖函数体，指针有效
     auto key = DAVOBFUS_KEY""_obf;
+    const char* decoded = key;
+    return QString::fromUtf8(decoded);
+#endif
+}
+
+QString zaiApiKey()
+{
+#if defined(_DEBUG) || !defined(NDEBUG) || defined(QT_DEBUG)
+    const char* key = AY_OBFUSCATE(ZAI_OBFUS_KEY);
+    return QString::fromUtf8(key);
+#else
+    auto key = ZAI_OBFUS_KEY""_obf;
     const char* decoded = key;
     return QString::fromUtf8(decoded);
 #endif

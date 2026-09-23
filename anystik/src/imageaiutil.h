@@ -13,7 +13,8 @@ class QTimer;
 /*
  * 图片描述通用工具（单例 + 顺序队列）：
  * 支持多种后端，由 imageaiutil.cpp 内的全局开关 g_imageDescBackend 切换：
- *   0 = Bing 以图搜图的重定向 URL（默认，无需 key）
+ *  16 = Z.ai 智谱国际版 glm-4.6v-flash（默认；key 由 davobfus 内嵌混淆提供）
+ *   0 = Bing 以图搜图的重定向 URL（无需 key，已非默认）
  *   1 = Pollinations 视觉接口（需填 kPollinationsApiKey）
  *   2 = 智谱 GLM-4.6V-Flash（需填 kZhipuApiKey）
  *   3 = 硅基流动 DeepSeek-OCR（需填 kSiliconFlowApiKey）
@@ -28,7 +29,7 @@ class QTimer;
  *  12 = 火山方舟豆包视觉（预置推理接入点，新用户送 token，需填 kVolcengineApiKey）
  *  14 = Google Gemini Flash 免费档（需填 kGeminiApiKey，免费额度大）
  *  15 = Ollama 本地视觉（localhost:11434，零 key/零限流，需先装 Ollama）
- *  16 = Z.ai 智谱国际版 glm-4.6v-flash（需填 kZaiApiKey，与 bigmodel.cn 不互通）
+ *  16 = Z.ai 智谱国际版 glm-4.6v-flash（默认；key 由 davobfus 内嵌混淆提供）
  * 1~8/10~12/14~16 走 OpenAI 兼容 chat/completions；9 走 AI Horde 异步提交+轮询；
  * 0 走 Bing 重定向解析。后端失败不回退。
  * - fetchDescription() 每次入队并返回唯一请求令牌；同一时刻仅一个在途，其余排队。
