@@ -20,17 +20,21 @@ class QTimer;
  *   3 = 硅基流动 DeepSeek-OCR（需填 kSiliconFlowApiKey）
  *   4 = NVIDIA NIM（需填 kNvidiaApiKey）
  *   5 = OpenRouter（需填 kOpenRouterApiKey）
- *   6 = BlockRun（免 key，免费视觉模型）
+ *   6 = BlockRun（免 key，免费视觉模型；实测免费容量常耗尽，几乎无法使用）
  *   7 = LLM7.io（需填 kLlm7ApiKey）
  *   8 = Cloudflare Workers AI（需填 kCloudflareAccountId + kCloudflareApiToken）
  *   9 = AI Horde 原生 interrogation（匿名 key 0000000000，需本地图片）
  *  10 = 阿里云百炼 qwen3-vl-flash（限时免费/新户额度，需填 kDashScopeApiKey）
- *  11 = OVH AI Endpoints Qwen2.5-VL-72B（免注册免 key，匿名 2 req/min/IP）
+ *  11 = OVH AI Endpoints Qwen2.5-VL-72B（免注册，但实测匿名限流严格，无 key 几乎无法使用；绑卡升级 400 req/min）
  *  12 = 火山方舟豆包视觉（预置推理接入点，新用户送 token，需填 kVolcengineApiKey）
+ *  13 = ModelScope 国内 qwen3-vl-8b-instruct（注册送 ~2000 次/日，需填 kModelScopeApiKey）
  *  14 = Google Gemini Flash 免费档（需填 kGeminiApiKey，免费额度大）
  *  15 = Ollama 本地视觉（localhost:11434，零 key/零限流，需先装 Ollama）
  *  16 = Z.ai 智谱国际版 glm-4.6v-flash（默认；key 由 davobfus 内嵌混淆提供）
- * 1~8/10~12/14~16 走 OpenAI 兼容 chat/completions；9 走 AI Horde 异步提交+轮询；
+ *  17 = ModelScope 国际 qwen3-vl-8b-instruct（modelscope.ai，免费额度以该站为准，需填 kModelScopeIntlApiKey；实测需先在 modelscope.ai › My Settings › Account 绑定阿里云账号才能调用）
+ *  18 = Groq qwen3.6-27b（免费 30 RPM/8K TPM/1K RPD，Preview，需填 kGroqApiKey；实测受限地区 IP 返回 403，需海外出口访问）
+ *  19 = HuggingFace qwen2.5-vl-7b-instruct（Serverless 免费档额度很少，Router 按量，需填 kHuggingFaceApiKey）
+ * 1~8/10~19（9 除外）走 OpenAI 兼容 chat/completions；9 走 AI Horde 异步提交+轮询；
  * 0 走 Bing 重定向解析。后端失败不回退。
  * - fetchDescription() 每次入队并返回唯一请求令牌；同一时刻仅一个在途，其余排队。
  * - descriptionReady/failed 信号回带 requestId + imageUrl，调用方据此归属结果，
@@ -81,6 +85,10 @@ private:
     void startDashScope();
     void startOvh();
     void startVolcengine();
+    void startModelScope();
+    void startModelScopeIntl();
+    void startGroq();
+    void startHuggingFace();
     void startGemini();
     void startOllama();
     void startZai();

@@ -29,15 +29,19 @@ const int kMaxHops = 8;
 //   3 = 硅基流动 DeepSeek-OCR（需填 kSiliconFlowApiKey）
 //   4 = NVIDIA NIM（需填 kNvidiaApiKey，国内直连）
 //   5 = OpenRouter（需填 kOpenRouterApiKey）
-//   6 = BlockRun（免 key，免费视觉模型，可能限流）
+//   6 = BlockRun（免 key，免费视觉模型；实测免费容量常耗尽，几乎无法使用）
 //   7 = LLM7.io（需填 kLlm7ApiKey）
 //   8 = Cloudflare Workers AI（需填 kCloudflareAccountId + kCloudflareApiToken）
 //   9 = AI Horde 原生 interrogation（匿名 key，需本地图片，可能无在线 worker）
 //  10 = 阿里云百炼 qwen3-vl-flash（限时免费/新户额度，需填 kDashScopeApiKey，中文最佳）
-//  11 = OVH AI Endpoints Qwen2.5-VL-72B（免注册免 key，匿名 2 req/min/IP）
+//  11 = OVH AI Endpoints Qwen2.5-VL-72B（免注册，但实测匿名限流严格，无 key 几乎无法使用；绑卡升级 400 req/min）
 //  12 = 火山方舟豆包视觉（预置推理接入点，新用户送 token，需填 kVolcengineApiKey）
+//  13 = ModelScope 国内 qwen3-vl-8b-instruct（注册送 ~2000 次/日，需填 kModelScopeApiKey）
 //  14 = Google Gemini Flash 免费档（需填 kGeminiApiKey，免费额度大）
 //  15 = Ollama 本地视觉（localhost:11434，零 key/零限流，需先装 Ollama + ollama pull）
+//  17 = ModelScope 国际 qwen3-vl-8b-instruct（modelscope.ai，免费额度以该站为准，需填 kModelScopeIntlApiKey；实测需先在 modelscope.ai › My Settings › Account 绑定阿里云账号才能调用）
+//  18 = Groq qwen3.6-27b（免费 30 RPM/8K TPM/1K RPD，Preview，需填 kGroqApiKey；实测受限地区 IP 返回 403，需海外出口访问）
+//  19 = HuggingFace qwen2.5-vl-7b-instruct（Serverless 免费档额度很少，Router 按量，需填 kHuggingFaceApiKey）
 // 失败不回退：所选后端失败即 emit failed，不会自动尝试其他后端。
 int g_imageDescBackend = 16;
 
@@ -71,7 +75,7 @@ const char* const kOpenRouterApiKey = "";
 const char* const kOpenRouterVisionModel = "google/gemma-4-31b-it:free";
 const int kOpenRouterMaxTokens = 512;
 
-// BlockRun 免 key（https://blockrun.ai，免费视觉模型，容量受限可能失败）
+// BlockRun 免 key（https://blockrun.ai，免费视觉模型，容量受限可能失败；实测免费容量常耗尽，几乎无法使用）
 const char* const kBlockRunVisionModel = "nvidia/llama-3.2-11b-vision";
 const int kBlockRunMaxTokens = 256;
 
@@ -95,7 +99,7 @@ const char* const kDashScopeApiKey = "";
 const char* const kDashScopeVisionModel = "qwen3-vl-flash";
 const int kDashScopeMaxTokens = 512;
 
-// OVH AI Endpoints（免注册，匿名 2 req/min/IP；绑卡可用 key 升级 400 req/min）
+// OVH AI Endpoints（免注册，匿名 2 req/min/IP；实测匿名限流严格，无 key 几乎无法使用；绑卡可用 key 升级 400 req/min）
 // 文档：https://endpoints.ai.cloud.ovh.net/docs
 const char* const kOvhVisionModel = "Qwen2.5-VL-72B-Instruct";
 const int kOvhMaxTokens = 512;
@@ -121,6 +125,32 @@ const int kOllamaMaxTokens = 512;
 // 免费档 1 并发 ≈1 req/s；大陆直连性需自行确认；key 由 davobfus 的 zaiApiKey() 提供
 const char* const kZaiVisionModel = "glm-4.6v-flash";
 const int kZaiMaxTokens = 1024;
+
+// ModelScope 国内（申请：https://modelscope.cn ，需实名 + ms- token）
+// 免费档注册即送约 2000 次/天（自然日重置，单模型动态限流）；Qwen3-VL-8B 8K ctx/4K out
+const char* const kModelScopeApiKey = "";
+const char* const kModelScopeVisionModel = "Qwen/Qwen3-VL-8B-Instruct";
+const int kModelScopeMaxTokens = 512;
+
+// ModelScope 国际版（申请：https://modelscope.ai ），端点 api-inference.modelscope.ai
+// 免费额度政策以该站为准（token 与国内版不互通）
+// 实测需先在 modelscope.ai › My Settings › Account 绑定阿里云账号才能调用
+const char* const kModelScopeIntlApiKey = "";
+const int kModelScopeIntlMaxTokens = 512;
+
+// Groq（申请：https://console.groq.com/keys ，免费）
+// 免费档 30 RPM / 8K TPM / 1K RPD；qwen3.6-27b 为 Preview，中文描述较好
+// 实测受限地区（如大陆直连）IP 返回 403 Unsupported Region，需海外出口/代理
+const char* const kGroqApiKey = "";
+const char* const kGroqVisionModel = "qwen/qwen3.6-27b";
+const int kGroqMaxTokens = 1024;
+
+// HuggingFace（申请：https://huggingface.co/settings/tokens ，Inference Providers 权限）
+// 路由器端点 router.huggingface.co 为按量透传（无免费包）；
+// Serverless 免费档额度很少（<10B 模型约数百 req/h），有变化再考虑实际使用
+const char* const kHuggingFaceApiKey = "";
+const char* const kHuggingFaceVisionModel = "Qwen/Qwen2.5-VL-7B-Instruct";
+const int kHuggingFaceMaxTokens = 512;
 
 // AI Horde 原生 interrogation（匿名 key 0000000000，最低优先级）
 // 端点：https://aihorde.net/api/v2/interrogate/async + status 轮询
@@ -292,12 +322,20 @@ void ImageAiUtil::startNext()
         startOvh();
     } else if (g_imageDescBackend == 12) {
         startVolcengine();
+    } else if (g_imageDescBackend == 13) {
+        startModelScope();
     } else if (g_imageDescBackend == 14) {
         startGemini();
     } else if (g_imageDescBackend == 15) {
         startOllama();
     } else if (g_imageDescBackend == 16) {
         startZai();
+    } else if (g_imageDescBackend == 17) {
+        startModelScopeIntl();
+    } else if (g_imageDescBackend == 18) {
+        startGroq();
+    } else if (g_imageDescBackend == 19) {
+        startHuggingFace();
     } else {
         startBing();
     }
@@ -632,6 +670,47 @@ void ImageAiUtil::startVolcengine()
                       QString::fromLatin1(kVolcengineVisionModel),
                       QByteArray(kVolcengineApiKey).trimmed(),
                       kVolcengineMaxTokens);
+}
+
+void ImageAiUtil::startModelScope()
+{
+    startOpenAiVision(QStringLiteral("ModelScope(国内)"),
+                      QUrl(QStringLiteral(
+                          "https://api-inference.modelscope.cn/v1"
+                          "/chat/completions")),
+                      QString::fromLatin1(kModelScopeVisionModel),
+                      QByteArray(kModelScopeApiKey).trimmed(),
+                      kModelScopeMaxTokens);
+}
+
+void ImageAiUtil::startModelScopeIntl()
+{
+    startOpenAiVision(QStringLiteral("ModelScope(国际)"),
+                      QUrl(QStringLiteral(
+                          "https://api-inference.modelscope.ai/v1"
+                          "/chat/completions")),
+                      QString::fromLatin1(kModelScopeVisionModel),
+                      QByteArray(kModelScopeIntlApiKey).trimmed(),
+                      kModelScopeIntlMaxTokens);
+}
+
+void ImageAiUtil::startGroq()
+{
+    startOpenAiVision(QStringLiteral("Groq"),
+                      QUrl(QStringLiteral(
+                          "https://api.groq.com/openai/v1/chat/completions")),
+                      QString::fromLatin1(kGroqVisionModel),
+                      QByteArray(kGroqApiKey).trimmed(), kGroqMaxTokens);
+}
+
+void ImageAiUtil::startHuggingFace()
+{
+    startOpenAiVision(QStringLiteral("HuggingFace"),
+                      QUrl(QStringLiteral(
+                          "https://router.huggingface.co/v1/chat/completions")),
+                      QString::fromLatin1(kHuggingFaceVisionModel),
+                      QByteArray(kHuggingFaceApiKey).trimmed(),
+                      kHuggingFaceMaxTokens);
 }
 
 void ImageAiUtil::startGemini()
