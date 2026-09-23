@@ -18,7 +18,8 @@ class ToastPopup : public QskPopup
 {
     Q_OBJECT
 public:
-    static void show(QQuickItem* parent, const QString& text);
+    static void show(QQuickItem* parent, const QString& text,
+                     int durationMs = 2600);
 
 protected:
     void updateLayout() override;

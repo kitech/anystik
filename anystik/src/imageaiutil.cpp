@@ -347,10 +347,11 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
             if (bytes.size() > 20 * 1024 * 1024) {
                 const Request done = m_active;
                 qWarning().noquote() << QStringLiteral(
-                    "[ImageAiUtil] req=%1 local img too large file=%2 size=%3")
+                    "[ImageAiUtil] req=%1 local img too large file=%2 size=%3 reason=%4")
                     .arg(done.requestId)
                     .arg(QFileInfo(localPath).fileName())
-                    .arg(bytes.size());
+                    .arg(bytes.size())
+                    .arg(tr("本地图片过大（>20MB）"));
                 emit failed(done.requestId, done.imageUrl,
                             tr("本地图片过大（>20MB）"));
                 finishActive();
@@ -365,19 +366,18 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
             const bool isPng = (fmt == "png");
             if (!isJpg && !isPng) {
                 const Request done = m_active;
+                const QString reason = fmt.isEmpty()
+                    ? tr("图片无法识别（不支持该格式）")
+                    : tr("图片格式不可用（仅支持 JPG/PNG，实际：%1）")
+                          .arg(QString::fromLatin1(fmt));
                 qWarning().noquote() << QStringLiteral(
                     "[ImageAiUtil] req=%1 local img format rejected "
-                    "file=%2 path=%3 fmt=%4")
+                    "file=%2 path=%3 fmt=%4 reason=%5")
                     .arg(done.requestId)
                     .arg(QFileInfo(localPath).fileName(), localPath,
                          QString::fromLatin1(fmt.isEmpty() ? "<unknown>"
-                                                           : fmt));
-                emit failed(done.requestId, done.imageUrl,
-                            fmt.isEmpty()
-                                ? tr("图片无法识别（不支持该格式）")
-                                : tr("图片格式不可用（仅支持 JPG/PNG，"
-                                     "实际：%1）")
-                                      .arg(QString::fromLatin1(fmt)));
+                                                           : fmt), reason);
+                emit failed(done.requestId, done.imageUrl, reason);
                 finishActive();
                 return;
             }
@@ -392,8 +392,9 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
     if (imageRef.isEmpty()) {
         const Request done = m_active;
         qWarning().noquote() << QStringLiteral(
-            "[ImageAiUtil] req=%1 empty image payload url=%2 local=%3")
-            .arg(done.requestId).arg(done.imageUrl, localPath);
+            "[ImageAiUtil] req=%1 empty image payload url=%2 local=%3 reason=%4")
+            .arg(done.requestId).arg(done.imageUrl, localPath,
+                                     tr("未提供可用图片（读取失败或参数为空）"));
         emit failed(done.requestId, done.imageUrl,
                     tr("未提供可用图片（读取失败或参数为空）"));
         finishActive();
@@ -500,6 +501,9 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
                         reason = apiErr;
                     else
                         reason = tr("未识别出图片描述");
+                    qInfo().noquote() << QStringLiteral(
+                        "[ImageAiUtil] req=%1 backend=%2 failed reason=%3")
+                        .arg(active.requestId).arg(backendTag, reason);
                     emit failed(active.requestId, active.imageUrl, reason);
                 }
                 finishActive();

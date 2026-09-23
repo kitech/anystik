@@ -25,10 +25,14 @@ namespace
     }
 }
 
-void ToastPopup::show(QQuickItem* parent, const QString& text)
+void ToastPopup::show(QQuickItem* parent, const QString& text, int durationMs)
 {
     if (text.isEmpty())
         return;
+
+    if (durationMs <= 0) {
+        durationMs = 2600;
+    }
 
 #ifdef Q_OS_ANDROID
     showAndroidToast(text);            // 保原生系统 toast
@@ -36,10 +40,10 @@ void ToastPopup::show(QQuickItem* parent, const QString& text)
     auto* toast = new ToastPopup(text, parent);
     connect(toast, &QskPopup::closed, toast, &QObject::deleteLater);
 
-    QTimer::singleShot(0, toast, [toast]() {
+    QTimer::singleShot(0, toast, [toast, durationMs]() {
         toast->open();
         toast->updateGeometry();
-        QTimer::singleShot(1300, toast, [toast]() {
+        QTimer::singleShot(durationMs, toast, [toast]() {
             if (toast->isOpen())
                 toast->close();
         });

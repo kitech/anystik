@@ -363,7 +363,7 @@ public:
                     return;
                 }
                 resetAutoBusy();
-                ToastPopup::show(this, tr("获取描述失败：%1").arg(reason));
+                ToastPopup::show(this, tr("获取描述失败：%1").arg(reason), 4000);
             });
 
         // 关窗兜底：取消在途请求（不再回发信号），避免 DeleteOnClose 后回调触碰已销毁弹窗
