@@ -285,19 +285,30 @@ public:
         // 主编辑：QQuickTextEdit 封装——文字可见、自动折行、回车/Ctrl+回车换行、
         // 中文 IME 全原生（已替代 QskTextInput/QskTextField，见 AGENTS.md）
         m_editInput = new MultiLineTextEdit(m_layout);
-        m_editInput->setPlaceholderText(tr("输入描述(最多60字)"));
-        m_editInput->setMaxLength(60);
+        m_editInput->setPlaceholderText(tr("输入描述(最多140字)"));
+        m_editInput->setMaxLength(140);
         m_editInput->setFixedHeight(72);
 
         m_editCount = new QskTextLabel(m_layout);
         m_editCount->setAlignment(Qt::AlignRight);
         m_editCount->setFontRole(QskFontRole::Caption);
-        m_editCount->setText(tr("%1/%2").arg(0).arg(60));
+        m_editCount->setText(tr("%1/%2").arg(0).arg(140));
 
         connect(m_editInput, &MultiLineTextEdit::textEdited, this, [this]() {
             m_editCount->setText(
-                tr("%1/%2").arg(m_editInput->text().size()).arg(60));
+                tr("%1/%2").arg(m_editInput->text().size()).arg(140));
         });
+
+        // 自动获取描述：默认后端 16 = Z.ai(国际)，本地图片 base64 走 OpenAI 兼容通道
+        {
+            auto* autoRow = new QskLinearBox(Qt::Horizontal, m_layout);
+            autoRow->setSpacing(10);
+            m_autoBtn = new QskPushButton(tr("自动获取描述"), autoRow);
+            m_autoBtn->setBoxShapeHint(QskPushButton::Panel,
+                QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+            m_autoBtn->setSizePolicy(QskSizePolicy::Expanding,
+                                     QskSizePolicy::Preferred);
+        }
 
         auto* btnBox = new QskLinearBox(Qt::Horizontal, m_layout);
         btnBox->setSpacing(10);
@@ -314,13 +325,63 @@ public:
 
         // open 后补一次几何布局（对齐 ImageSearchPopup L167 范式）
         QTimer::singleShot(0, this, [this]() { updateGeometry(); });
+
+        // 自动获取描述：在途防重、结果按 token 归属、关窗即取消。
+        // 所有终态（成功/失败/关窗）统一经 resetAutoBusy 恢复按钮，杜绝卡死。
+        auto resetAutoBusy = [this]() {
+            m_autoReqId = 0;
+            m_autoBtn->setEnabled(true);
+            m_autoBtn->setText(tr("自动获取描述"));
+        };
+
+        connect(m_autoBtn, &QskAbstractButton::clicked, this, [this]() {
+            if (m_autoReqId != 0 || m_localPath.isEmpty()) {
+                return;
+            }
+            m_autoReqId = ImageAiUtil::instance()->fetchDescription(
+                QString(), m_localPath);
+            m_autoBtn->setEnabled(false);
+            m_autoBtn->setText(tr("获取中…"));
+        });
+
+        ImageAiUtil* ai = ImageAiUtil::instance();
+        connect(ai, &ImageAiUtil::descriptionReady, this,
+            [this, resetAutoBusy](quint64 requestId, const QString&,
+                                  const QString& desc) {
+                if (requestId != m_autoReqId) {
+                    return;
+                }
+                const QString text = desc.trimmed().left(140);
+                m_editInput->setText(text);
+                m_editCount->setText(tr("%1/%2").arg(text.size()).arg(140));
+                resetAutoBusy();
+            });
+        connect(ai, &ImageAiUtil::failed, this,
+            [this, resetAutoBusy](quint64 requestId, const QString&,
+                                  const QString& reason) {
+                if (requestId != m_autoReqId) {
+                    return;
+                }
+                resetAutoBusy();
+                ToastPopup::show(this, tr("获取描述失败：%1").arg(reason));
+            });
+
+        // 关窗兜底：取消在途请求（不再回发信号），避免 DeleteOnClose 后回调触碰已销毁弹窗
+        connect(this, &QskPopup::closed, this, [this, resetAutoBusy]() {
+            if (m_autoReqId != 0) {
+                ImageAiUtil::instance()->cancelRequest(m_autoReqId);
+                m_autoReqId = 0;
+            }
+            resetAutoBusy();
+        });
     }
 
     void setBrief(const StickerBrief& brief)
     {
+        m_localPath = brief.filePath;
         // 主输入预填原文（有则可见显示，placeholder 自动隐藏）
         m_editInput->setText(brief.description);
-        m_editCount->setText(tr("%1/%2").arg(brief.description.size()).arg(60));
+        m_editCount->setText(tr("%1/%2").arg(brief.description.size()).arg(140));
 
         QImageReader reader(brief.filePath);
         reader.setAutoTransform(true);
@@ -379,9 +440,12 @@ private:
         }
     }
 
+    QString m_localPath;          // 当前贴纸本地图路径（自动获取描述用）
     QskGraphicLabel* m_thumb = nullptr;
     QskTextLabel* m_meta = nullptr;
+    QskPushButton* m_autoBtn = nullptr;
     QskPushButton* m_saveBtn = nullptr;
+    quint64 m_autoReqId = 0;      // 自动获取描述在途令牌（0=无在途）
 };
 #include <QUrl>
 

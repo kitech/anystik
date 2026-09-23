@@ -12,6 +12,8 @@
 #include <QJsonArray>
 #include <QFile>
 #include <QFileInfo>
+#include <QImageReader>
+#include <QBuffer>
 #include <QTimer>
 #include <QDebug>
 
@@ -186,7 +188,11 @@ quint64 ImageAiUtil::fetchDescription(const QString& imageUrl,
     req.localPath = localPath;
     m_pending.enqueue(req);
     if (!m_busy) {
-        startNext();
+        // 延后到下一事件循环再启动：保证 descriptionReady/failed 一律晚于
+        // 调用方「m_xxxReqId = fetchDescription(...)」拿到令牌之后发出，
+        // 同步失败路径（格式不支持/未配置 key/过大等）不再被令牌过滤吞掉。
+        QMetaObject::invokeMethod(this, &ImageAiUtil::startNext,
+                                  Qt::QueuedConnection);
     }
     return id;
 }
@@ -330,7 +336,8 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
         QStringLiteral("请用一句中文简要描述这张图片，只输出描述本身"));
 
     // 本地图片优先：localPath 非空则转 base64 data-URI（各视觉后端直接读本机贴纸），
-    // 否则用远程 imageUrl。
+    // 否则用远程 imageUrl。只放行 JPG/PNG（GLM-4.6V 等后端的官方图片格式），
+    // 格式按文件内容探测而非扩展名。
     QString imageRef = m_active.imageUrl;
     const QString localPath = m_active.localPath.trimmed();
     if (!localPath.isEmpty()) {
@@ -340,27 +347,57 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
             if (bytes.size() > 20 * 1024 * 1024) {
                 const Request done = m_active;
                 qWarning().noquote() << QStringLiteral(
-                    "[ImageAiUtil] req=%1 local img too large")
-                    .arg(done.requestId);
+                    "[ImageAiUtil] req=%1 local img too large file=%2 size=%3")
+                    .arg(done.requestId)
+                    .arg(QFileInfo(localPath).fileName())
+                    .arg(bytes.size());
                 emit failed(done.requestId, done.imageUrl,
                             tr("本地图片过大（>20MB）"));
                 finishActive();
                 return;
             }
-            QString mime = QStringLiteral("image/png");
-            const QString ext = QFileInfo(localPath).suffix().toLower();
-            if (ext == QStringLiteral("jpg") || ext == QStringLiteral("jpeg"))
-                mime = QStringLiteral("image/jpeg");
-            else if (ext == QStringLiteral("webp"))
-                mime = QStringLiteral("image/webp");
-            else if (ext == QStringLiteral("gif"))
-                mime = QStringLiteral("image/gif");
-            else if (ext == QStringLiteral("bmp"))
-                mime = QStringLiteral("image/bmp");
-            imageRef = QStringLiteral("data:%1;base64,").arg(mime)
+            QBuffer buf(const_cast<QByteArray*>(&bytes));
+            buf.open(QIODevice::ReadOnly);
+            QImageReader reader(&buf);
+            reader.setAutoTransform(true);
+            const QByteArray fmt = reader.format().toLower();
+            const bool isJpg = (fmt == "jpg" || fmt == "jpeg");
+            const bool isPng = (fmt == "png");
+            if (!isJpg && !isPng) {
+                const Request done = m_active;
+                qWarning().noquote() << QStringLiteral(
+                    "[ImageAiUtil] req=%1 local img format rejected "
+                    "file=%2 path=%3 fmt=%4")
+                    .arg(done.requestId)
+                    .arg(QFileInfo(localPath).fileName(), localPath,
+                         QString::fromLatin1(fmt.isEmpty() ? "<unknown>"
+                                                           : fmt));
+                emit failed(done.requestId, done.imageUrl,
+                            fmt.isEmpty()
+                                ? tr("图片无法识别（不支持该格式）")
+                                : tr("图片格式不可用（仅支持 JPG/PNG，"
+                                     "实际：%1）")
+                                      .arg(QString::fromLatin1(fmt)));
+                finishActive();
+                return;
+            }
+            imageRef = QStringLiteral("data:%1;base64,")
+                           .arg(isJpg ? "image/jpeg" : "image/png")
                 + QString::fromLatin1(bytes.toBase64());
         }
-        // 读失败则回落原 imageUrl（两者皆空时由后端自报错误）
+        // 读失败则回落原 imageUrl；两者皆空时由下方空载荷前检拦截
+    }
+
+    // 空载荷前检：本地读取失败且无远程 URL → 直接失败，不发空 url 请求
+    if (imageRef.isEmpty()) {
+        const Request done = m_active;
+        qWarning().noquote() << QStringLiteral(
+            "[ImageAiUtil] req=%1 empty image payload url=%2 local=%3")
+            .arg(done.requestId).arg(done.imageUrl, localPath);
+        emit failed(done.requestId, done.imageUrl,
+                    tr("未提供可用图片（读取失败或参数为空）"));
+        finishActive();
+        return;
     }
 
     QJsonObject imageUrl;
