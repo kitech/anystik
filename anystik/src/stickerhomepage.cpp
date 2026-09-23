@@ -37,9 +37,8 @@
 #include <QskSimpleListBox.h>
 #include <QskFunctions.h>
 #include <QskQuick.h>
-#include <QInputMethodEvent>
 #include <QFontMetricsF>
-#include <private/qquicktextedit_p.h>   // 真多行编辑：QskTextInput/TextField 内嵌单行不可换行
+#include "multilinetextedit.h"   // 真多行编辑：QskTextInput/TextField 内嵌单行不可换行
 
 #include <QDir>
 #include <QFileInfo>
@@ -58,171 +57,6 @@
 #include <QKeyEvent>
 #include <QHoverEvent>
 #include <QSet>
-
-// 真多行编辑器：内嵌 QQuickTextEdit。回车/Ctrl+回车 插 \n、显式几何下自动折行、
-// 光标/中文 IME 全原生（QskTextInput/QskTextField 内嵌单行 QQuickTextInput 做不到）。
-class MultiLineTextEdit : public QskControl
-{
-    Q_OBJECT
-public:
-    explicit MultiLineTextEdit(QQuickItem* parent = nullptr)
-        : QskControl(parent)
-    {
-        setPolishOnResize(true);
-        setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
-
-        setFocusPolicy(Qt::StrongFocus);                  // 外壳为焦点对象（qskinny 输入法走线）
-        setFlag(QQuickItem::ItemAcceptsInputMethod);      // 外壳是 IM 目标（仿 QskTextInput）
-
-        m_background = new QskBox(this);
-        m_background->setBoxShapeHint(QskBox::Panel,
-            QskBoxShapeMetrics(8, Qt::AbsoluteSize));
-
-        m_placeholder = new QskTextLabel(this);
-        m_placeholder->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-        m_placeholder->setFontRole(QskFontRole::Caption);
-
-        m_edit = new QQuickTextEdit(this);
-        m_edit->setWrapMode(QQuickTextEdit::WrapAnywhere);
-        m_edit->setClip(true);
-        m_edit->setFocusOnPress(false);                   // 焦点/输入法由外壳接管
-        m_edit->setFlag(QQuickItem::ItemAcceptsInputMethod, false);
-        m_edit->setAcceptedMouseButtons(Qt::NoButton);    // 鼠标事件由外壳转发
-
-        connect(m_edit, &QQuickTextEdit::textChanged, this, [this]() {
-            if (m_maxLength > 0) {
-                const QString t = m_edit->text();
-                if (t.size() > m_maxLength) {
-                    m_edit->setText(t.left(m_maxLength));
-                    m_edit->setCursorPosition(m_maxLength);
-                }
-            }
-            updatePlaceholder();
-            Q_EMIT textEdited();
-        });
-    }
-
-    void setText(const QString& text) { m_edit->setText(text); if (!text.isEmpty()) m_edit->setCursorPosition(text.size()); updatePlaceholder(); }
-    QString text() const { return m_edit->text(); }
-    void setMaxLength(int max) { m_maxLength = max; }
-    void setPlaceholderText(const QString& text)
-    {
-        m_placeholder->setText(text);
-        updatePlaceholder();
-    }
-    void activate()
-    {
-        setFocus(true);
-        m_engaged = true;
-        m_edit->setCursorVisible(true);
-        qskInputMethodSetVisible(this, true);
-        updatePlaceholder();
-    }
-
-signals:
-    void textEdited();
-
-protected:
-    using Inherited = QskControl;
-
-    bool event(QEvent* event) override
-    {
-        if (event->type() == QEvent::ShortcutOverride)
-            return QCoreApplication::sendEvent(m_edit, event);
-        return Inherited::event(event);
-    }
-    void keyPressEvent(QKeyEvent* event) override
-    {
-        if (!m_engaged) {
-            m_engaged = true;
-            m_edit->setCursorVisible(true);
-            updatePlaceholder();
-        }
-        QCoreApplication::sendEvent(m_edit, event);
-    }
-    void keyReleaseEvent(QKeyEvent* event) override
-    {
-        QCoreApplication::sendEvent(m_edit, event);
-    }
-    void inputMethodEvent(QInputMethodEvent* event) override
-    {
-        QCoreApplication::sendEvent(m_edit, event);
-    }
-    QVariant inputMethodQuery(Qt::InputMethodQuery q) const override
-    {
-        return m_edit->inputMethodQuery(q);
-    }
-    QVariant inputMethodQuery(Qt::InputMethodQuery q, const QVariant& a) const
-    {
-        return m_edit->inputMethodQuery(q, a);
-    }
-    void focusInEvent(QFocusEvent* event) override
-    {
-        m_engaged = true;
-        m_edit->setCursorVisible(true);
-        updatePlaceholder();
-        Inherited::focusInEvent(event);
-    }
-    void focusOutEvent(QFocusEvent* event) override
-    {
-        m_engaged = false;
-        m_edit->setCursorVisible(false);
-        qskInputMethodSetVisible(this, false);
-        updatePlaceholder();
-        Inherited::focusOutEvent(event);
-    }
-    void mousePressEvent(QMouseEvent* event) override
-    {
-        QCoreApplication::sendEvent(m_edit, event);
-        if (!m_engaged)
-            activate();
-    }
-    void mouseMoveEvent(QMouseEvent* event) override
-    {
-        QCoreApplication::sendEvent(m_edit, event);
-    }
-    void mouseReleaseEvent(QMouseEvent* event) override
-    {
-        QCoreApplication::sendEvent(m_edit, event);
-    }
-    void mouseDoubleClickEvent(QMouseEvent* event) override
-    {
-        QCoreApplication::sendEvent(m_edit, event);
-    }
-    void updateLayout() override
-    {
-        if (!m_colorApplied) {
-            // 文字色对齐皮肤（placeholder 为 QskTextLabel，默认生效皮肤文本色）
-            const QColor c = m_placeholder->textColor();
-            if (c.isValid()) {
-                m_edit->setColor(c);
-                m_colorApplied = true;
-            }
-        }
-        const QRectF r = contentsRect();
-        m_background->setGeometry(r);
-        const QRectF textRect = r.adjusted(8, 4, -8, -4);   // 显式几何 → 折行成立
-        m_edit->setX(textRect.x());                          // QQuickTextEdit 为裸 QQuickItem，无 setGeometry
-        m_edit->setY(textRect.y());
-        m_edit->setWidth(textRect.width());
-        m_edit->setHeight(textRect.height());
-        m_placeholder->setGeometry(textRect);
-    }
-
-private:
-    void updatePlaceholder()
-    {
-        m_placeholder->setVisible(
-            m_edit->text().isEmpty() && !m_engaged);
-    }
-
-    QskBox* m_background = nullptr;
-    QskTextLabel* m_placeholder = nullptr;
-    QQuickTextEdit* m_edit = nullptr;
-    int m_maxLength = 0;
-    bool m_colorApplied = false;
-    bool m_engaged = false;      // 外壳：编辑态（占位符/光标/输入法面板开关）
-};
 
 // 面板不透明度：回读皮肤面板填充色、仅改 alpha（对齐 ImageSearchPopup/SyncProgressPopup）
 void applyDescPanelOpacity(QskBox* panel, qreal opacity)
@@ -1983,4 +1817,4 @@ void StickerHomePage::openChatDir(const QString& path)
 }
 
 #include "moc_stickerhomepage.cpp"
-#include "stickerhomepage.moc"   // 本文件内 Q_OBJECT 局部类（DescEditPopup/MultiLineTextEdit）
+#include "stickerhomepage.moc"   // 本文件内 Q_OBJECT 局部类（DescEditPopup）

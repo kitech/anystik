@@ -59,10 +59,9 @@
   均可见，弹窗内同样已验证可见）；但该路径不可换行，真正的多行编辑见下条 QQuickTextEdit 封装
 - 进阶: QskTextInput/QskTextField 内嵌单行 QQuickTextInput——回车=提交+移焦（源码 keyPressEvent
   仅 ImhMultiLine 时不跳焦，仍不插 \n）；折行需显式宽（subControlRect(Text) 未赋予 → WordWrap 不生效）
-- ✅ 真多行编辑: 自封装 QQuickTextEdit（`#include <private/qquicktextedit_p.h>`，工程已链
-  `Qt6::QuickPrivate`，仓库已有 `<private/qquicktaphandler_p.h>` 先例）——回车/Ctrl+回车 插 \n、
+- ✅ 真多行编辑: `multilinetextedit.{h,cpp}` 组件（本目录，自封装 QQuickTextEdit，
+  `#include <private/qquicktextedit_p.h>`；复用工程须链 `Qt6::QuickPrivate`）——回车/Ctrl+回车 插 \n、
   显式几何下自动折行、光标全原生；中文 IME 为应用级部署问题（见下节）
-  （实例: stickerhomepage.cpp MultiLineTextEdit）
 - 同类实例: anystik/src/stickerhomepage.cpp（DescEditPopup 仅剩主输入 = MultiLineTextEdit——
   QQuickTextEdit 封装，文字色取皮肤 textColor、有值预填且光标落文末；旧 QskTextInput / QskTextField
   输入均已删除）、anystik/src/stickergenpage.cpp:151

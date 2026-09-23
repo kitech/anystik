@@ -20,6 +20,8 @@ set(QSKCOMP_SOURCES
     ${QSKCOMP_DIR}/loglistview.cpp
     ${QSKCOMP_DIR}/logmodel.h
     ${QSKCOMP_DIR}/logmodel.cpp
+    ${QSKCOMP_DIR}/multilinetextedit.h
+    ${QSKCOMP_DIR}/multilinetextedit.cpp
 )
 
 set(QSKCOMP_INCLUDE_DIRS ${QSKCOMP_DIR})
