@@ -422,12 +422,14 @@ private:
         const auto parentRect = descParentRect(parentItem());
         if (parentRect.isEmpty()) return;
 
+        // 完全对齐 SyncProgressPopup（syncprogresspopup.cpp:313-317）：
+        // 宽取 maxW（内容窄所以不叠加 hint，等效“顶满”）；高同式 hint+36 并受 maxH 限
         const auto hint = m_layout->effectiveSizeHint(
             Qt::PreferredSize, QSizeF());
-        const qreal maxW = 0.9 * parentRect.width();
-
-        const qreal panelW = qMin(qMax(300.0, hint.width() + 36), maxW);
-        const qreal panelH = parentRect.height() * 2.0 / 3.0;   // 固定占 2/3 窗口高
+        const qreal maxW = qMin(0.92 * parentRect.width(), 440.0);
+        const qreal maxH = 0.9 * parentRect.height();
+        const qreal panelW = qMax(320.0, maxW);
+        const qreal panelH = qBound(360.0, hint.height() + 36, maxH);
 
         QRectF r(0, 0, panelW, panelH);
         r.moveCenter(parentRect.center());
