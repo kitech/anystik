@@ -10,6 +10,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QFile>
+#include <QFileInfo>
 #include <QTimer>
 #include <QDebug>
 
@@ -19,8 +20,8 @@ const int kMaxHops = 8;
 
 // 图片描述后端开关（全局变量，if(1) 风格手动切换）：
 //   0 = Bing（默认，无需 key；以图搜图重定向 URL 取描述）
-//   1 = Pollinations 视觉接口（需填 kPollinationsApiKey）
-//   2 = 智谱 GLM-4V-Flash（需填 kZhipuApiKey，域名国内直连）
+//   1 = Pollinations 视觉接口（已失效：仅文本 openai-fast，勿选）
+//   2 = 智谱 GLM-4.6V-Flash（需填 kZhipuApiKey，域名国内直连）
 //   3 = 硅基流动 DeepSeek-OCR（需填 kSiliconFlowApiKey）
 //   4 = NVIDIA NIM（需填 kNvidiaApiKey，国内直连）
 //   5 = OpenRouter（需填 kOpenRouterApiKey）
@@ -28,19 +29,26 @@ const int kMaxHops = 8;
 //   7 = LLM7.io（需填 kLlm7ApiKey）
 //   8 = Cloudflare Workers AI（需填 kCloudflareAccountId + kCloudflareApiToken）
 //   9 = AI Horde 原生 interrogation（匿名 key，需本地图片，可能无在线 worker）
+//  10 = 阿里云百炼 qwen3-vl-flash（限时免费/新户额度，需填 kDashScopeApiKey，中文最佳）
+//  11 = OVH AI Endpoints Qwen2.5-VL-72B（免注册免 key，匿名 2 req/min/IP）
+//  12 = 火山方舟豆包视觉（预置推理接入点，新用户送 token，需填 kVolcengineApiKey）
+//  14 = Google Gemini Flash 免费档（需填 kGeminiApiKey，免费额度大）
+//  15 = Ollama 本地视觉（localhost:11434，零 key/零限流，需先装 Ollama + ollama pull）
+//  16 = Z.ai 智谱国际版 glm-4.6v-flash（需填 kZaiApiKey，邮箱注册免手机号；与 bigmodel.cn 不互通，大陆直连自行确认）
 // 失败不回退：所选后端失败即 emit failed，不会自动尝试其他后端。
 int g_imageDescBackend = 0;
 
 // Pollinations API key（申请：https://enter.pollinations.ai/keys）
+// 注意：视觉已失效（现仅文本 openai-fast），此后端勿选
 const char* const kPollinationsApiKey = "";
 
 // 视觉模型名（gen 端点，需选支持 vision 的模型，如 openai / gemini 等）
 const char* const kPollinationsVisionModel = "openai";
 
 // 智谱 API key（申请：https://open.bigmodel.cn/ ）
-// glm-4v-flash 永久免费，但 max_tokens 上限为 1024
+// glm-4.6v-flash 永久免费（glm-4v-flash 已退役）、128K ctx，看图/视频/文件
 const char* const kZhipuApiKey = "";
-const char* const kZhipuVisionModel = "glm-4v-flash";
+const char* const kZhipuVisionModel = "glm-4.6v-flash";
 const int kZhipuMaxTokens = 1024;
 
 // 硅基流动 API key（申请：https://siliconflow.cn/ ）
@@ -55,8 +63,9 @@ const char* const kNvidiaVisionModel = "meta/llama-3.2-11b-vision-instruct";
 const int kNvidiaMaxTokens = 512;
 
 // OpenRouter API key（申请：https://openrouter.ai/keys ，:free 模型 50 次/天）
+// 免费名单频繁轮换：查 https://openrouter.ai/models?max_price=0
 const char* const kOpenRouterApiKey = "";
-const char* const kOpenRouterVisionModel = "qwen/qwen2.5-vl-72b-instruct:free";
+const char* const kOpenRouterVisionModel = "google/gemma-4-31b-it:free";
 const int kOpenRouterMaxTokens = 512;
 
 // BlockRun 免 key（https://blockrun.ai，免费视觉模型，容量受限可能失败）
@@ -76,6 +85,40 @@ const char* const kCloudflareApiToken = "";
 const char* const kCloudflareVisionModel =
     "@cf/meta/llama-3.2-11b-vision-instruct";
 const int kCloudflareMaxTokens = 512;
+
+// 阿里云百炼 DashScope（申请：https://bailian.console.aliyun.com/ ）
+// qwen3-vl-flash 限时免费，新用户每模型系列 100万 token/90天，中文最佳
+const char* const kDashScopeApiKey = "";
+const char* const kDashScopeVisionModel = "qwen3-vl-flash";
+const int kDashScopeMaxTokens = 512;
+
+// OVH AI Endpoints（免注册，匿名 2 req/min/IP；绑卡可用 key 升级 400 req/min）
+// 文档：https://endpoints.ai.cloud.ovh.net/docs
+const char* const kOvhVisionModel = "Qwen2.5-VL-72B-Instruct";
+const int kOvhMaxTokens = 512;
+
+// 火山方舟豆包视觉（申请：https://console.volcengine.com/ark ）
+// 预置推理接入点无需创建；新用户送 token，边缘大模型网关免费额度 200万起/可申 1000万
+const char* const kVolcengineApiKey = "";
+const char* const kVolcengineVisionModel = "doubao-seed-2-0-mini-260428";
+const int kVolcengineMaxTokens = 512;
+
+// Google Gemini 免费档（申请：https://aistudio.google.com/apikey ）
+// gemini-2.5-flash 免费；免费档内容可能被用于改进产品；大陆直连性请自行确认
+const char* const kGeminiApiKey = "";
+const char* const kGeminiVisionModel = "gemini-2.5-flash";
+const int kGeminiMaxTokens = 1024;
+
+// 本地 Ollama（先安装 Ollama 并 `ollama pull qwen2.5vl:7b`；localhost 免 key）
+const char* const kOllamaVisionModel = "qwen2.5vl:7b";
+const int kOllamaMaxTokens = 512;
+
+// Z.ai 智谱国际版（申请：https://z.ai ，邮箱注册免手机号；账号/Key 与 bigmodel.cn 不互通）
+// 免费视觉模型永久免费（官方价格页大写 GLM-4.6V-Flash，接口用小写同为该模型），
+// 免费档 1 并发 ≈1 req/s；大陆直连性需自行确认
+const char* const kZaiApiKey = "";
+const char* const kZaiVisionModel = "glm-4.6v-flash";
+const int kZaiMaxTokens = 1024;
 
 // AI Horde 原生 interrogation（匿名 key 0000000000，最低优先级）
 // 端点：https://aihorde.net/api/v2/interrogate/async + status 轮询
@@ -237,6 +280,18 @@ void ImageAiUtil::startNext()
         startCloudflare();
     } else if (g_imageDescBackend == 9) {
         startAiHorde();
+    } else if (g_imageDescBackend == 10) {
+        startDashScope();
+    } else if (g_imageDescBackend == 11) {
+        startOvh();
+    } else if (g_imageDescBackend == 12) {
+        startVolcengine();
+    } else if (g_imageDescBackend == 14) {
+        startGemini();
+    } else if (g_imageDescBackend == 15) {
+        startOllama();
+    } else if (g_imageDescBackend == 16) {
+        startZai();
     } else {
         startBing();
     }
@@ -274,8 +329,42 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
     textPart.insert(QStringLiteral("text"),
         QStringLiteral("请用一句中文简要描述这张图片，只输出描述本身"));
 
+    // 本地图片优先：localPath 非空则转 base64 data-URI（各视觉后端直接读本机贴纸），
+    // 否则用远程 imageUrl。
+    QString imageRef = m_active.imageUrl;
+    const QString localPath = m_active.localPath.trimmed();
+    if (!localPath.isEmpty()) {
+        QFile file(localPath);
+        if (file.open(QIODevice::ReadOnly)) {
+            const QByteArray bytes = file.readAll();
+            if (bytes.size() > 20 * 1024 * 1024) {
+                const Request done = m_active;
+                qWarning().noquote() << QStringLiteral(
+                    "[ImageAiUtil] req=%1 local img too large")
+                    .arg(done.requestId);
+                emit failed(done.requestId, done.imageUrl,
+                            tr("本地图片过大（>20MB）"));
+                finishActive();
+                return;
+            }
+            QString mime = QStringLiteral("image/png");
+            const QString ext = QFileInfo(localPath).suffix().toLower();
+            if (ext == QStringLiteral("jpg") || ext == QStringLiteral("jpeg"))
+                mime = QStringLiteral("image/jpeg");
+            else if (ext == QStringLiteral("webp"))
+                mime = QStringLiteral("image/webp");
+            else if (ext == QStringLiteral("gif"))
+                mime = QStringLiteral("image/gif");
+            else if (ext == QStringLiteral("bmp"))
+                mime = QStringLiteral("image/bmp");
+            imageRef = QStringLiteral("data:%1;base64,").arg(mime)
+                + QString::fromLatin1(bytes.toBase64());
+        }
+        // 读失败则回落原 imageUrl（两者皆空时由后端自报错误）
+    }
+
     QJsonObject imageUrl;
-    imageUrl.insert(QStringLiteral("url"), m_active.imageUrl);
+    imageUrl.insert(QStringLiteral("url"), imageRef);
     QJsonObject imagePart;
     imagePart.insert(QStringLiteral("type"), QStringLiteral("image_url"));
     imagePart.insert(QStringLiteral("image_url"), imageUrl);
@@ -364,7 +453,11 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
                                           active.imageUrl, desc);
                 } else {
                     QString reason;
-                    if (reply->error() != QNetworkReply::NoError)
+                    if (backendTag == QStringLiteral("Ollama 本地")
+                            && reply->error() != QNetworkReply::NoError) {
+                        reason = tr("未检测到本地 Ollama（请先安装 Ollama 并 "
+                                    "执行 `ollama pull qwen2.5vl:7b`）");
+                    } else if (reply->error() != QNetworkReply::NoError)
                         reason = reply->errorString();
                     else if (!apiErr.isEmpty())
                         reason = apiErr;
@@ -465,6 +558,71 @@ void ImageAiUtil::startCloudflare()
                                .arg(QString::fromLatin1(accountId))),
                       QString::fromLatin1(kCloudflareVisionModel),
                       token, kCloudflareMaxTokens);
+}
+
+void ImageAiUtil::startDashScope()
+{
+    startOpenAiVision(QStringLiteral("百炼"),
+                      QUrl(QStringLiteral(
+                          "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                          "/chat/completions")),
+                      QString::fromLatin1(kDashScopeVisionModel),
+                      QByteArray(kDashScopeApiKey).trimmed(),
+                      kDashScopeMaxTokens);
+}
+
+void ImageAiUtil::startOvh()
+{
+    // 免 key 后端：allowEmptyKey=true，不发送 Authorization 头
+    startOpenAiVision(QStringLiteral("OVH"),
+                      QUrl(QStringLiteral(
+                          "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
+                          "/chat/completions")),
+                      QString::fromLatin1(kOvhVisionModel),
+                      QByteArray(), kOvhMaxTokens, true);
+}
+
+void ImageAiUtil::startVolcengine()
+{
+    startOpenAiVision(QStringLiteral("豆包"),
+                      QUrl(QStringLiteral(
+                          "https://ark.cn-beijing.volces.com/api/v3"
+                          "/chat/completions")),
+                      QString::fromLatin1(kVolcengineVisionModel),
+                      QByteArray(kVolcengineApiKey).trimmed(),
+                      kVolcengineMaxTokens);
+}
+
+void ImageAiUtil::startGemini()
+{
+    startOpenAiVision(QStringLiteral("Gemini"),
+                      QUrl(QStringLiteral(
+                          "https://generativelanguage.googleapis.com/v1beta"
+                          "/openai/chat/completions")),
+                      QString::fromLatin1(kGeminiVisionModel),
+                      QByteArray(kGeminiApiKey).trimmed(),
+                      kGeminiMaxTokens);
+}
+
+void ImageAiUtil::startOllama()
+{
+    // 本地服务（localhost:11434），免 key；连不上时给出安装提示
+    startOpenAiVision(QStringLiteral("Ollama 本地"),
+                      QUrl(QStringLiteral(
+                          "http://localhost:11434/v1/chat/completions")),
+                      QString::fromLatin1(kOllamaVisionModel),
+                      QByteArray(), kOllamaMaxTokens, true);
+}
+
+void ImageAiUtil::startZai()
+{
+    // 国际版独立端点；未填 key 时沿用「未配置 key」提示
+    startOpenAiVision(QStringLiteral("Z.ai(国际)"),
+                      QUrl(QStringLiteral(
+                          "https://api.z.ai/api/paas/v4/chat/completions")),
+                      QString::fromLatin1(kZaiVisionModel),
+                      QByteArray(kZaiApiKey).trimmed(),
+                      kZaiMaxTokens);
 }
 
 // AI Horde 原生 interrogation：本地图片 base64 提交 → 定时轮询状态。

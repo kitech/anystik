@@ -15,7 +15,7 @@ class QTimer;
  * 支持多种后端，由 imageaiutil.cpp 内的全局开关 g_imageDescBackend 切换：
  *   0 = Bing 以图搜图的重定向 URL（默认，无需 key）
  *   1 = Pollinations 视觉接口（需填 kPollinationsApiKey）
- *   2 = 智谱 GLM-4V-Flash（需填 kZhipuApiKey）
+ *   2 = 智谱 GLM-4.6V-Flash（需填 kZhipuApiKey）
  *   3 = 硅基流动 DeepSeek-OCR（需填 kSiliconFlowApiKey）
  *   4 = NVIDIA NIM（需填 kNvidiaApiKey）
  *   5 = OpenRouter（需填 kOpenRouterApiKey）
@@ -23,7 +23,13 @@ class QTimer;
  *   7 = LLM7.io（需填 kLlm7ApiKey）
  *   8 = Cloudflare Workers AI（需填 kCloudflareAccountId + kCloudflareApiToken）
  *   9 = AI Horde 原生 interrogation（匿名 key 0000000000，需本地图片）
- * 1~8 走 OpenAI 兼容 chat/completions；9 走 AI Horde 异步提交+轮询；
+ *  10 = 阿里云百炼 qwen3-vl-flash（限时免费/新户额度，需填 kDashScopeApiKey）
+ *  11 = OVH AI Endpoints Qwen2.5-VL-72B（免注册免 key，匿名 2 req/min/IP）
+ *  12 = 火山方舟豆包视觉（预置推理接入点，新用户送 token，需填 kVolcengineApiKey）
+ *  14 = Google Gemini Flash 免费档（需填 kGeminiApiKey，免费额度大）
+ *  15 = Ollama 本地视觉（localhost:11434，零 key/零限流，需先装 Ollama）
+ *  16 = Z.ai 智谱国际版 glm-4.6v-flash（需填 kZaiApiKey，与 bigmodel.cn 不互通）
+ * 1~8/10~12/14~16 走 OpenAI 兼容 chat/completions；9 走 AI Horde 异步提交+轮询；
  * 0 走 Bing 重定向解析。后端失败不回退。
  * - fetchDescription() 每次入队并返回唯一请求令牌；同一时刻仅一个在途，其余排队。
  * - descriptionReady/failed 信号回带 requestId + imageUrl，调用方据此归属结果，
@@ -37,13 +43,14 @@ public:
     struct Request {
         quint64 requestId = 0;
         QString imageUrl;
-        QString localPath;    // 本地图片路径（仅 AI Horde 原生接口需要）
+        QString localPath;    // 本地图片路径（AI Horde 上传、OpenAI 兼容后端本地图 base64）
     };
 
     static ImageAiUtil* instance();
 
     // 入队一次描述获取；返回唯一请求令牌。
-    // localPath 供 AI Horde 等需要本地上传的后端使用，其余后端忽略。
+    // localPath 供需要本地上传/本地图的后端使用（AI Horde、OpenAI 兼容后端 base64
+    // data-URI），远程图后端忽略。
     quint64 fetchDescription(const QString& imageUrl,
                              const QString& localPath = QString());
 
@@ -70,6 +77,12 @@ private:
     void startLlm7();
     void startCloudflare();
     void startAiHorde();
+    void startDashScope();
+    void startOvh();
+    void startVolcengine();
+    void startGemini();
+    void startOllama();
+    void startZai();
     void pollAiHorde();
     void startOpenAiVision(const QString& backendTag, const QUrl& url,
                            const QString& model, const QByteArray& apiKey,
