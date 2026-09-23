@@ -269,9 +269,18 @@ public:
         m_layout->setMargins(18);
         m_layout->setSpacing(10);
 
-        auto* title = new QskTextLabel(tr("编辑描述简介"), m_layout);
+        // 标题行（左：标题 / 右：关闭按钮），对齐 SyncProgressPopup 范式
+        auto* titleRow = new QskLinearBox(Qt::Horizontal, m_layout);
+        titleRow->setSpacing(8);
+
+        auto* title = new QskTextLabel(tr("编辑描述简介"), titleRow);
         title->setFontRole(QskFontRole::Title);
-        title->setAlignment(Qt::AlignCenter);
+        title->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+        title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+        m_cornerCloseBtn = new QskPushButton(QStringLiteral("✕"), titleRow);
+        connect(m_cornerCloseBtn, &QskAbstractButton::clicked,
+                this, &QskPopup::close);
 
         m_thumb = new QskGraphicLabel(m_layout);
         m_thumb->setFillMode(QskGraphicLabel::PreserveAspectFit);
@@ -374,6 +383,38 @@ public:
             }
             resetAutoBusy();
         });
+
+        // Esc / 安卓返回键关闭（对齐 SyncProgressPopup 范式）。
+        // DeleteOnClose 自毁时必须先移除窗口滤镜，避免悬垂过滤器指针。
+        connect(this, &QskPopup::opened, this, [this]() {
+            if (m_escFilterInstalled)
+                return;
+            if (auto* w = window()) {
+                w->installEventFilter(this);
+                m_escFilterInstalled = true;
+            }
+        });
+    }
+
+    ~DescEditPopup() override
+    {
+        if (m_escFilterInstalled) {
+            if (auto* w = window())
+                w->removeEventFilter(this);
+            m_escFilterInstalled = false;
+        }
+    }
+
+    bool eventFilter(QObject*, QEvent* ev) override
+    {
+        if (ev->type() == QEvent::KeyPress) {
+            const auto key = static_cast<QKeyEvent*>(ev)->key();
+            if (key == Qt::Key_Escape || key == Qt::Key_Back) {
+                close();      // 弹窗自身可随时关闭，无需门控
+                return true;  // 吞掉，禁止底层 QskPopup/BackButtonFilter 处理
+            }
+        }
+        return false;
     }
 
     void setBrief(const StickerBrief& brief)
@@ -447,6 +488,8 @@ private:
     QskTextLabel* m_meta = nullptr;
     QskPushButton* m_autoBtn = nullptr;
     QskPushButton* m_saveBtn = nullptr;
+    QskPushButton* m_cornerCloseBtn = nullptr;
+    bool m_escFilterInstalled = false;
     quint64 m_autoReqId = 0;      // 自动获取描述在途令牌（0=无在途）
 };
 #include <QUrl>
