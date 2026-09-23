@@ -3,12 +3,16 @@
 #include "advobfuscator/string.h"
 
 // 双轨混淆：
-//   Debug/RelWithDebInfo 等同调试型构建 → libobfuscate AY_OBFUSCATE（全构建生效）
-//   Release 构建 → ADVobfuscator ""_obf（仅 Release 生效，混淆更强）
-// 检测条件取三信号 OR，任一命中即视为调试型，宁保守不回退明文：
-//   - _DEBUG   MSVC 传统调试宏
-//   - !NDEBUG  C/C++ 标准：未定义 NDEBUG 即断言/调试模式
-//   - QT_DEBUG Qt：qtconfigmacros.h 在未定义 QT_NO_DEBUG 时自动定义
+//   Android / Debug / RelWithDebInfo 等同调试型构建 → libobfuscate AY_OBFUSCATE（全构建生效）
+//   非 Android 的 Release 构建 → ADVobfuscator ""_obf（混淆更强）
+// 注意：Android 不用 ADVobfuscator —— 该 2025 版(consteval+FSM)在 NDK clang 上
+// 运行时解码抛 std::exception，进入 noexcept 触发 std::terminate 闪退（实测安卓
+// 点「自动获取描述」即崩）；libobfuscate 全平台稳定，仅混淆强度低一档。
+// 检测条件取四信号 OR，任一命中即回退 libobfuscate，宁保守不碰 ADVobfuscator：
+//   - __ANDROID__  NDK clang 恒定义，Android 一律走稳定支
+//   - _DEBUG       MSVC 传统调试宏
+//   - !NDEBUG      C/C++ 标准：未定义 NDEBUG 即断言/调试模式
+//   - QT_DEBUG     Qt：qtconfigmacros.h 在未定义 QT_NO_DEBUG 时自动定义
 // ADVobfuscator 须用 `_obf` UDL 而非显式构造：
 //   ObfuscatedString("...") 会把字面量当运行时参数留在 .rodata 泄露明文；
 //   "..."_obf 把 ObfuscatedString 整体作为 NTTP 模板实参，仅存编码字节。
@@ -25,7 +29,7 @@ using namespace andrivet::advobfuscator;
 
 QString davObfusKey()
 {
-#if defined(_DEBUG) || !defined(NDEBUG) || defined(QT_DEBUG)
+#if defined(__ANDROID__) || defined(_DEBUG) || !defined(NDEBUG) || defined(QT_DEBUG)
     // libobfuscate：编译期 XOR 加密，明文不出现在二进制（全构建生效）
     const char* key = AY_OBFUSCATE(DAVOBFUS_KEY);
     return QString::fromUtf8(key);
@@ -41,7 +45,7 @@ QString davObfusKey()
 
 QString zaiApiKey()
 {
-#if defined(_DEBUG) || !defined(NDEBUG) || defined(QT_DEBUG)
+#if defined(__ANDROID__) || defined(_DEBUG) || !defined(NDEBUG) || defined(QT_DEBUG)
     const char* key = AY_OBFUSCATE(ZAI_OBFUS_KEY);
     return QString::fromUtf8(key);
 #else
