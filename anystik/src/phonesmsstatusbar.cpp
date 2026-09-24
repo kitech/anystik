@@ -14,8 +14,10 @@
 #include <QskTextLabel.h>
 
 #include <QDateTime>
+#include <QCoreApplication>
 #include <QQuickWindow>
 #include <QTimer>
+#include <QKeyEvent>
 #include <QDebug>
 
 namespace
@@ -47,8 +49,8 @@ public:
                       const QString& closeText, QQuickItem* parent)
         : QskPopup(parent)
     {
-        setModal(false);
-        setOverlay(false);
+        setModal(true);
+        setOverlay(true);
         setPopupFlag(QskPopup::DeleteOnClose, false);
         setPolishOnResize(true);
         setPolishOnParentResize(true);
@@ -62,22 +64,74 @@ public:
         m_layout->setMargins(16);
         m_layout->setSpacing(10);
 
-        m_tabBar = new QskTabBar(Qt::TopEdge, m_layout);
+        // ── 头部行（左：电话/短信 Tab / 右：✕ 关闭）──
+        auto* headerRow = new QskLinearBox(Qt::Horizontal, m_layout);
+        headerRow->setSpacing(8);
+
+        m_tabBar = new QskTabBar(Qt::TopEdge, headerRow);
         m_tabBar->addTab(tabCall);
         m_tabBar->addTab(tabSms);
         m_tabBar->setAutoFitTabs(true);
+        m_tabBar->setSizePolicy(
+            QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+        m_cornerCloseBtn = new QskPushButton(QStringLiteral("✕"), headerRow);
+        connect(m_cornerCloseBtn, &QskAbstractButton::clicked,
+                this, &QskPopup::close);
 
         m_listBox = new QskSimpleListBox(m_layout);
         m_listBox->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
+        // Expanding 列表不贡献首选尺寸 → 显式给 hint（与同步窗口 setListPreferredHeight 同款）
+        // 500 保证 hint 恒 ≥ maxW(≤440)，340 与同步日志列表同款高度
+        m_listBox->setPreferredSize(QSizeF(500, 540));
 
         m_closeBtn = new QskPushButton(closeText, m_layout);
         m_closeBtn->setBoxShapeHint(QskPushButton::Panel,
             QskBoxShapeMetrics(8, Qt::AbsoluteSize));
         connect(m_closeBtn, &QskAbstractButton::clicked, this, &QskPopup::close);
+
+        // Esc / 安卓返回键关闭：挂 QCoreApplication 全局过滤器（同一对象后装先跑），
+        // 抢在 main.cpp 的 BackButtonFilter 之前，window 级过滤器会被它先吞掉
+        connect(this, &QskPopup::opened, this, [this]() {
+            if (m_escFilterInstalled)
+                return;
+            if (auto* app = QCoreApplication::instance()) {
+                app->installEventFilter(this);
+                m_escFilterInstalled = true;
+            }
+        });
+        connect(this, &QskPopup::closed, this, [this]() {
+            if (!m_escFilterInstalled)
+                return;
+            if (auto* app = QCoreApplication::instance())
+                app->removeEventFilter(this);
+            m_escFilterInstalled = false;
+        });
     }
 
     QskTabBar* tabBar() const { return m_tabBar; }
     QskSimpleListBox* listBox() const { return m_listBox; }
+
+    ~PhoneSmsListPopup() override
+    {
+        if (m_escFilterInstalled) {
+            if (auto* app = QCoreApplication::instance())
+                app->removeEventFilter(this);
+            m_escFilterInstalled = false;
+        }
+    }
+
+    bool eventFilter(QObject*, QEvent* ev) override
+    {
+        if (ev->type() == QEvent::KeyPress) {
+            const auto key = static_cast<QKeyEvent*>(ev)->key();
+            if (key == Qt::Key_Escape || key == Qt::Key_Back) {
+                close();      // 弹窗可随时关闭，无需门控
+                return true;  // 吞掉，禁止后续 BackButtonFilter 退出/翻页处理
+            }
+        }
+        return false;
+    }
 
 protected:
     void updateLayout() override
@@ -89,13 +143,19 @@ protected:
 private:
     void updateGeometry()
     {
-        QRectF parentRect(0, 0, 400, 520);
-        if (auto* w = window())
-            parentRect = QRectF(QPointF(), w->size());
+        const QRectF parentRect = window()
+            ? QRectF(QPointF(), window()->size())
+            : QRectF();
+        if (parentRect.isEmpty())
+            return;
 
-        const qreal w = 340.0;
-        const qreal h = qMin(parentRect.height() * 0.7, 480.0);
-        QRectF r(0, 0, w, h);
+        const auto hint = m_layout->effectiveSizeHint(Qt::PreferredSize, QSizeF());
+        const qreal maxW = qMin(0.92 * parentRect.width(), 440.0);
+        const qreal maxH = 0.9 * parentRect.height();
+        const qreal panelW = qBound(320.0, hint.width() + 36, maxW);
+        const qreal panelH = qBound(360.0, hint.height() + 36, maxH);
+
+        QRectF r(0, 0, panelW, panelH);
         r.moveCenter(parentRect.center());
         setGeometry(r);
         m_panel->setGeometry(r.translated(-r.topLeft()));
@@ -105,7 +165,9 @@ private:
     QskLinearBox* m_layout = nullptr;
     QskTabBar* m_tabBar = nullptr;
     QskSimpleListBox* m_listBox = nullptr;
+    QskPushButton* m_cornerCloseBtn = nullptr;
     QskPushButton* m_closeBtn = nullptr;
+    bool m_escFilterInstalled = false;
 };
 
 PhoneSmsStatusBar::PhoneSmsStatusBar(QQuickItem* parent)
