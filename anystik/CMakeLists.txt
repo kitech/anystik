@@ -121,6 +121,7 @@ qt_add_executable(anystik
     ${qlcomp_dir}/assertf.cpp
     ${qlcomp_dir}/generic_slot.cpp
     ${qlcomp_dir}/qthooks.cpp
+    ${qlcomp_dir}/tagutil.cpp
     ${qlcomp_dir}/md5.c
     ${qlcomp_dir}/qcrc64.cpp
     ${QSKCOMP_SOURCES}

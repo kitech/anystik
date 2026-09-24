@@ -59,3 +59,5 @@ term2: echo > droid.log && tail -f droid.log |grep -a -i tox
 
 * https://volpeon.ink
 * 斗图DIY表情大师app
+* sticker bridge
+
