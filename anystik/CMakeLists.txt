@@ -22,10 +22,10 @@ if(ANDROID)
     _fix_qskinny_abi_target(Qt6OpenGL_arm64-v8a Qt6::OpenGL)
 endif()
 
-set(qlapp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qldox)
-set(qlcomp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp)
 set(myvendor_dir ${CMAKE_CURRENT_SOURCE_DIR}/../myvendor)
 include(${myvendor_dir}/tousesub.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/qlappcom.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/qlcompsub.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../qskcomp/qskcomp.cmake)
 
 qt_add_executable(anystik
@@ -109,24 +109,8 @@ qt_add_executable(anystik
     vendor/qwebdav/qwebdavdirparser.cpp
     vendor/qwebdav/qwebdavitem.cpp
     ${MYVENDOR_SOURCES}
-    ${qlapp_dir}/cJSON.c
-    ${qlapp_dir}/message_db.cpp
-    ${qlapp_dir}/storage.cpp
-    ${qlapp_dir}/channel_db.cpp
-    ${qlapp_dir}/pending_db.cpp
-    ${qlapp_dir}/sticker_db.cpp
-    ${qlapp_dir}/cache_db.cpp
-    ${qlapp_dir}/cache_fs.cpp
-    ${qlapp_dir}/eventpoller.cpp
-    ${qlapp_dir}/unknownparser.cpp
-    ${qlcomp_dir}/compatcore34.cpp
-    ${qlcomp_dir}/limelog.cpp
-    ${qlcomp_dir}/assertf.cpp
-    ${qlcomp_dir}/generic_slot.cpp
-    ${qlcomp_dir}/qthooks.cpp
-    ${qlcomp_dir}/tagutil.cpp
-    ${qlcomp_dir}/md5.c
-    ${qlcomp_dir}/qcrc64.cpp
+    ${QLAPP_SOURCES}
+    ${QLCOMP_SOURCES}
     ${QSKCOMP_SOURCES}
 )
 
@@ -149,8 +133,8 @@ target_include_directories(anystik PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/qwebdav
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/include
     ${MYVENDOR_INCLUDE_DIRS}
-    ${qlapp_dir}
-    ${qlcomp_dir}
+    ${QLAPP_INCLUDE_DIRS}
+    ${QLCOMP_INCLUDE_DIRS}
     ${QSKCOMP_INCLUDE_DIRS}
 )
 
