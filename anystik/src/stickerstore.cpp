@@ -38,6 +38,8 @@
 #include <QtCore/private/qzipreader_p.h>
 #include <QTemporaryFile>
 #include "../vendor/tangora_gif.h"
+#include <zlib.h>
+#include <QPainter>
 #include <string>
 
 #ifdef Q_OS_ANDROID
@@ -587,9 +589,70 @@ int StickerStore::countStickers(const QString& packId)
 static bool isSupportedImage(const QString& suffix)
 {
     static const QStringList exts = {
-        "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg",
+        "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "tgs",
     };
     return exts.contains(suffix.toLower());
+}
+
+// ── TGS 支持：Telegram 官方动图贴纸是 gzip 压缩的 Lottie JSON ──
+// 本应用不内置 Lottie 渲染，导入时解压读取画布尺寸，用占位图入库。
+static bool gunzipTgs(const QByteArray& in, QByteArray* raw)
+{
+    if (raw) raw->clear();
+    z_stream zs;
+    std::memset(&zs, 0, sizeof(zs));
+    if (inflateInit2(&zs, 15 + 16) != Z_OK) return false;   // 31: 自动识别 gzip/zlib
+    zs.next_in  = reinterpret_cast<Bytef*>(const_cast<char*>(in.constData()));
+    zs.avail_in = uInt(in.size());
+    char buf[65536];
+    int ret = Z_OK;
+    do {
+        zs.next_out = reinterpret_cast<Bytef*>(buf);
+        zs.avail_out = sizeof(buf);
+        ret = inflate(&zs, Z_NO_FLUSH);
+        if (ret != Z_OK && ret != Z_STREAM_END) {
+            inflateEnd(&zs);
+            return false;
+        }
+        if (raw) raw->append(buf, sizeof(buf) - zs.avail_out);
+    } while (ret != Z_STREAM_END);
+    inflateEnd(&zs);
+    return true;
+}
+
+static bool parseTgsSize(const QByteArray& raw, int* w, int* h)
+{
+    QJsonParseError pe;
+    const QJsonDocument doc = QJsonDocument::fromJson(raw, &pe);
+    if (pe.error != QJsonParseError::NoError || !doc.isObject()) return false;
+    const QJsonObject o = doc.object();
+    if (!o.contains("w") || !o.contains("h")) return false;
+    const QJsonValue wv = o.value("w"), hv = o.value("h");
+    if (!wv.isDouble() || !hv.isDouble()) return false;
+    const int wi = int(wv.toDouble()), hi = int(hv.toDouble());
+    if (wi <= 0 || hi <= 0 || wi > 8192 || hi > 8192) return false;
+    if (w) *w = wi;
+    if (h) *h = hi;
+    return true;
+}
+
+static QImage makeTgsPlaceholder(const QString& name, int w, int h)
+{
+    QImage img(w, h, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setBrush(QColor(90, 140, 220, 90));
+    p.setPen(Qt::NoPen);
+    p.drawRoundedRect(QRectF(0, 0, w, h), w * 0.04, h * 0.04);
+    QFont f = p.font();
+    f.setPixelSize(qMax(12, qMin(w, h) / 8));
+    p.setFont(f);
+    p.setPen(QColor(255, 255, 255, 230));
+    p.drawText(QRect(0, 0, w, h), Qt::AlignCenter,
+               name.isEmpty() ? QStringLiteral("TGS 动图") : name);
+    p.end();
+    return img;
 }
 
 static bool scanRecursive(QDir dir, QVector<QString>& files)
@@ -1602,6 +1665,51 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
         // 相对源根的相对子路径，保持目录层级复制到目标
         const QString rel = QDir(rootAbs).relativeFilePath(file);
         const QString dst = targetDir + QLatin1Char('/') + rel;
+
+        // TGS 分支：Telegram 动图贴纸（gzip Lottie JSON）。
+        // 解压取画布尺寸，原始 .tgs 字节保留，同目录生成占位 PNG 入库。
+        if (QFileInfo(file).suffix().toLower() == QLatin1String("tgs")) {
+            QFile f(file);
+            if (!f.open(QIODevice::ReadOnly)) continue;
+            const QByteArray bytes = f.readAll();
+            f.close();
+            int tw = 512, th = 512;
+            QByteArray raw;
+            const bool gzOk = bytes.size() >= 2
+                && uchar(bytes.at(0)) == 0x1f && uchar(bytes.at(1)) == 0x8b
+                && gunzipTgs(bytes, &raw);
+            if (!gzOk || !parseTgsSize(raw, &tw, &th)) {
+                tw = th = 512;
+            }
+
+            // 原始 .tgs 字节保留（供未来真渲染），仍按相对层级复制
+            if (!QFile::exists(dst)) {
+                if (!QDir().mkpath(QFileInfo(dst).absolutePath())) continue;
+                if (!QFile::copy(file, dst)) continue;
+            }
+            // 占位 PNG：同目录 <stem>.tgs_preview.png
+            // （带 .tgs_preview 后缀避免与并存同 stem 真图冲突）
+            const QString stem = QFileInfo(file).completeBaseName();
+            const QString pngRel = stem + QStringLiteral(".tgs_preview.png");
+            const QString pngDst = QFileInfo(dst).dir().filePath(pngRel);
+            const QImage ph = makeTgsPlaceholder(stem, tw, th);
+            if (ph.isNull()) continue;
+            ph.save(pngDst, "PNG");
+            if (!QFileInfo(pngDst).exists()) continue;
+
+            StickerRow row;
+            row.id = fileIdFor(pngDst).toStdString();
+            row.pack_id = packId.toUtf8().constData();
+            row.file_path = relativeToBase(pngDst).toStdString();
+            row.emoji = "";
+            row.width = tw;
+            row.height = th;
+            row.size = int(QFileInfo(dst).size());   // 原始 tgs 字节数
+            row.last_used = 0;
+            row.position = pos++;
+            if (db.add_sticker(row)) importedAny = true;
+            continue;
+        }
 
         // 解码预检：svg 例外（canRead 依赖平台 qsvg 插件，保持旧行为）；
         // 其它格式解析不出尺寸（损坏/截断/不支持）→ 跳过，不复制不入库。
@@ -3162,11 +3270,17 @@ const BuiltinSource kBuiltinSources[] = {
       6236255L,
       "https://v2fy.com/p/106_Frieren_%E8%8A%99%E8%8E%89%E8%8E%B2%F0%9F%AA%84_BQB/?post_category=%E4%B8%AD%E5%9B%BD%E4%BA%BA%E7%9A%84%E8%A1%A8%E6%83%85%E5%8C%85-pp%E5%88%B6%E9%80%A0%E8%AE%A1%E5%88%92-chinesebqb",
       "2026-06-19", true },
-    { "新飞飞QQ表情包 (eif)",
-      "https://cz.197942.com/dl/lx/xinff.zip",
-      167841L,    // 2013-01-04 cr173 页面更新日；zip 内含 新飞飞表情包.eif（1602050B，74 张）
-      "https://www.cr173.com/soft/53605.html",
-      "2013-01-04", true },
+{ "新飞飞QQ表情包 (eif)",
+       "https://cz.197942.com/dl/lx/xinff.zip",
+       167841L,    // 2013-01-04 cr173 页面更新日；zip 内含 新飞飞表情包.eif（1602050B，74 张）
+       "https://www.cr173.com/soft/53605.html",
+       "2013-01-04", true },
+     { "Telegram 官方动图贴纸样例 (TGS)",
+       "https://codeload.github.com/kuronekowen/Telegram-Sticker-Sample/zip/"
+       "334150dbf20b010dbb6393baccc1f596f046a1f3",
+       778380L,       // 2026-09-25 实测下载字节；zip 内含 6 张 tgs + 6 份 Lottie JSON
+       "https://github.com/kuronekowen/Telegram-Sticker-Sample",
+       "2021-11-13", true },
 };
 const unsigned kBuiltinSourceCount =
     sizeof(kBuiltinSources) / sizeof(kBuiltinSources[0]);
@@ -3591,6 +3705,12 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     if (eifreader::isEifFile(head8)) {
         return runInstallEif(task, zipPath, md5);
     }
+    // TGS 分流：单个 .tgs（gzip 压缩 Lottie）裸文件也走专门安装链路。
+    // 注：zip 包内的 .tgs 由 importDirectory 的 tgs 分支处理，不需在此分流。
+    if (head8.size() >= 2 && uchar(head8.at(0)) == 0x1f
+            && uchar(head8.at(1)) == 0x8b) {
+        return runInstallTgs(task, zipPath, md5);
+    }
 
     QZipReader zip(zipPath);
     if (!zip.exists() || !zip.isReadable()) {
@@ -3799,6 +3919,77 @@ StickerStore::InstallResult StickerStore::runInstallEif(
     }
 
     QFile::remove(eifPath);
+    return r;
+}
+
+StickerStore::InstallResult StickerStore::runInstallTgs(
+    DownloadTask* task, const QString& tgsPath, const QByteArray& md5)
+{
+    const QString url = task->url;
+    const QString base = stickerBaseDir();
+
+    // 标题同 zip 链路：源显示名优先，回退 URL 派生名
+    QString title = task->name;
+    if (title.isEmpty()) {
+        title = urlDisplayName(url);
+    }
+    title = sanitizeToken(title);
+
+    const QString targetDir = base + QStringLiteral("/packs/") + title;
+    if (QFile::exists(targetDir)) {
+        if (!QDir(targetDir).removeRecursively()) {
+            return {false, QStringLiteral("无法清理旧包目录"), {}, {},
+                    {}, {}, {}};
+        }
+    }
+    if (!QDir().mkpath(targetDir)) {
+        return {false, QStringLiteral("无法创建包目录"), {}, {}, {}, {}, {}};
+    }
+
+    // 单文件 tgs 落盘，随后的 importDirectory 会命中 tgs 分支生成占位
+    const QString tgsDst = targetDir + QStringLiteral("/") + title
+                           + QStringLiteral(".tgs");
+    if (!QFile::copy(tgsPath, tgsDst)) {
+        return {false, QStringLiteral("导入失败：tgs 文件无法落盘"), {}, {},
+                {}, {}, {}};
+    }
+
+    QString err;
+    if (!importDirectory(targetDir, &err)) {
+        return {false, QStringLiteral("导入失败：") + (err.isEmpty()
+                 ? QStringLiteral("无可用图片") : err), {}, {},
+                 {}, {}, {}};
+    }
+
+    QString packId;
+    for (const auto& p : stickerDb().list_packs(-1)) {
+        if (QString::fromUtf8(p.title.c_str()) == title) {
+            packId = QString::fromStdString(p.id);
+            break;
+        }
+    }
+    if (packId.isEmpty()) {
+        QFile::remove(tgsPath);
+        return {false, QStringLiteral("分组标识丢失"), {}, {}, {}, {}, {}};
+    }
+
+    InstallResult r;
+    r.ok = true;
+    r.message = title;
+    r.packId = packId;
+    r.dir = targetDir;
+    r.total = QFileInfo(tgsPath).size();
+    r.md5Hex = QString::fromLatin1(md5.toHex());
+
+    const QVariantMap oldMeta = QSettings().value(
+        QStringLiteral("downloadedPackMeta/") + packId).toMap();
+    const QString oldMd5 = oldMeta.value("md5").toString();
+    if (!oldMd5.isEmpty() && oldMeta.value("url").toString() == url
+            && oldMd5 != r.md5Hex) {
+        r.note = QStringLiteral("（远端内容已变化，已覆盖安装）");
+    }
+
+    QFile::remove(tgsPath);
     return r;
 }
 

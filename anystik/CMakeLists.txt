@@ -234,10 +234,12 @@ if(ANDROID)
         IMPORTED_NO_SONAME TRUE)
 
     target_link_libraries(anystik PRIVATE libcurl libssl libcrypto)
+    target_link_libraries(anystik PRIVATE z)
 else()
     find_package(CURL REQUIRED)
     find_package(OpenSSL REQUIRED)
-    target_link_libraries(anystik PRIVATE CURL::libcurl OpenSSL::SSL OpenSSL::Crypto)
+    find_package(ZLIB REQUIRED)
+    target_link_libraries(anystik PRIVATE CURL::libcurl OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB)
 endif()
 
 # ── vendor: SQLite 预编译库 ──

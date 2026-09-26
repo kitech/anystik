@@ -409,6 +409,7 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     topBar->setSpacing(8);
 
     m_title = new QskTextLabel(tr("😐 表情包"), topBar);
+    m_title->setFontRole(QskFontRole::Title);
     m_title->setAlignment(Qt::AlignCenter);
     m_title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
 
