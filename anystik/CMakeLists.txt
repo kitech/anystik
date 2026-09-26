@@ -24,6 +24,8 @@ endif()
 
 set(qlapp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qldox)
 set(qlcomp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp)
+set(myvendor_dir ${CMAKE_CURRENT_SOURCE_DIR}/../myvendor)
+include(${myvendor_dir}/tousesub.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../qskcomp/qskcomp.cmake)
 
 qt_add_executable(anystik
@@ -106,6 +108,7 @@ qt_add_executable(anystik
     vendor/qwebdav/qwebdav.cpp
     vendor/qwebdav/qwebdavdirparser.cpp
     vendor/qwebdav/qwebdavitem.cpp
+    ${MYVENDOR_SOURCES}
     ${qlapp_dir}/cJSON.c
     ${qlapp_dir}/message_db.cpp
     ${qlapp_dir}/storage.cpp
@@ -145,6 +148,7 @@ target_include_directories(anystik PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/qwebdav
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/include
+    ${MYVENDOR_INCLUDE_DIRS}
     ${qlapp_dir}
     ${qlcomp_dir}
     ${QSKCOMP_INCLUDE_DIRS}
