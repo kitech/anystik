@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(anystik LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 23) # osx11 max23
+set(CMAKE_CXX_STANDARD 23) # osx11 max23, build slower
+set(CMAKE_CXX_STANDARD 17) # osx11 max23, build faster
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
@@ -62,6 +63,10 @@ qt_add_executable(anystik
     src/phonemonitor.cpp
     src/phonesmsstatusbar.h
     src/phonesmsstatusbar.cpp
+    src/phonedb.h
+    src/phonedb.cpp
+    src/phoneqpage.h
+    src/phoneqpage.cpp
     src/stickerstore.h
     src/stickerstore.cpp
     src/eifreader.h
