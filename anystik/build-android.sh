@@ -9,11 +9,11 @@ if [ -z "$APP_VERSION_CODE" ]; then APP_VERSION_CODE=1; fi
 cat > src/version_config.h <<H
 #ifndef VERSION_CONFIG_H
 #define VERSION_CONFIG_H
-#define APP_VERSION_NAME "0.5"
+#define APP_VERSION_NAME "0.6"
 #define APP_VERSION_CODE ${APP_VERSION_CODE}
 #endif
 H
-echo "[build-android.sh] versionConfig: 0.5 (${APP_VERSION_CODE})"
+echo "[build-android.sh] versionConfig: 0.6 (${APP_VERSION_CODE})"
 
 QT_ANDROID=/opt/qt/6.7.3/android_arm64_v8a
 QSK_ANDROID=/opt/qt/qskinny-arm64
