@@ -2,6 +2,7 @@
 #define PHONEQ_PAGE_H
 
 #include "page.h"
+#include "multilinetextedit.h"
 
 class QskTextLabel;
 class QskTextField;
@@ -22,11 +23,13 @@ protected:
 private:
     void doQuery();
     void updateStatusLabel();
+    void updateMetaLabel();
 
     QskTextLabel* m_title = nullptr;
     QskTextField* m_numberEdit = nullptr;
     QskPushButton* m_queryBtn = nullptr;
-    QskTextLabel* m_resultLabel = nullptr;
+    MultiLineTextEdit* m_resultLabel = nullptr;
+    QskTextLabel* m_metaLabel = nullptr;
     QskTextLabel* m_statusLabel = nullptr;
 };
 

@@ -24,6 +24,7 @@ public:
     void ensureData();
     Result lookup(const QString& number) const;
     QString statusText() const;
+    QString metaText() const;
     bool ready() const;
 
 Q_SIGNALS:
@@ -37,6 +38,7 @@ private:
 
     QByteArray m_data;
     QString m_status;
+    QString m_metaText;
     QNetworkAccessManager* m_nam = nullptr;
     QNetworkReply* m_reply = nullptr;
 };

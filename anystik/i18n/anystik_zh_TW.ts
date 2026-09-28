@@ -285,12 +285,12 @@
     <name>IPInfoPage</name>
     <message>
         <location filename="../src/ipinfopage.cpp" line="+59"/>
-        <location line="+131"/>
+        <location line="+134"/>
         <source>IP 信息</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-119"/>
+        <location line="-121"/>
         <source>本机地址</source>
         <translation type="unfinished"></translation>
     </message>
@@ -301,7 +301,7 @@
     </message>
     <message>
         <location line="+12"/>
-        <location line="+97"/>
+        <location line="+99"/>
         <source>刷新</source>
         <translation type="unfinished"></translation>
     </message>
@@ -769,7 +769,12 @@
 <context>
     <name>PhoneDb</name>
     <message>
-        <location filename="../src/phonedb.cpp" line="+77"/>
+        <location filename="../src/phonedb.cpp" line="+51"/>
+        <source>库 v%1 · %2 段 · %3 MB · %4</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+34"/>
         <source>归属地库下载中…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -788,18 +793,18 @@
     <name>PhoneQPage</name>
     <message>
         <location filename="../src/phoneqpage.cpp" line="+31"/>
-        <location line="+93"/>
+        <location line="+115"/>
         <source>号码归属地</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-73"/>
-        <location line="+75"/>
+        <location line="-94"/>
+        <location line="+96"/>
         <source>查询</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="-41"/>
+        <location line="-48"/>
         <source>归属地库尚未就绪，请稍候</source>
         <translation type="unfinished"></translation>
     </message>

@@ -189,6 +189,7 @@ void PageManager::setStackBoxCurrent(Page* page)
     if (m_stackBox->currentItem() != page) {
         m_stackBox->setCurrentItem(page);
     }
+    page->forceActiveFocus(Qt::ActiveWindowFocusReason);  // Qt 要求作用域链每层 focus=true 键盘才可达文本控件
 }
 
 // ── 查询 ──

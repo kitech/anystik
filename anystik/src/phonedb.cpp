@@ -46,6 +46,14 @@ void PhoneDb::loadFromFile(const QByteArray& body)
             .arg(phoneloc_version(m_data.constData())).arg(n));
     else
         setStatus(QStringLiteral("库解析失败"));
+
+    m_metaText = n
+        ? tr("库 v%1 · %2 段 · %3 MB · %4")
+            .arg(QString::number(phoneloc_version(m_data.constData())))
+            .arg(n)
+            .arg(QString::number(m_data.size() / 1048576.0, 'f', 2))
+            .arg(dataPath())
+        : QString();
 }
 
 void PhoneDb::setStatus(const QString& s)
@@ -121,4 +129,5 @@ PhoneDb::Result PhoneDb::lookup(const QString& number) const
 }
 
 QString PhoneDb::statusText() const { return m_status; }
+QString PhoneDb::metaText() const { return m_metaText; }
 bool PhoneDb::ready() const { return !m_data.isEmpty(); }

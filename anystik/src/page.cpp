@@ -3,6 +3,7 @@
 Page::Page(QQuickItem* parent)
     : QskControl(parent)
 {
+    setFocusPolicy(Qt::StrongFocus);   // 页面可聚焦 → 点亮焦点链头（StackBox→Page→结果区）
     Lang::instance().registerRetranslatable(this);
 }
 

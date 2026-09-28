@@ -40,6 +40,7 @@ void PhoneQPage::onCreate(const QVariantMap&, const QVariantMap&)
     layout->addSpacer(8, 0);
 
     // ── 输入行 ──
+    layout->addStretch(1);   // 上方弹性填充
     auto* row = new QskLinearBox(Qt::Horizontal, layout);
     row->setSpacing(12);
 
@@ -56,10 +57,21 @@ void PhoneQPage::onCreate(const QVariantMap&, const QVariantMap&)
     });
 
     // ── 结果 ──
-    m_resultLabel = new QskTextLabel(QString(), layout);
-    m_resultLabel->setFontRole(QskFontRole::Subtitle);
-    m_resultLabel->setWrapMode(QskTextOptions::WrapAnywhere);
-    m_resultLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
+    m_resultLabel = new MultiLineTextEdit(layout);
+    m_resultLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_resultLabel->setPreferredHeight(96);
+    m_resultLabel->setReadOnly(true);   // 结果区只读：可选中/复制，禁编辑
+    m_resultLabel->setText(QString());
+
+    layout->addStretch(1);   // 结果与状态之间弹性填充
+    layout->addSpacer(4, 0);
+
+    // ── 库元信息 ──
+    m_metaLabel = new QskTextLabel(QString(), layout);
+    m_metaLabel->setFontRole(QskFontRole::Caption);
+    m_metaLabel->setTextColor(QColor(140, 160, 190));
+    m_metaLabel->setWrapMode(QskTextOptions::WrapAnywhere);
+    m_metaLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
 
     layout->addSpacer(8, 0);
 
@@ -71,9 +83,13 @@ void PhoneQPage::onCreate(const QVariantMap&, const QVariantMap&)
 
     // 数据库状态联动
     auto* db = PhoneDb::instance();
-    connect(db, &PhoneDb::statusChanged, this, [this]() { updateStatusLabel(); });
+    connect(db, &PhoneDb::statusChanged, this, [this]() {
+        updateStatusLabel();
+        updateMetaLabel();
+    });
     db->ensureData();
     updateStatusLabel();
+    updateMetaLabel();
 }
 
 void PhoneQPage::doQuery()
@@ -117,6 +133,13 @@ void PhoneQPage::updateStatusLabel()
     m_statusLabel->setText(st);
 }
 
+void PhoneQPage::updateMetaLabel()
+{
+    const QString meta = PhoneDb::instance()->metaText();
+    m_metaLabel->setText(meta);
+    m_metaLabel->setVisible(!meta.isEmpty());
+}
+
 void PhoneQPage::retranslateUi()
 {
     if (!m_title)
@@ -124,4 +147,5 @@ void PhoneQPage::retranslateUi()
     m_title->setText(tr("号码归属地"));
     if (m_queryBtn)
         m_queryBtn->setText(tr("查询"));
+    updateMetaLabel();
 }

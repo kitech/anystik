@@ -68,14 +68,16 @@ void IPInfoPage::onCreate(const QVariantMap&, const QVariantMap&)
     layout->addSpacer(8, 0);
 
     // ── 本机地址 ──
+    layout->addStretch(1);   // 上方弹性填充
     auto* localTitle = new QskTextLabel(tr("本机地址"), layout);
     localTitle->setFontRole(QskFontRole::Caption);
     localTitle->setTextColor(QColor(140, 160, 190));
 
-    m_localLabel = new QskTextLabel(QString(), layout);
-    m_localLabel->setFontRole(QskFontRole::Subtitle);
-    m_localLabel->setWrapMode(QskTextOptions::WrapAnywhere);
-    m_localLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
+    m_localLabel = new MultiLineTextEdit(layout);
+    m_localLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_localLabel->setPreferredHeight(96);
+    m_localLabel->setReadOnly(true);    // 结果区只读：可选中/复制，禁编辑
+    m_localLabel->setText(QString());
 
     layout->addSpacer(12, 0);
 
@@ -84,10 +86,11 @@ void IPInfoPage::onCreate(const QVariantMap&, const QVariantMap&)
     exitTitle->setFontRole(QskFontRole::Caption);
     exitTitle->setTextColor(QColor(140, 160, 190));
 
-    m_exitLabel = new QskTextLabel(QString(), layout);
-    m_exitLabel->setFontRole(QskFontRole::Subtitle);
-    m_exitLabel->setWrapMode(QskTextOptions::WrapAnywhere);
-    m_exitLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
+    m_exitLabel = new MultiLineTextEdit(layout);
+    m_exitLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_exitLabel->setPreferredHeight(120);
+    m_exitLabel->setReadOnly(true);     // 结果区只读：可选中/复制，禁编辑
+    m_exitLabel->setText(QString());
 
     layout->addSpacer(8, 0);
 
@@ -103,6 +106,8 @@ void IPInfoPage::onCreate(const QVariantMap&, const QVariantMap&)
     m_statusLabel->setFontRole(QskFontRole::Caption);
     m_statusLabel->setWrapMode(QskTextOptions::WrapAnywhere);
     m_statusLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Constrained);
+
+    layout->addStretch(1);   // 底部弹性填充
 
     m_nam = new QNetworkAccessManager(this);
     m_nam->setTransferTimeout(15000);

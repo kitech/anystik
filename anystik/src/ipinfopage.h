@@ -3,6 +3,7 @@
 
 #include "page.h"
 #include <QStringList>
+#include "multilinetextedit.h"
 
 class QskTextLabel;
 class QskPushButton;
@@ -27,8 +28,8 @@ private:
     void doRefresh();
 
     QskTextLabel* m_title = nullptr;
-    QskTextLabel* m_localLabel = nullptr;
-    QskTextLabel* m_exitLabel = nullptr;
+    MultiLineTextEdit* m_localLabel = nullptr;
+    MultiLineTextEdit* m_exitLabel = nullptr;
     QskTextLabel* m_statusLabel = nullptr;
     QskPushButton* m_refreshBtn = nullptr;
     QNetworkAccessManager* m_nam = nullptr;
