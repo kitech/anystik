@@ -282,6 +282,47 @@
     </message>
 </context>
 <context>
+    <name>IPInfoPage</name>
+    <message>
+        <location filename="../src/ipinfopage.cpp" line="+59"/>
+        <location line="+131"/>
+        <source>IP 信息</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-119"/>
+        <source>本机地址</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+12"/>
+        <source>出口地址</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+12"/>
+        <location line="+97"/>
+        <source>刷新</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-56"/>
+        <location line="+24"/>
+        <source>获取失败</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-13"/>
+        <source>出口地址查询中…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+26"/>
+        <source>已刷新</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ImageAiUtil</name>
     <message>
         <location filename="../src/imageaiutil.cpp" line="+366"/>
@@ -435,7 +476,7 @@
 <context>
     <name>Main</name>
     <message>
-        <location filename="../src/main.cpp" line="+502"/>
+        <location filename="../src/main.cpp" line="+507"/>
         <source>选择推送服务</source>
         <translation>Select push service</translation>
     </message>
@@ -1691,7 +1732,7 @@ Please check that ntfy is running in the background</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+233"/>
+        <location line="+236"/>
         <source>已保存描述</source>
         <translation>Description saved</translation>
     </message>
@@ -1701,19 +1742,19 @@ Please check that ntfy is running in the background</translation>
         <translation>Failed to save description: %1</translation>
     </message>
     <message>
-        <location line="-668"/>
+        <location line="-671"/>
         <source>分享</source>
         <translation>Share</translation>
     </message>
     <message>
         <location line="+1"/>
         <location line="+390"/>
-        <location line="+295"/>
+        <location line="+298"/>
         <source>删除</source>
         <translation>Delete</translation>
     </message>
     <message>
-        <location line="-633"/>
+        <location line="-636"/>
         <source>已复制</source>
         <translation>Copied</translation>
     </message>
@@ -1850,7 +1891,7 @@ Please check that ntfy is running in the background</translation>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+242"/>
+        <location line="+245"/>
         <location line="+53"/>
         <location line="+34"/>
         <location line="+174"/>
@@ -1858,7 +1899,7 @@ Please check that ntfy is running in the background</translation>
         <translation>Cancel</translation>
     </message>
     <message>
-        <location line="-497"/>
+        <location line="-500"/>
         <source>已删除</source>
         <translation>Deleted</translation>
     </message>
@@ -1869,12 +1910,12 @@ Please check that ntfy is running in the background</translation>
     </message>
     <message>
         <location line="+24"/>
-        <location line="+69"/>
+        <location line="+72"/>
         <source>导入表情包文件夹</source>
         <translation>Import sticker pack folder</translation>
     </message>
     <message>
-        <location line="-68"/>
+        <location line="-71"/>
         <source>表情包目录</source>
         <translation>Sticker pack directory</translation>
     </message>
@@ -1890,6 +1931,11 @@ Please check that ntfy is running in the background</translation>
     </message>
     <message>
         <location line="+4"/>
+        <source>IP 信息</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
         <source>App Log</source>
         <translation>App Log</translation>
     </message>
@@ -1914,7 +1960,7 @@ Please check that ntfy is running in the background</translation>
         <translation>  Keep Screen On</translation>
     </message>
     <message>
-        <location line="+130"/>
+        <location line="+132"/>
         <source>选择分组</source>
         <translation>Select group</translation>
     </message>

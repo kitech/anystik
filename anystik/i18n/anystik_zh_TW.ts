@@ -282,6 +282,47 @@
     </message>
 </context>
 <context>
+    <name>IPInfoPage</name>
+    <message>
+        <location filename="../src/ipinfopage.cpp" line="+59"/>
+        <location line="+131"/>
+        <source>IP 信息</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-119"/>
+        <source>本机地址</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+12"/>
+        <source>出口地址</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+12"/>
+        <location line="+97"/>
+        <source>刷新</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-56"/>
+        <location line="+24"/>
+        <source>获取失败</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-13"/>
+        <source>出口地址查询中…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+26"/>
+        <source>已刷新</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ImageAiUtil</name>
     <message>
         <location filename="../src/imageaiutil.cpp" line="+366"/>
@@ -435,7 +476,7 @@
 <context>
     <name>Main</name>
     <message>
-        <location filename="../src/main.cpp" line="+502"/>
+        <location filename="../src/main.cpp" line="+507"/>
         <source>选择推送服务</source>
         <translation>選擇推播服務</translation>
     </message>
@@ -1691,7 +1732,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+233"/>
+        <location line="+236"/>
         <source>已保存描述</source>
         <translation>已儲存描述</translation>
     </message>
@@ -1701,19 +1742,19 @@
         <translation>儲存描述失敗：%1</translation>
     </message>
     <message>
-        <location line="-668"/>
+        <location line="-671"/>
         <source>分享</source>
         <translation>分享</translation>
     </message>
     <message>
         <location line="+1"/>
         <location line="+390"/>
-        <location line="+295"/>
+        <location line="+298"/>
         <source>删除</source>
         <translation>刪除</translation>
     </message>
     <message>
-        <location line="-633"/>
+        <location line="-636"/>
         <source>已复制</source>
         <translation>已複製</translation>
     </message>
@@ -1850,7 +1891,7 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+242"/>
+        <location line="+245"/>
         <location line="+53"/>
         <location line="+34"/>
         <location line="+174"/>
@@ -1858,7 +1899,7 @@
         <translation>取消</translation>
     </message>
     <message>
-        <location line="-497"/>
+        <location line="-500"/>
         <source>已删除</source>
         <translation>已刪除</translation>
     </message>
@@ -1869,12 +1910,12 @@
     </message>
     <message>
         <location line="+24"/>
-        <location line="+69"/>
+        <location line="+72"/>
         <source>导入表情包文件夹</source>
         <translation>匯入貼圖包資料夾</translation>
     </message>
     <message>
-        <location line="-68"/>
+        <location line="-71"/>
         <source>表情包目录</source>
         <translation>貼圖包目錄</translation>
     </message>
@@ -1890,6 +1931,11 @@
     </message>
     <message>
         <location line="+4"/>
+        <source>IP 信息</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
         <source>App Log</source>
         <translation>App 日誌</translation>
     </message>
@@ -1914,7 +1960,7 @@
         <translation>  保持螢幕恆亮</translation>
     </message>
     <message>
-        <location line="+130"/>
+        <location line="+132"/>
         <source>选择分组</source>
         <translation>選擇分組</translation>
     </message>

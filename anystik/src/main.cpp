@@ -32,6 +32,7 @@
 #include "stickergenpage.h"
 #include "onlinepackspage.h"
 #include "phoneqpage.h"
+#include "ipinfopage.h"
 #include "aboutpage.h"
 #include "myi18n.h"
 #include "logpage.h"
@@ -415,6 +416,10 @@ int main(int argc, char* argv[]) {
 
     pageManager->registerPage("phoneq", []() -> Page* {
         return new PhoneQPage();
+    }, {CachePolicy::Transient, LaunchMode::Standard});
+
+    pageManager->registerPage("ipinfo", []() -> Page* {
+        return new IPInfoPage();
     }, {CachePolicy::Transient, LaunchMode::Standard});
 
     // ── Window ──

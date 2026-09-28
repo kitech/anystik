@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(anystik LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23) # osx11 max23, build slower
-set(CMAKE_CXX_STANDARD 17) # osx11 max23, build faster
+set(CMAKE_CXX_STANDARD 20) # osx11 max23, build faster
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
@@ -93,6 +93,8 @@ qt_add_executable(anystik
     src/imageaiutil.cpp
     src/onlinepackspage.h
     src/onlinepackspage.cpp
+    src/ipinfopage.h
+    src/ipinfopage.cpp
     src/stickerpreviewoverlay.h
     src/stickerpreviewoverlay.cpp
     src/migrationdialog.h

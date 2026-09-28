@@ -1247,6 +1247,7 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
     }
     menu->addSeparator();
     const int idxPhoneQ = menu->addOption(QskLabelData(tr("号码归属地")));
+    const int idxIPInfo = menu->addOption(QskLabelData(tr("IP 信息")));
     const int idxLog = menu->addOption(QskLabelData(tr("App Log")));
     const int idxSettings = menu->addOption(QskLabelData(tr("Settings")));
     const int idxAbout = menu->addOption(QskLabelData(tr("About")));
@@ -1257,7 +1258,7 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
     menu->setOrigin(origin);
 
     connect(menu, &QskMenu::triggered, this, [this, idxBundled, idxImport, idxPaste,
-        idxManage, idxPhoneQ, idxLog, idxSettings, idxAbout, idxKeep](int index) {
+        idxManage, idxPhoneQ, idxIPInfo, idxLog, idxSettings, idxAbout, idxKeep](int index) {
         if (index == idxImport) {
             requestImportFolder();
         } else if (index == idxBundled) {
@@ -1268,6 +1269,8 @@ void StickerHomePage::showOptionsMenu(const QPointF& origin)
             showPackManageMenu();
         } else if (index == idxPhoneQ) {
             pageManager()->open("phoneq");
+        } else if (index == idxIPInfo) {
+            pageManager()->open("ipinfo");
         } else if (index == idxLog) {
             pageManager()->open("logs");
         } else if (index == idxSettings) {
