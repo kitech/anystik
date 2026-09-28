@@ -199,22 +199,6 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>大小 %1</source>
-        <translation type="vanished">Size %1</translation>
-    </message>
-    <message>
-        <source>大小未知（以下载实计）</source>
-        <translation type="vanished">Size unknown (based on what was downloaded)</translation>
-    </message>
-    <message>
-        <source>  ·  版本 %1</source>
-        <translation type="vanished">  ·  Version %1</translation>
-    </message>
-    <message>
-        <source>  ·  已装且未变化</source>
-        <translation type="vanished">  ·  Installed &amp; unchanged</translation>
-    </message>
-    <message>
         <location line="+29"/>
         <source>下载中  %1</source>
         <translation>Downloading  %1</translation>
@@ -251,26 +235,100 @@
     </message>
 </context>
 <context>
+    <name>DescEditPopup</name>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="+110"/>
+        <source>编辑描述简介</source>
+        <translation type="unfinished">Edit description</translation>
+    </message>
+    <message>
+        <location line="+21"/>
+        <source>输入描述(最多140字)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <location line="+4"/>
+        <location line="+57"/>
+        <location line="+60"/>
+        <source>%1/%2</source>
+        <translation type="unfinished">%1/%2</translation>
+    </message>
+    <message>
+        <location line="-110"/>
+        <location line="+28"/>
+        <source>自动获取描述</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-19"/>
+        <source>取消</source>
+        <translation type="unfinished">Cancel</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>确定</source>
+        <translation type="unfinished">OK</translation>
+    </message>
+    <message>
+        <location line="+24"/>
+        <source>获取中…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+22"/>
+        <source>获取描述失败：%1</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ImageAiUtil</name>
     <message>
-        <location filename="../src/imageaiutil.cpp" line="+267"/>
+        <location filename="../src/imageaiutil.cpp" line="+366"/>
         <source>未配置 %1 key</source>
         <translation>%1 key not configured</translation>
     </message>
     <message>
-        <location line="+105"/>
-        <location line="+256"/>
+        <location line="+26"/>
+        <location line="+2"/>
+        <source>本地图片过大（&gt;20MB）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+14"/>
+        <source>图片无法识别（不支持该格式）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>图片格式不可用（仅支持 JPG/PNG，实际：%1）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+26"/>
+        <location line="+2"/>
+        <source>未提供可用图片（读取失败或参数为空）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+97"/>
+        <source>未检测到本地 Ollama（请先安装 Ollama 并 执行 `ollama pull qwen2.5vl:7b`）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <location line="+365"/>
         <location line="+73"/>
         <source>未识别出图片描述</source>
         <translation>No image description recognized</translation>
     </message>
     <message>
-        <location line="-244"/>
+        <location line="-350"/>
         <source>未配置 Cloudflare 账号或 Token</source>
         <translation>Cloudflare account or token not configured</translation>
     </message>
     <message>
-        <location line="+20"/>
+        <location line="+126"/>
         <source>AI Horde 需要本地图片</source>
         <translation>AI Horde requires a local image</translation>
     </message>
@@ -349,12 +407,12 @@
 <context>
     <name>ImageTmpUploader</name>
     <message>
-        <location filename="../src/imagetmpuploader.cpp" line="+178"/>
+        <location filename="../src/imagetmpuploader.cpp" line="+224"/>
         <source>图床不可用</source>
         <translation>Image host unavailable</translation>
     </message>
     <message>
-        <location line="+12"/>
+        <location line="+17"/>
         <source>无法打开图片文件</source>
         <translation>Cannot open image file</translation>
     </message>
@@ -364,7 +422,7 @@
         <translation>Invalid host response</translation>
     </message>
     <message>
-        <location line="+18"/>
+        <location line="+135"/>
         <source>第 %1/%2 · %3 失败 → %4</source>
         <translation>%3 failed → %4 · %1/%2</translation>
     </message>
@@ -377,7 +435,7 @@
 <context>
     <name>Main</name>
     <message>
-        <location filename="../src/main.cpp" line="+494"/>
+        <location filename="../src/main.cpp" line="+502"/>
         <source>选择推送服务</source>
         <translation>Select push service</translation>
     </message>
@@ -504,32 +562,37 @@ Please check that ntfy is running in the background</translation>
 <context>
     <name>NetworkMonitor</name>
     <message>
+        <location filename="../src/networkmonitor.cpp" line="+33"/>
         <source>WiFi 已连接</source>
         <translation>WiFi connected</translation>
     </message>
     <message>
+        <location line="+5"/>
         <source>WiFi 已断开</source>
         <translation>WiFi disconnected</translation>
     </message>
     <message>
+        <location line="-4"/>
         <source>移动数据已连接</source>
         <translation>Mobile data connected</translation>
     </message>
     <message>
+        <location line="+5"/>
         <source>移动数据已断开</source>
         <translation>Mobile data disconnected</translation>
     </message>
     <message>
+        <location line="-4"/>
         <source>以太网已连接</source>
         <translation>Ethernet connected</translation>
     </message>
     <message>
+        <location line="+5"/>
         <source>以太网已断开</source>
         <translation>Ethernet disconnected</translation>
     </message>
     <message>
-        <location line="+2"/>
-        <location line="+69"/>
+        <location line="+88"/>
         <location line="+52"/>
         <location line="+45"/>
         <source>网络已断开</source>
@@ -553,18 +616,13 @@ Please check that ntfy is running in the background</translation>
 <context>
     <name>OnlinePacksPage</name>
     <message>
-        <location filename="../src/onlinepackspage.cpp" line="+62"/>
-        <location line="+186"/>
+        <location filename="../src/onlinepackspage.cpp" line="+63"/>
+        <location line="+231"/>
         <source>在线表情</source>
         <translation>Online Stickers</translation>
     </message>
     <message>
-        <location line="-171"/>
-        <source>仅预览站点</source>
-        <translation>Preview Sites</translation>
-    </message>
-    <message>
-        <location line="+5"/>
+        <location line="-211"/>
         <source>去斗图 (qudoutu.com)</source>
         <translation>QuDuTu (qudoutu.com)</translation>
     </message>
@@ -594,28 +652,23 @@ Please check that ntfy is running in the background</translation>
         <translation>Yandex Images</translation>
     </message>
     <message>
-        <location line="+12"/>
+        <location line="+18"/>
         <source>关键词</source>
         <translation>Keyword</translation>
     </message>
     <message>
         <location line="+12"/>
-        <location line="+135"/>
+        <location line="+174"/>
         <source>搜索</source>
         <translation>Search</translation>
     </message>
     <message>
-        <location line="-129"/>
-        <source>输入关键词点搜索：Bing/Yandex 应用内展示，Google 打开浏览器</source>
-        <translation>Enter a keyword and search: Bing/Yandex show results in-app, Google opens the browser</translation>
-    </message>
-    <message>
-        <location line="+15"/>
+        <location line="-145"/>
         <source>%1 个结果</source>
         <translation>%1 results</translation>
     </message>
     <message>
-        <location line="+38"/>
+        <location line="+53"/>
         <source>请输入关键词</source>
         <translation>Please enter a keyword</translation>
     </message>
@@ -630,64 +683,120 @@ Please check that ntfy is running in the background</translation>
         <translation>Searching…</translation>
     </message>
     <message>
-        <location line="+9"/>
-        <source>当前为仅预览站点，请选择 Google / Bing / Yandex 图片搜索</source>
-        <translation>This is a preview-only site — pick Google / Bing / Yandex image search</translation>
-    </message>
-    <message>
-        <source>功能开发中…</source>
-        <translation type="vanished">Under development…</translation>
-    </message>
-    <message>
+        <location line="-143"/>
         <source>站点</source>
         <translation>Sites</translation>
     </message>
     <message>
+        <location line="+23"/>
+        <location line="+197"/>
         <source>浏览</source>
         <translation>Browse</translation>
     </message>
     <message>
+        <location line="-170"/>
+        <source>站点可点「浏览」加载；搜索引擎用关键词「搜索」</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+10"/>
+        <location line="+162"/>
         <source>加载更多</source>
         <translation>Load more</translation>
     </message>
     <message>
+        <location line="-134"/>
         <source>已载入 %1 项</source>
         <translation>%1 loaded</translation>
     </message>
     <message>
+        <location line="+77"/>
         <source>加载中…</source>
         <translation>Loading…</translation>
     </message>
     <message>
+        <location line="-13"/>
         <source>当前站点请用「浏览」加载，搜索引擎用「搜索」</source>
         <translation>Use Browse for sites, or Search with a keyword for engines</translation>
     </message>
     <message>
+        <location line="+8"/>
         <source>搜索引擎请用「搜索」</source>
         <translation>Use Search for search engines</translation>
     </message>
 </context>
 <context>
-    <name>SiteListClient</name>
+    <name>PhoneDb</name>
     <message>
-        <source>站点加载失败：%1</source>
-        <translation>Failed to load: %1</translation>
+        <location filename="../src/phonedb.cpp" line="+77"/>
+        <source>归属地库下载中…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+8"/>
+        <source>归属地库下载失败</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>归属地库下载失败(大小不符)</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>PhoneQPage</name>
+    <message>
+        <location filename="../src/phoneqpage.cpp" line="+31"/>
+        <location line="+93"/>
+        <source>号码归属地</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-73"/>
+        <location line="+75"/>
+        <source>查询</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-41"/>
+        <source>归属地库尚未就绪，请稍候</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+11"/>
+        <source>请输入 11 位手机号</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+8"/>
+        <source>未收录该号段</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>已按离线库查询</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>归属地：%1 %2（%3）</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>PhoneSmsStatusBar</name>
     <message>
-        <location filename="../src/phonesmsstatusbar.cpp" line="+194"/>
+        <location filename="../src/phonesmsstatusbar.cpp" line="+264"/>
         <source>电话 %1 · 短信 %2</source>
         <translation>Calls %1 · SMS %2</translation>
     </message>
     <message>
-        <location line="-69"/>
+        <location line="-76"/>
         <source>列表</source>
         <translation>List</translation>
     </message>
     <message>
-        <location line="+92"/>
+        <location line="+107"/>
         <source>电话</source>
         <translation>Calls</translation>
     </message>
@@ -702,7 +811,7 @@ Please check that ntfy is running in the background</translation>
         <translation>Close</translation>
     </message>
     <message>
-        <location line="-16"/>
+        <location line="-24"/>
         <source>来电</source>
         <translation>Incoming</translation>
     </message>
@@ -717,29 +826,56 @@ Please check that ntfy is running in the background</translation>
         <translation>Ended</translation>
     </message>
     <message>
-        <location line="-37"/>
-        <location line="+81"/>
+        <location line="-53"/>
+        <location line="+13"/>
+        <location line="+92"/>
+        <location line="+12"/>
         <source>未知</source>
         <translation>Unknown</translation>
     </message>
     <message>
-        <location line="-90"/>
+        <location line="-114"/>
         <source>电话事件：%1 (%2)</source>
         <translation>Phone event: %1 (%2)</translation>
     </message>
     <message>
-        <location line="+10"/>
+        <location line="+1"/>
+        <source>电话事件：%1 (%2 · %3)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+12"/>
         <source>新短信：%1</source>
         <translation>New SMS: %1</translation>
     </message>
     <message>
-        <location line="+81"/>
+        <location line="+1"/>
+        <source>新短信：%1（%2）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+45"/>
+        <source>%1 %2（%3）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+46"/>
         <source>%1 %2：%3</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+7"/>
+        <location line="+1"/>
+        <source>%1 %2（%3）：%4</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+11"/>
         <source>%1 [%2] %3</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>%1 [%2] %3（%4）</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -812,7 +948,7 @@ Please check that ntfy is running in the background</translation>
 <context>
     <name>RemoteImagePreview</name>
     <message>
-        <location filename="../src/searchresultgrid.cpp" line="+428"/>
+        <location filename="../src/searchresultgrid.cpp" line="+425"/>
         <source>预览</source>
         <translation>Preview</translation>
     </message>
@@ -1254,6 +1390,14 @@ Please check that ntfy is running in the background</translation>
     </message>
 </context>
 <context>
+    <name>SiteListClient</name>
+    <message>
+        <location filename="../src/sitelistclient.cpp" line="+165"/>
+        <source>站点加载失败：%1</source>
+        <translation>Failed to load: %1</translation>
+    </message>
+</context>
+<context>
     <name>StickerGenPage</name>
     <message>
         <location filename="../src/stickergenpage.cpp" line="+117"/>
@@ -1449,7 +1593,7 @@ Please check that ntfy is running in the background</translation>
 <context>
     <name>StickerHomePage</name>
     <message>
-        <location filename="../src/stickerhomepage.cpp" line="+136"/>
+        <location filename="../src/stickerhomepage.cpp" line="+207"/>
         <location line="+225"/>
         <source>粘贴</source>
         <translation>Paste</translation>
@@ -1537,42 +1681,46 @@ Please check that ntfy is running in the background</translation>
         <translation>Copy metadata</translation>
     </message>
     <message>
+        <location line="+1"/>
         <source>编辑描述简介</source>
         <translation>Edit description</translation>
     </message>
     <message>
+        <location line="+435"/>
+        <source>号码归属地</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+233"/>
         <source>已保存描述</source>
         <translation>Description saved</translation>
     </message>
     <message>
+        <location line="+1"/>
         <source>保存描述失败：%1</source>
         <translation>Failed to save description: %1</translation>
     </message>
     <message>
-        <source>%1/%2</source>
-        <translation>%1/%2</translation>
-    </message>
-    <message>
-        <location line="+1"/>
+        <location line="-668"/>
         <source>分享</source>
         <translation>Share</translation>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+388"/>
-        <location line="+266"/>
+        <location line="+390"/>
+        <location line="+295"/>
         <source>删除</source>
         <translation>Delete</translation>
     </message>
     <message>
-        <location line="-602"/>
+        <location line="-633"/>
         <source>已复制</source>
         <translation>Copied</translation>
     </message>
     <message>
         <location line="-8"/>
         <location line="+9"/>
-        <location line="+95"/>
+        <location line="+97"/>
         <source>复制失败</source>
         <translation>Copy failed</translation>
     </message>
@@ -1597,13 +1745,13 @@ Please check that ntfy is running in the background</translation>
         <translation>Copied x2.0</translation>
     </message>
     <message>
-        <location line="-98"/>
+        <location line="-100"/>
         <source>已复制元信息</source>
         <translation>Copied metadata</translation>
     </message>
     <message>
-        <location line="-467"/>
-        <location line="+228"/>
+        <location line="-469"/>
+        <location line="+229"/>
         <source>😐 表情包</source>
         <translation>😐 Stickers</translation>
     </message>
@@ -1651,12 +1799,12 @@ Please check that ntfy is running in the background</translation>
         <translation>Scaled Copy ›</translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="+7"/>
         <source>搜索相似 ›</source>
         <translation>Search Similar ›</translation>
     </message>
     <message>
-        <location line="+66"/>
+        <location line="+68"/>
         <source>桌面暂不支持分享</source>
         <translation>Sharing is not supported on desktop</translation>
     </message>
@@ -1702,15 +1850,15 @@ Please check that ntfy is running in the background</translation>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+239"/>
-        <location line="+27"/>
+        <location line="+242"/>
+        <location line="+53"/>
         <location line="+34"/>
         <location line="+174"/>
         <source>取消</source>
         <translation>Cancel</translation>
     </message>
     <message>
-        <location line="-468"/>
+        <location line="-497"/>
         <source>已删除</source>
         <translation>Deleted</translation>
     </message>
@@ -1721,12 +1869,12 @@ Please check that ntfy is running in the background</translation>
     </message>
     <message>
         <location line="+24"/>
-        <location line="+66"/>
+        <location line="+69"/>
         <source>导入表情包文件夹</source>
         <translation>Import sticker pack folder</translation>
     </message>
     <message>
-        <location line="-65"/>
+        <location line="-68"/>
         <source>表情包目录</source>
         <translation>Sticker pack directory</translation>
     </message>
@@ -1736,16 +1884,12 @@ Please check that ntfy is running in the background</translation>
         <translation>Paste to add</translation>
     </message>
     <message>
-        <source>打开目录</source>
-        <translation type="vanished">Open folder</translation>
-    </message>
-    <message>
         <location line="+3"/>
         <source>分组管理</source>
         <translation>Group management</translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>App Log</source>
         <translation>App Log</translation>
     </message>
@@ -1770,7 +1914,7 @@ Please check that ntfy is running in the background</translation>
         <translation>  Keep Screen On</translation>
     </message>
     <message>
-        <location line="+128"/>
+        <location line="+130"/>
         <source>选择分组</source>
         <translation>Select group</translation>
     </message>
@@ -1781,12 +1925,12 @@ Please check that ntfy is running in the background</translation>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+72"/>
+        <location line="+98"/>
         <source>删除分组</source>
         <translation>Delete group</translation>
     </message>
     <message>
-        <location line="-37"/>
+        <location line="-63"/>
         <source>重命名分组</source>
         <translation>Rename group</translation>
     </message>
@@ -1811,7 +1955,7 @@ Please check that ntfy is running in the background</translation>
         <translation>Rename failed</translation>
     </message>
     <message>
-        <location line="+14"/>
+        <location line="+40"/>
         <source>确定删除「%1」及其全部贴纸？
 文件不会被删除。</source>
         <translation>Delete “%1” and all its stickers?
@@ -1893,7 +2037,7 @@ Files will not be deleted.</translation>
         <translation>Could not open sticker directory</translation>
     </message>
     <message>
-        <location line="-465"/>
+        <location line="-491"/>
         <source>打开目录…</source>
         <translation>Open folder…</translation>
     </message>
@@ -1929,7 +2073,7 @@ Files will not be deleted.</translation>
         <translation>Matrix Image Folder</translation>
     </message>
     <message>
-        <location line="+345"/>
+        <location line="+371"/>
         <source>打开</source>
         <translation>Open</translation>
     </message>

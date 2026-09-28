@@ -22,6 +22,7 @@ private:
     void openListsPopup();
     void refreshList();
     QString stateLabel(const QString& state) const;
+    QString attributionOf(const QString& number) const;
 
     QskTextLabel* m_statusLabel = nullptr;
     QskPushButton* m_listBtn = nullptr;

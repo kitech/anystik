@@ -12,6 +12,7 @@ set(MYVENDOR_SOURCES
     ${myvendor_dir}/bloom/murmur2/MurmurHash2.c
     ${myvendor_dir}/uuid/uuid4.c
     ${myvendor_dir}/byteut/bytes2hum.c
+    ${myvendor_dir}/phoneloc/phoneloc.c
 )
 
 set(MYVENDOR_INCLUDE_DIRS
@@ -19,4 +20,5 @@ set(MYVENDOR_INCLUDE_DIRS
     ${myvendor_dir}/bloom/murmur2/
     ${myvendor_dir}/bloom/
     ${myvendor_dir}/uuid/
+    ${myvendor_dir}/phoneloc/
 )

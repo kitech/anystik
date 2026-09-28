@@ -1,5 +1,6 @@
 #include "phonesmsstatusbar.h"
 #include "phonemonitor.h"
+#include "phonedb.h"
 #include "toastpopup.h"
 
 #include <QskBox.h>
@@ -216,8 +217,12 @@ void PhoneSmsStatusBar::attachPhoneMonitor()
         refreshList();
         if (auto* p = PhoneMonitor::instance()) {
             const auto& rec = p->callRecords().constLast();
-            ToastPopup::show(this, tr("电话事件：%1 (%2)")
-                .arg(stateLabel(rec.state), rec.number));
+            const QString num = rec.number.isEmpty() ? tr("未知") : rec.number;
+            const QString loc = attributionOf(rec.number);
+            ToastPopup::show(this, loc.isEmpty()
+                ? tr("电话事件：%1 (%2)").arg(stateLabel(rec.state), num)
+                : tr("电话事件：%1 (%2 · %3)").arg(
+                    stateLabel(rec.state), num, loc));
         }
     });
     connect(ph, &PhoneMonitor::smsRecorded, this, [this]() {
@@ -226,7 +231,10 @@ void PhoneSmsStatusBar::attachPhoneMonitor()
             const auto& rec = p->smsRecords().constLast();
             const QString from = rec.sender.isEmpty()
                 ? tr("未知") : rec.sender;
-            ToastPopup::show(this, tr("新短信：%1").arg(from));
+            const QString loc = attributionOf(rec.sender);
+            ToastPopup::show(this, loc.isEmpty()
+                ? tr("新短信：%1").arg(from)
+                : tr("新短信：%1（%2）").arg(from, loc));
         }
     });
     updateStatus();   // 连上后立即按当前计数刷新一次
@@ -264,6 +272,14 @@ QString PhoneSmsStatusBar::stateLabel(const QString& state) const
     if (state == "OFFHOOK") return tr("通话");
     if (state == "IDLE")    return tr("挂断");
     return state;
+}
+
+QString PhoneSmsStatusBar::attributionOf(const QString& number) const
+{
+    const auto r = PhoneDb::instance()->lookup(number);
+    if (!r.ok)
+        return QString();
+    return tr("%1 %2（%3）").arg(r.province, r.city, r.operatorName);
 }
 
 void PhoneSmsStatusBar::openListsPopup()
@@ -307,7 +323,10 @@ void PhoneSmsStatusBar::refreshList()
                     it->timestamp).toString("HH:mm");
                 const QString from = it->sender.isEmpty()
                     ? tr("未知") : it->sender;
-                entries.append(tr("%1 %2：%3").arg(t, from, it->body.left(60)));
+                const QString loc = attributionOf(it->sender);
+                entries.append(loc.isEmpty()
+                    ? tr("%1 %2：%3").arg(t, from, it->body.left(60))
+                    : tr("%1 %2（%3）：%4").arg(t, from, loc, it->body.left(60)));
             }
         } else {
             const auto& calls = ph->callRecords();
@@ -316,8 +335,11 @@ void PhoneSmsStatusBar::refreshList()
                     it->timestamp).toString("HH:mm");
                 const QString num = it->number.isEmpty()
                     ? tr("未知") : it->number;
-                entries.append(tr("%1 [%2] %3")
-                    .arg(t, stateLabel(it->state), num));
+                const QString loc = attributionOf(it->number);
+                entries.append(loc.isEmpty()
+                    ? tr("%1 [%2] %3").arg(t, stateLabel(it->state), num)
+                    : tr("%1 [%2] %3（%4）").arg(
+                        t, stateLabel(it->state), num, loc));
             }
         }
         if (entries.isEmpty())

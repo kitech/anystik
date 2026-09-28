@@ -199,22 +199,6 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>大小 %1</source>
-        <translation type="vanished">大小 %1</translation>
-    </message>
-    <message>
-        <source>大小未知（以下载实计）</source>
-        <translation type="vanished">大小未知（以下载实计）</translation>
-    </message>
-    <message>
-        <source>  ·  版本 %1</source>
-        <translation type="vanished">  ·  版本 %1</translation>
-    </message>
-    <message>
-        <source>  ·  已装且未变化</source>
-        <translation type="vanished">  ·  已装且未变化</translation>
-    </message>
-    <message>
         <location line="+29"/>
         <source>下载中  %1</source>
         <translation>下载中  %1</translation>
@@ -251,26 +235,100 @@
     </message>
 </context>
 <context>
+    <name>DescEditPopup</name>
+    <message>
+        <location filename="../src/stickerhomepage.cpp" line="+110"/>
+        <source>编辑描述简介</source>
+        <translation type="unfinished">编辑描述简介</translation>
+    </message>
+    <message>
+        <location line="+21"/>
+        <source>输入描述(最多140字)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <location line="+4"/>
+        <location line="+57"/>
+        <location line="+60"/>
+        <source>%1/%2</source>
+        <translation type="unfinished">%1/%2</translation>
+    </message>
+    <message>
+        <location line="-110"/>
+        <location line="+28"/>
+        <source>自动获取描述</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-19"/>
+        <source>取消</source>
+        <translation type="unfinished">取消</translation>
+    </message>
+    <message>
+        <location line="+5"/>
+        <source>确定</source>
+        <translation type="unfinished">确定</translation>
+    </message>
+    <message>
+        <location line="+24"/>
+        <source>获取中…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+22"/>
+        <source>获取描述失败：%1</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ImageAiUtil</name>
     <message>
-        <location filename="../src/imageaiutil.cpp" line="+267"/>
+        <location filename="../src/imageaiutil.cpp" line="+366"/>
         <source>未配置 %1 key</source>
         <translation>未配置 %1 key</translation>
     </message>
     <message>
-        <location line="+105"/>
-        <location line="+256"/>
+        <location line="+26"/>
+        <location line="+2"/>
+        <source>本地图片过大（&gt;20MB）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+14"/>
+        <source>图片无法识别（不支持该格式）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>图片格式不可用（仅支持 JPG/PNG，实际：%1）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+26"/>
+        <location line="+2"/>
+        <source>未提供可用图片（读取失败或参数为空）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+97"/>
+        <source>未检测到本地 Ollama（请先安装 Ollama 并 执行 `ollama pull qwen2.5vl:7b`）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+7"/>
+        <location line="+365"/>
         <location line="+73"/>
         <source>未识别出图片描述</source>
         <translation>未识别出图片描述</translation>
     </message>
     <message>
-        <location line="-244"/>
+        <location line="-350"/>
         <source>未配置 Cloudflare 账号或 Token</source>
         <translation>未配置 Cloudflare 账号或 Token</translation>
     </message>
     <message>
-        <location line="+20"/>
+        <location line="+126"/>
         <source>AI Horde 需要本地图片</source>
         <translation>AI Horde 需要本地图片</translation>
     </message>
@@ -349,12 +407,12 @@
 <context>
     <name>ImageTmpUploader</name>
     <message>
-        <location filename="../src/imagetmpuploader.cpp" line="+178"/>
+        <location filename="../src/imagetmpuploader.cpp" line="+224"/>
         <source>图床不可用</source>
         <translation>图床不可用</translation>
     </message>
     <message>
-        <location line="+12"/>
+        <location line="+17"/>
         <source>无法打开图片文件</source>
         <translation>无法打开图片文件</translation>
     </message>
@@ -364,7 +422,7 @@
         <translation>响应解析失败</translation>
     </message>
     <message>
-        <location line="+18"/>
+        <location line="+135"/>
         <source>第 %1/%2 · %3 失败 → %4</source>
         <translation>第 %1/%2 · %3 失败 → %4</translation>
     </message>
@@ -377,7 +435,7 @@
 <context>
     <name>Main</name>
     <message>
-        <location filename="../src/main.cpp" line="+494"/>
+        <location filename="../src/main.cpp" line="+502"/>
         <source>选择推送服务</source>
         <translation>选择推送服务</translation>
     </message>
@@ -504,32 +562,37 @@
 <context>
     <name>NetworkMonitor</name>
     <message>
+        <location filename="../src/networkmonitor.cpp" line="+33"/>
         <source>WiFi 已连接</source>
         <translation>WiFi 已连接</translation>
     </message>
     <message>
+        <location line="+5"/>
         <source>WiFi 已断开</source>
         <translation>WiFi 已断开</translation>
     </message>
     <message>
+        <location line="-4"/>
         <source>移动数据已连接</source>
         <translation>移动数据已连接</translation>
     </message>
     <message>
+        <location line="+5"/>
         <source>移动数据已断开</source>
         <translation>移动数据已断开</translation>
     </message>
     <message>
+        <location line="-4"/>
         <source>以太网已连接</source>
         <translation>以太网已连接</translation>
     </message>
     <message>
+        <location line="+5"/>
         <source>以太网已断开</source>
         <translation>以太网已断开</translation>
     </message>
     <message>
-        <location line="+2"/>
-        <location line="+69"/>
+        <location line="+88"/>
         <location line="+52"/>
         <location line="+45"/>
         <source>网络已断开</source>
@@ -553,18 +616,13 @@
 <context>
     <name>OnlinePacksPage</name>
     <message>
-        <location filename="../src/onlinepackspage.cpp" line="+62"/>
-        <location line="+186"/>
+        <location filename="../src/onlinepackspage.cpp" line="+63"/>
+        <location line="+231"/>
         <source>在线表情</source>
         <translation>在线表情</translation>
     </message>
     <message>
-        <location line="-171"/>
-        <source>仅预览站点</source>
-        <translation>仅预览站点</translation>
-    </message>
-    <message>
-        <location line="+5"/>
+        <location line="-211"/>
         <source>去斗图 (qudoutu.com)</source>
         <translation>去斗图 (qudoutu.com)</translation>
     </message>
@@ -594,28 +652,23 @@
         <translation>Yandex图片</translation>
     </message>
     <message>
-        <location line="+12"/>
+        <location line="+18"/>
         <source>关键词</source>
         <translation>关键词</translation>
     </message>
     <message>
         <location line="+12"/>
-        <location line="+135"/>
+        <location line="+174"/>
         <source>搜索</source>
         <translation>搜索</translation>
     </message>
     <message>
-        <location line="-129"/>
-        <source>输入关键词点搜索：Bing/Yandex 应用内展示，Google 打开浏览器</source>
-        <translation>输入关键词点搜索：Bing/Yandex 应用内展示，Google 打开浏览器</translation>
-    </message>
-    <message>
-        <location line="+15"/>
+        <location line="-145"/>
         <source>%1 个结果</source>
         <translation>%1 个结果</translation>
     </message>
     <message>
-        <location line="+38"/>
+        <location line="+53"/>
         <source>请输入关键词</source>
         <translation>请输入关键词</translation>
     </message>
@@ -630,64 +683,120 @@
         <translation>搜索中…</translation>
     </message>
     <message>
-        <location line="+9"/>
-        <source>当前为仅预览站点，请选择 Google / Bing / Yandex 图片搜索</source>
-        <translation>当前为仅预览站点，请选择 Google / Bing / Yandex 图片搜索</translation>
-    </message>
-    <message>
-        <source>功能开发中…</source>
-        <translation type="vanished">功能开发中…</translation>
-    </message>
-    <message>
+        <location line="-143"/>
         <source>站点</source>
         <translation>站点</translation>
     </message>
     <message>
+        <location line="+23"/>
+        <location line="+197"/>
         <source>浏览</source>
         <translation>浏览</translation>
     </message>
     <message>
+        <location line="-170"/>
+        <source>站点可点「浏览」加载；搜索引擎用关键词「搜索」</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+10"/>
+        <location line="+162"/>
         <source>加载更多</source>
         <translation>加载更多</translation>
     </message>
     <message>
+        <location line="-134"/>
         <source>已载入 %1 项</source>
         <translation>已载入 %1 项</translation>
     </message>
     <message>
+        <location line="+77"/>
         <source>加载中…</source>
         <translation>加载中…</translation>
     </message>
     <message>
+        <location line="-13"/>
         <source>当前站点请用「浏览」加载，搜索引擎用「搜索」</source>
         <translation>当前站点请用「浏览」加载，搜索引擎用「搜索」</translation>
     </message>
     <message>
+        <location line="+8"/>
         <source>搜索引擎请用「搜索」</source>
         <translation>搜索引擎请用「搜索」</translation>
     </message>
 </context>
 <context>
-    <name>SiteListClient</name>
+    <name>PhoneDb</name>
     <message>
-        <source>站点加载失败：%1</source>
-        <translation>站点加载失败：%1</translation>
+        <location filename="../src/phonedb.cpp" line="+77"/>
+        <source>归属地库下载中…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+8"/>
+        <source>归属地库下载失败</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>归属地库下载失败(大小不符)</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>PhoneQPage</name>
+    <message>
+        <location filename="../src/phoneqpage.cpp" line="+31"/>
+        <location line="+93"/>
+        <source>号码归属地</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-73"/>
+        <location line="+75"/>
+        <source>查询</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="-41"/>
+        <source>归属地库尚未就绪，请稍候</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+11"/>
+        <source>请输入 11 位手机号</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+8"/>
+        <source>未收录该号段</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+4"/>
+        <source>已按离线库查询</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>归属地：%1 %2（%3）</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>PhoneSmsStatusBar</name>
     <message>
-        <location filename="../src/phonesmsstatusbar.cpp" line="+194"/>
+        <location filename="../src/phonesmsstatusbar.cpp" line="+264"/>
         <source>电话 %1 · 短信 %2</source>
         <translation>电话 %1 · 短信 %2</translation>
     </message>
     <message>
-        <location line="-69"/>
+        <location line="-76"/>
         <source>列表</source>
         <translation>列表</translation>
     </message>
     <message>
-        <location line="+92"/>
+        <location line="+107"/>
         <source>电话</source>
         <translation>电话</translation>
     </message>
@@ -702,7 +811,7 @@
         <translation>关闭</translation>
     </message>
     <message>
-        <location line="-16"/>
+        <location line="-24"/>
         <source>来电</source>
         <translation>来电</translation>
     </message>
@@ -717,29 +826,56 @@
         <translation>挂断</translation>
     </message>
     <message>
-        <location line="-37"/>
-        <location line="+81"/>
+        <location line="-53"/>
+        <location line="+13"/>
+        <location line="+92"/>
+        <location line="+12"/>
         <source>未知</source>
         <translation>未知</translation>
     </message>
     <message>
-        <location line="-90"/>
+        <location line="-114"/>
         <source>电话事件：%1 (%2)</source>
         <translation>电话事件：%1 (%2)</translation>
     </message>
     <message>
-        <location line="+10"/>
+        <location line="+1"/>
+        <source>电话事件：%1 (%2 · %3)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+12"/>
         <source>新短信：%1</source>
         <translation>新短信：%1</translation>
     </message>
     <message>
-        <location line="+81"/>
+        <location line="+1"/>
+        <source>新短信：%1（%2）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+45"/>
+        <source>%1 %2（%3）</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+46"/>
         <source>%1 %2：%3</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location line="+7"/>
+        <location line="+1"/>
+        <source>%1 %2（%3）：%4</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+11"/>
         <source>%1 [%2] %3</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+1"/>
+        <source>%1 [%2] %3（%4）</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -812,7 +948,7 @@
 <context>
     <name>RemoteImagePreview</name>
     <message>
-        <location filename="../src/searchresultgrid.cpp" line="+428"/>
+        <location filename="../src/searchresultgrid.cpp" line="+425"/>
         <source>预览</source>
         <translation>预览</translation>
     </message>
@@ -1254,6 +1390,14 @@
     </message>
 </context>
 <context>
+    <name>SiteListClient</name>
+    <message>
+        <location filename="../src/sitelistclient.cpp" line="+165"/>
+        <source>站点加载失败：%1</source>
+        <translation>站点加载失败：%1</translation>
+    </message>
+</context>
+<context>
     <name>StickerGenPage</name>
     <message>
         <location filename="../src/stickergenpage.cpp" line="+117"/>
@@ -1449,7 +1593,7 @@
 <context>
     <name>StickerHomePage</name>
     <message>
-        <location filename="../src/stickerhomepage.cpp" line="+136"/>
+        <location filename="../src/stickerhomepage.cpp" line="+207"/>
         <location line="+225"/>
         <source>粘贴</source>
         <translation>粘贴</translation>
@@ -1537,42 +1681,46 @@
         <translation>复制元信息</translation>
     </message>
     <message>
+        <location line="+1"/>
         <source>编辑描述简介</source>
         <translation>编辑描述简介</translation>
     </message>
     <message>
+        <location line="+435"/>
+        <source>号码归属地</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location line="+233"/>
         <source>已保存描述</source>
         <translation>已保存描述</translation>
     </message>
     <message>
+        <location line="+1"/>
         <source>保存描述失败：%1</source>
         <translation>保存描述失败：%1</translation>
     </message>
     <message>
-        <source>%1/%2</source>
-        <translation>%1/%2</translation>
-    </message>
-    <message>
-        <location line="+1"/>
+        <location line="-668"/>
         <source>分享</source>
         <translation>分享</translation>
     </message>
     <message>
         <location line="+1"/>
-        <location line="+388"/>
-        <location line="+266"/>
+        <location line="+390"/>
+        <location line="+295"/>
         <source>删除</source>
         <translation>删除</translation>
     </message>
     <message>
-        <location line="-602"/>
+        <location line="-633"/>
         <source>已复制</source>
         <translation>已复制</translation>
     </message>
     <message>
         <location line="-8"/>
         <location line="+9"/>
-        <location line="+95"/>
+        <location line="+97"/>
         <source>复制失败</source>
         <translation>复制失败</translation>
     </message>
@@ -1597,13 +1745,13 @@
         <translation>已复制x2.0</translation>
     </message>
     <message>
-        <location line="-98"/>
+        <location line="-100"/>
         <source>已复制元信息</source>
         <translation>已复制元信息</translation>
     </message>
     <message>
-        <location line="-467"/>
-        <location line="+228"/>
+        <location line="-469"/>
+        <location line="+229"/>
         <source>😐 表情包</source>
         <translation>😐 表情包</translation>
     </message>
@@ -1651,12 +1799,12 @@
         <translation>缩放拷贝 ›</translation>
     </message>
     <message>
-        <location line="+6"/>
+        <location line="+7"/>
         <source>搜索相似 ›</source>
         <translation>搜索相似 ›</translation>
     </message>
     <message>
-        <location line="+66"/>
+        <location line="+68"/>
         <source>桌面暂不支持分享</source>
         <translation>桌面暂不支持分享</translation>
     </message>
@@ -1702,15 +1850,15 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+239"/>
-        <location line="+27"/>
+        <location line="+242"/>
+        <location line="+53"/>
         <location line="+34"/>
         <location line="+174"/>
         <source>取消</source>
         <translation>取消</translation>
     </message>
     <message>
-        <location line="-468"/>
+        <location line="-497"/>
         <source>已删除</source>
         <translation>已删除</translation>
     </message>
@@ -1721,12 +1869,12 @@
     </message>
     <message>
         <location line="+24"/>
-        <location line="+66"/>
+        <location line="+69"/>
         <source>导入表情包文件夹</source>
         <translation>导入表情包文件夹</translation>
     </message>
     <message>
-        <location line="-65"/>
+        <location line="-68"/>
         <source>表情包目录</source>
         <translation>表情包目录</translation>
     </message>
@@ -1736,16 +1884,12 @@
         <translation>粘贴添加</translation>
     </message>
     <message>
-        <source>打开目录</source>
-        <translation type="vanished">打开目录</translation>
-    </message>
-    <message>
         <location line="+3"/>
         <source>分组管理</source>
         <translation>分组管理</translation>
     </message>
     <message>
-        <location line="+3"/>
+        <location line="+4"/>
         <source>App Log</source>
         <translation>App Log</translation>
     </message>
@@ -1770,7 +1914,7 @@
         <translation>  Keep Screen On</translation>
     </message>
     <message>
-        <location line="+128"/>
+        <location line="+130"/>
         <source>选择分组</source>
         <translation>选择分组</translation>
     </message>
@@ -1781,12 +1925,12 @@
     </message>
     <message>
         <location line="+1"/>
-        <location line="+72"/>
+        <location line="+98"/>
         <source>删除分组</source>
         <translation>删除分组</translation>
     </message>
     <message>
-        <location line="-37"/>
+        <location line="-63"/>
         <source>重命名分组</source>
         <translation>重命名分组</translation>
     </message>
@@ -1811,7 +1955,7 @@
         <translation>重命名失败</translation>
     </message>
     <message>
-        <location line="+14"/>
+        <location line="+40"/>
         <source>确定删除「%1」及其全部贴纸？
 文件不会被删除。</source>
         <translation>确定删除「%1」及其全部贴纸？
@@ -1893,7 +2037,7 @@
         <translation>无法打开贴纸目录</translation>
     </message>
     <message>
-        <location line="-465"/>
+        <location line="-491"/>
         <source>打开目录…</source>
         <translation>打开目录…</translation>
     </message>
@@ -1929,7 +2073,7 @@
         <translation>Matrix 图片目录</translation>
     </message>
     <message>
-        <location line="+345"/>
+        <location line="+371"/>
         <source>打开</source>
         <translation>打开</translation>
     </message>

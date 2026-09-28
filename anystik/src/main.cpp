@@ -31,6 +31,7 @@
 #include "settingspage.h"
 #include "stickergenpage.h"
 #include "onlinepackspage.h"
+#include "phoneqpage.h"
 #include "aboutpage.h"
 #include "myi18n.h"
 #include "logpage.h"
@@ -410,6 +411,10 @@ int main(int argc, char* argv[]) {
 
     pageManager->registerPage("onlinepacks", []() -> Page* {
         return new OnlinePacksPage();
+    }, {CachePolicy::Transient, LaunchMode::Standard});
+
+    pageManager->registerPage("phoneq", []() -> Page* {
+        return new PhoneQPage();
     }, {CachePolicy::Transient, LaunchMode::Standard});
 
     // ── Window ──
