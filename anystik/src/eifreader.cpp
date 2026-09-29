@@ -2,12 +2,21 @@
 
 #include "compoundfilereader.h"
 
+#ifdef QT3_BUILD
+#include <qcstring.h>
+#include <qdir.h>
+#include <qfile.h>
+#include <qfileinfo.h>
+#include <qstring.h>
+#include <qstringlist.h>
+#else
 #include <QByteArray>
+#include <QString>
+#include <QStringList>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QString>
-#include <QStringList>
+#endif
 
 #include <atomic>
 #include <cstdint>

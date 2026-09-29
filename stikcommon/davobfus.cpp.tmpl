@@ -1,6 +1,11 @@
 #include "davobfus.h"
 #include "libobfuscate/obfuscate.h"
+// ADVobfuscator 是 C++20 专有（consteval / using enum / std::rotr），
+// Qt3(Qt 3.5) 与 Qt4 均为 -std=c++14 解析不了；而下方 #if 在这两种构建下
+// 本来就走 libobfuscate 支，ADVobfuscator 属死代码，故按标准版本条件引入。
+#if defined(__cplusplus) && __cplusplus >= 202002L
 #include "advobfuscator/string.h"
+#endif
 
 // 双轨混淆：
 //   Android / Debug / RelWithDebInfo 等同调试型构建 → libobfuscate AY_OBFUSCATE（全构建生效）
@@ -17,7 +22,9 @@
 //   ObfuscatedString("...") 会把字面量当运行时参数留在 .rodata 泄露明文；
 //   "..."_obf 把 ObfuscatedString 整体作为 NTTP 模板实参，仅存编码字节。
 // 勿把 UDL 对象赋给 char*（语句结束析构），须经隐式转换 const char* 后用 QString::fromUtf8。
+#if defined(__cplusplus) && __cplusplus >= 202002L
 using namespace andrivet::advobfuscator;
+#endif
 
 // format: https://user:pass@path/dav
 // user/pass 含 @ 需写成 %40

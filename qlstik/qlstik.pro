@@ -97,7 +97,10 @@ QMAKE_CFLAGS   += $$STIKCOMMON_CFLAGS
     }
 }
 
-# ══ C++ 底线：Qt3 = c++14；Qt4/5 = c++11；Qt6 = c++17 ══
+# ══ C++ 底线：Qt3 = c++14；Qt4/5 = c++14；Qt6 = c++17 ══
+# Qt4 从 c++11 提到 c++14：批次 1 的 libobfuscate（davobfus）用 relaxed constexpr，
+# c++11 下编不过。qmake 3.x 不支持按文件 CXXFLAGS，只能全局提；qlcomp 在 c++14
+# 下实测无回归（build-qt4 全绿）。
 # C 源一律 gnu 模式（不能用 -std=c11/c17）：myvendor/netut/ipaddr_list.c 依赖
 # getnameinfo / NI_MAXHOST / IFF_UP，这些在 __STRICT_ANSI__ 下不声明；
 # anystik 侧 CMake 也是 gcc 默认 gnu 模式编它，保持行为一致。
@@ -108,7 +111,7 @@ QMAKE_CFLAGS   += -O0
         QMAKE_CXXFLAGS += -std=c++17
         QMAKE_CFLAGS   += -std=gnu17
     } else {
-        QMAKE_CXXFLAGS += -std=c++11
+        QMAKE_CXXFLAGS += -std=c++14
         QMAKE_CFLAGS   += -std=gnu11
     }
 } else {

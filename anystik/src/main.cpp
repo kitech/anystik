@@ -142,42 +142,6 @@ static void toggleStatsTimer(QskWindow* win)
 
 } // namespace
 
-// mac 设置落盘诊断探针：非 mac 平台为空转。
-// 输出 QSettings 实际生效格式/落盘文件/可写性/真实磁盘状态（exists/size/mtime），
-// sync() 前后各确认一次；调用点由 site 标签区分。
-void trace_settings(const char* site)
-{
-#ifdef Q_OS_MACOS
-    if (1) return;                       // 关闭探针输出：日志与磁盘探测全部跳过
-    QSettings s;
-    const QString file = s.fileName();
-    const QFileInfo fi(file);
-    qInfo().noquote() << "[S_TRACE]" << site
-        << "format=" << int(s.format())
-        << "fileName=" << file
-        << "exists=" << fi.exists()
-        << "writable=" << s.isWritable()
-        << "status=" << s.status()
-        << "cfgLoc=" << QStandardPaths::writableLocation(QStandardPaths::ConfigLocation)
-        << "keys=" << s.allKeys();
-    if (fi.exists()) {
-        qInfo().noquote() << "[S_TRACE]" << site
-            << "size=" << fi.size()
-            << "mtime=" << fi.lastModified().toString(Qt::ISODate);
-    }
-    s.sync();
-    qInfo().noquote() << "[S_TRACE]" << site
-        << "afterSync status=" << s.status();
-    const QFileInfo fia(file);
-    if (fia.exists()) {
-        qInfo().noquote() << "[S_TRACE]" << site
-            << "afterSync exists size=" << fia.size()
-            << "mtime=" << fia.lastModified().toString(Qt::ISODate);
-    }
-#else
-    Q_UNUSED(site)
-#endif
-}
 
 int main(int argc, char* argv[]) {
 #ifdef Q_OS_ANDROID

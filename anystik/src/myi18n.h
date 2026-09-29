@@ -1,11 +1,20 @@
 #ifndef ANYS_I18N_H
 #define ANYS_I18N_H
 
+#include "stdcompat_shim.h"   // std::as_const 在 c++14 构建下缺失
+#ifdef QT3_BUILD
+#include "qcoreapplication_shim.h"
+#include "qvector_shim.h"
+#include <qobject.h>
+#include <qstring.h>
+#include <qtranslator.h>
+#else
 #include <QCoreApplication>
 #include <QObject>
 #include <QString>
 #include <QTranslator>
 #include <QVector>
+#endif
 
 // 无 Q_OBJECT 类（stickerlist/myscrollarea/dialogpopup…）的翻译入口：
 // context 显式指定，source 为中文原文；zh 缺失时原样回退。

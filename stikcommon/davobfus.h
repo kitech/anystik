@@ -1,7 +1,11 @@
 #ifndef DAV_OBFUS_H
 #define DAV_OBFUS_H
 
+#ifdef QT3_BUILD
+#include <qstring.h>
+#else
 #include <QString>
+#endif
 
 // dav 鉴权密钥（编译期混淆持有，防 strings 低门槛提取）+ Z.ai 智谱国际版 API key。
 // 真实 key 未来替换 davobfus.cpp 内 AY_OBFUSCATE("AUTHKEY_PLACEHOLDER") 一处即可。

@@ -103,8 +103,9 @@ qt_add_executable(anystik
     src/toastpopup.cpp
     src/myi18n.h
     src/myi18n.cpp
-    src/davobfus.h
-    src/davobfus.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/davobfus.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/davobfus.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/settings_trace.cpp
     src/davbisync.h
     src/davbisync.cpp
     src/davbisync_baseline.h
@@ -143,6 +144,7 @@ target_include_directories(anystik PRIVATE
     ${QLAPP_INCLUDE_DIRS}
     ${QLCOMP_INCLUDE_DIRS}
     ${QSKCOMP_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon
 )
 
 target_link_libraries(anystik PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::CorePrivate Qt6::Concurrent Qt6::Xml)

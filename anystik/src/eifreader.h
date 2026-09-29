@@ -1,10 +1,17 @@
 #ifndef EIF_READER_H
 #define EIF_READER_H
 
+#ifdef QT3_BUILD
+#include "qhash_shim.h"
+#include <qcstring.h>
+#include <qstring.h>
+#include <qstringlist.h>
+#else
 #include <QByteArray>
 #include <QHash>
 #include <QString>
 #include <QStringList>
+#endif
 
 // QQ 表情包 .eif（OLE 复合文档 CFB）解析。
 // 格式：Root 下含 Face.dat（XOR 混淆的 分组\文件名 索引）与若干分组 Storage，
