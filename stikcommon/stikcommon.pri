@@ -63,6 +63,33 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qcoreapplication_shim.h \
                        $$STIKCOMMON_DIR/qstring_shim.h \
                        $$STIKCOMMON_DIR/qvector_shim.h
 
+# ══ 批次 2a：davbisync_baseline（QJson / QStandardPaths / QSaveFile）══
+# 三个类都是 Qt5 才引入：Qt3.5 与 Qt4.8.7 的 QtCore 下均无对应头文件，
+# 故三个垫片对 Qt3 与 Qt4 同时启用（计划原文"QSaveFile 仅 Qt3、Qt4.1+ 原生"
+# 有误，已核实更正为 Qt5.1 才引入）。Qt5+ 走原生，垫片 .cpp 不参与编译。
+STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/davbisync_baseline.cpp
+STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/davbisync_baseline.h
+
+# ══ 批次 2a 垫片 ══
+# 头文件无条件登记（moc/依赖扫描用），.cpp 严格按版本条件挂载，避免 Qt5+ 出现
+# "QSaveFile/QJson/QStandardPaths 重复定义"。条件范式对齐 qlstik.pro：
+# Qt3 的 qmake(1.07a) 无 QT_VERSION 变量，用 isEmpty(QT_VERSION) 自判。
+STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qjson_shim.h \
+                       $$STIKCOMMON_DIR/qstandardpaths_shim.h \
+                       $$STIKCOMMON_DIR/qsavefile_shim.h
+
+isEmpty(QT_VERSION) {
+    # Qt3.5
+    STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qjson_shim.cpp \
+                         $$STIKCOMMON_DIR/qstandardpaths_shim.cpp \
+                         $$STIKCOMMON_DIR/qsavefile_shim.cpp
+} else:lessThan(QT_VERSION, 5.0.0) {
+    # Qt4.8.7
+    STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qjson_shim.cpp \
+                         $$STIKCOMMON_DIR/qstandardpaths_shim.cpp \
+                         $$STIKCOMMON_DIR/qsavefile_shim.cpp
+}
+
 # myi18n 的 settings_trace.h 在 anystik 侧；davobfus 的 libobfuscate 在 vendor
 STIKCOMMON_INCLUDES += $$ANYSTIK_SRC_DIR \
                        $$ANYSTIK_SRC_DIR/../vendor/include

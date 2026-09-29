@@ -1,8 +1,17 @@
 #ifndef DAVBISYNC_BASELINE_H
 #define DAVBISYNC_BASELINE_H
 
+#ifdef QT3_BUILD
+// Qt3.5 无 CamelCase 转发头（QString/QMap 等只有小写头文件）
+#include <qstring.h>
+#include <qmap.h>
+// Qt3.5 无 qint64（Qt4 引入），本头公开 API 用它承载字节数/epoch 毫秒
+#include "qglobaltype_shim.h"
+#else
 #include <QString>
 #include <QMap>
+#endif
+#include "qstring_shim.h"   // QStringLiteral(Qt<4.1) 垫片，本头的默认值初始化要用
 
 namespace davbisync {
 

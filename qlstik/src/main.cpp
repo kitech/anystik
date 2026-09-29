@@ -44,6 +44,15 @@ int main(int argc, char* argv[])
 #ifndef QT3_BUILD
     app.setApplicationVersion("0.6.0");
 #endif
+    // 应用名必须显式固定：QStandardPaths::AppLocalDataLocation 在应用名为空时
+    // 会回退到"可执行文件名"，于是 Qt3/Qt4 与 Qt5/6 会因可执行名不同（qlstik /
+    // q3stik / q4stik / q6stik）而落到不同的数据目录。固定后各版本统一为
+    // ~/.local/share/qlstik。QlStik 不设组织名，故路径无 org 一层。
+#ifdef QT3_BUILD
+    app.setName("qlstik");
+#else
+    app.setApplicationName("qlstik");
+#endif
 
     if (showVersion) {
         printf("qlstik 0.6.0 (GIT_COMMIT=%s)\n", QLSTIK_GIT_COMMIT_STR);
