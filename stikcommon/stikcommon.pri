@@ -70,19 +70,42 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qcoreapplication_shim.h \
 STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/davbisync_baseline.cpp
 STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/davbisync_baseline.h
 
+# ══ 批次 2b：phonedb（QNAM 消费端：QNetworkRequest/Manager/Reply +
+#     qconnect_slots 新式 connect + cookie jar）══
+# Qt4 原生 QNAM 有硬限制：QNetworkReply::finished 是 protected Q_SIGNAL
+#     （Qt4.8 Q_SIGNALS=protected，Qt5 才改 public），新式 connect 在 Qt4
+#     编不过；且 Qt4 无 setTransferTimeout（5.15+）。故 Qt4 分支暂不挂载
+#     phonedb（Qt3 用 qnam_shim 垫片、Qt6 用原生 QNAM），待 qnam_shim 扩展
+#     Qt4 支援（移植计划 §6.3b 记录）。Qt3 由不含 QT_VERSION 自判。
+# phonedb.cpp 的 Qt3 差异（QIODevice::ReadOnly→IO_ReadOnly、QDir().mkpath→qMkdir、
+#     constData→data、QFile::write→writeBlock、toUtf8→utf8、QString::size→length）
+#     已在源内用 QT3_BUILD 分支收口。phonedb.h 的 Q_OBJECT/Q_SIGNALS 在 Qt3 由
+#     qt3 moc 处理生成 moc_phonedb.cpp，新式 connect 走 qconnect_slots.h。
+# 注：isEmpty(QT_VERSION)=Qt3；Qt5+/Qt6 也编译（原生 QNAM）。
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/phonedb.cpp
+    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/phonedb.h
+} else:!lessThan(QT_VERSION, 5.0.0) {
+    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/phonedb.cpp
+    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/phonedb.h
+}
+
 # ══ 批次 2a 垫片 ══
 # 头文件无条件登记（moc/依赖扫描用），.cpp 严格按版本条件挂载，避免 Qt5+ 出现
 # "QSaveFile/QJson/QStandardPaths 重复定义"。条件范式对齐 qlstik.pro：
 # Qt3 的 qmake(1.07a) 无 QT_VERSION 变量，用 isEmpty(QT_VERSION) 自判。
 STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qjson_shim.h \
                        $$STIKCOMMON_DIR/qstandardpaths_shim.h \
-                       $$STIKCOMMON_DIR/qsavefile_shim.h
+                       $$STIKCOMMON_DIR/qsavefile_shim.h \
+                       $$STIKCOMMON_DIR/qnam_shim.h \
+                       $$STIKCOMMON_DIR/qconnect_slots.h
 
 isEmpty(QT_VERSION) {
     # Qt3.5
     STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qjson_shim.cpp \
                          $$STIKCOMMON_DIR/qstandardpaths_shim.cpp \
-                         $$STIKCOMMON_DIR/qsavefile_shim.cpp
+                         $$STIKCOMMON_DIR/qsavefile_shim.cpp \
+                         $$STIKCOMMON_DIR/qnam_shim.cpp
 } else:lessThan(QT_VERSION, 5.0.0) {
     # Qt4.8.7
     STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qjson_shim.cpp \

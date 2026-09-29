@@ -1,9 +1,15 @@
 #ifndef PHONEDB_H
 #define PHONEDB_H
 
+#ifdef QT3_BUILD
+#include <qobject.h>
+#include <qstring.h>
+#include <qcstring.h>
+#else
 #include <QObject>
 #include <QString>
 #include <QByteArray>
+#endif
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -27,7 +33,7 @@ public:
     QString metaText() const;
     bool ready() const;
 
-Q_SIGNALS:
+signals:
     void statusChanged();
 
 private:
