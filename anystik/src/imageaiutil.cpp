@@ -1,6 +1,22 @@
 #include "imageaiutil.h"
 #include "davobfus.h"
 
+#ifdef QT3_BUILD
+#include <qurl.h>
+#include <qfile.h>
+#include <qfileinfo.h>
+#include <qbuffer.h>
+#include <qtimer.h>
+#include "qjson_shim.h"
+#include "qnam_shim.h"
+#include "qconnect_slots.h"
+#include "qstring_shim.h"
+#include "qurl_shim.h"
+#include "qimagereader_shim.h"
+#include "qbytearray_shim.h"
+#include "qdebug_shim.h"
+#include "qba_shim.h"
+#else
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -16,6 +32,22 @@
 #include <QBuffer>
 #include <QTimer>
 #include <QDebug>
+#endif
+
+// Qt3 图片读取打开模式：Qt3 QIODevice 用 IO_* 宏（无枚举成员）
+#ifdef QT3_BUILD
+const int kImgReadMode = IO_ReadOnly;
+#else
+const QIODevice::OpenMode kImgReadMode = QIODevice::ReadOnly;
+#endif
+
+#ifdef QT3_BUILD
+// QByteArray=QMemArray<char> 无 (const char*) 构造且无 trimmed()；apiKey 一律
+// 经 QCString（is-a QByteArray）→ stripWhiteSpace。Qt6 走原生 QByteArray()。
+#define AK(x) QCString(x).stripWhiteSpace()
+#else
+#define AK(x) QByteArray(x).trimmed()
+#endif
 
 namespace {
 
@@ -180,7 +212,13 @@ bool isDescription(const QString& value)
     if (value.isEmpty()) {
         return false;
     }
-    return !value.startsWith(QStringLiteral("imgurl:"), Qt::CaseInsensitive);
+    return !value.startsWith(QStringLiteral("imgurl:"),
+#ifdef QT3_BUILD
+                             false  // Qt3 参数是 bool cs（false = 大小写不敏感）
+#else
+                             Qt::CaseInsensitive
+#endif
+                             );
 }
 
 void logHop(const quint64 requestId, int hop, const char* tag,
@@ -198,8 +236,16 @@ ImageAiUtil::ImageAiUtil(QObject* parent)
     : QObject(parent)
 {
     m_pollTimer = new QTimer(this);
+#ifdef QT3_BUILD
+    // Qt3 QTimer 无 setInterval()：start(ms) 即设定并启动；connect 走 Qt3 的
+    // 老式 SIGNAL/SLOT（QObject 继承成员，无需前缀；pollAiHorde 已在 QT3_BUILD
+    // 并入 slots 分区，见 imageaiutil.h）
+    m_pollTimer->start(kAiHordePollIntervalMs);
+    connect(m_pollTimer, SIGNAL(timeout()), this, SLOT(pollAiHorde()));
+#else
     m_pollTimer->setInterval(kAiHordePollIntervalMs);
     connect(m_pollTimer, &QTimer::timeout, this, &ImageAiUtil::pollAiHorde);
+#endif
 }
 
 ImageAiUtil* ImageAiUtil::instance()
@@ -221,8 +267,14 @@ quint64 ImageAiUtil::fetchDescription(const QString& imageUrl,
         // 延后到下一事件循环再启动：保证 descriptionReady/failed 一律晚于
         // 调用方「m_xxxReqId = fetchDescription(...)」拿到令牌之后发出，
         // 同步失败路径（格式不支持/未配置 key/过大等）不再被令牌过滤吞掉。
+#ifdef QT3_BUILD
+        // Qt3 无 QMetaObject::invokeMethod(QObject*,const char*,type)（Qt4 引入）；
+        // QTimer::singleShot(0, …) 同为"回到事件循环后执行"，startNext 已是 slot
+        QTimer::singleShot(0, this, SLOT(startNext()));
+#else
         QMetaObject::invokeMethod(this, &ImageAiUtil::startNext,
                                   Qt::QueuedConnection);
+#endif
     }
     return id;
 }
@@ -237,7 +289,7 @@ void ImageAiUtil::cancelRequest(quint64 requestId)
         if (m_pollTimer) {
             m_pollTimer->stop();
         }
-        m_hordeJobId.clear();
+        m_hordeJobId = QString();   // 等价 clear()，Qt3 无 clear 成员（统一写法）
         m_hordePolls = 0;
         if (m_reply) {
             auto* reply = m_reply;
@@ -263,7 +315,7 @@ void ImageAiUtil::cancelPending()
     if (m_pollTimer) {
         m_pollTimer->stop();
     }
-    m_hordeJobId.clear();
+    m_hordeJobId = QString();   // 等价 clear()，Qt3 无 clear 成员（统一写法）
     m_hordePolls = 0;
     if (m_reply) {
         auto* reply = m_reply;
@@ -343,7 +395,12 @@ void ImageAiUtil::startNext()
 
 void ImageAiUtil::startBing()
 {
+#ifdef QT3_BUILD
+    // Qt3 QUrl 无 static toPercentEncoding；qurl_shim 提供 qToPercentEncoding
+    const QByteArray enc = qToPercentEncoding(m_active.imageUrl);
+#else
     const QByteArray enc = QUrl::toPercentEncoding(m_active.imageUrl);
+#endif
     const QUrl url(QStringLiteral(
         "https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=")
             + QString::fromLatin1(enc));
@@ -377,10 +434,14 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
     // 否则用远程 imageUrl。只放行 JPG/PNG（GLM-4.6V 等后端的官方图片格式），
     // 格式按文件内容探测而非扩展名。
     QString imageRef = m_active.imageUrl;
+#ifdef QT3_BUILD
+    const QString localPath = m_active.localPath.stripWhiteSpace();
+#else
     const QString localPath = m_active.localPath.trimmed();
+#endif
     if (!localPath.isEmpty()) {
         QFile file(localPath);
-        if (file.open(QIODevice::ReadOnly)) {
+        if (file.open(kImgReadMode)) {
             const QByteArray bytes = file.readAll();
             if (bytes.size() > 20 * 1024 * 1024) {
                 const Request done = m_active;
@@ -395,11 +456,21 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
                 finishActive();
                 return;
             }
+#ifdef QT3_BUILD
+            // Qt3：QBuffer ctor 按值拷 QByteArray；QImageReader 走 qimagereader_shim
+            QBuffer buf(bytes);
+            buf.open(kImgReadMode);
+            QImageReader reader(&buf);
+            reader.setAutoTransform(true);
+            // Qt3 下 format() 走 qimagereader_shim，探测已小写，无需 .lower()
+            const QCString fmt = reader.format();
+#else
             QBuffer buf(const_cast<QByteArray*>(&bytes));
             buf.open(QIODevice::ReadOnly);
             QImageReader reader(&buf);
             reader.setAutoTransform(true);
             const QByteArray fmt = reader.format().toLower();
+#endif
             const bool isJpg = (fmt == "jpg" || fmt == "jpeg");
             const bool isPng = (fmt == "png");
             if (!isJpg && !isPng) {
@@ -421,7 +492,11 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
             }
             imageRef = QStringLiteral("data:%1;base64,")
                            .arg(isJpg ? "image/jpeg" : "image/png")
+#ifdef QT3_BUILD
+                + QString::fromLatin1(qToBase64(bytes));
+#else
                 + QString::fromLatin1(bytes.toBase64());
+#endif
         }
         // 读失败则回落原 imageUrl；两者皆空时由下方空载荷前检拦截
     }
@@ -485,6 +560,9 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
         QJsonDocument(root).toJson(QJsonDocument::Compact));
     m_reply = reply;
 
+#ifdef QT3_BUILD
+    using ::connect;   // qconnect_slots 模板进成员查找
+#endif
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, active, backendTag]() {
                 reply->deleteLater();
@@ -554,7 +632,7 @@ void ImageAiUtil::startPollinations()
                       QUrl(QStringLiteral(
                           "https://gen.pollinations.ai/v1/chat/completions")),
                       QString::fromLatin1(kPollinationsVisionModel),
-                      QByteArray(kPollinationsApiKey).trimmed(), 200);
+                      AK(kPollinationsApiKey), 200);
 }
 
 void ImageAiUtil::startZhipu()
@@ -563,7 +641,7 @@ void ImageAiUtil::startZhipu()
                       QUrl(QStringLiteral("https://open.bigmodel.cn/api/paas/v4"
                                           "/chat/completions")),
                       QString::fromLatin1(kZhipuVisionModel),
-                      QByteArray(kZhipuApiKey).trimmed(), kZhipuMaxTokens);
+                      AK(kZhipuApiKey), kZhipuMaxTokens);
 }
 
 void ImageAiUtil::startSiliconFlow()
@@ -572,7 +650,7 @@ void ImageAiUtil::startSiliconFlow()
                       QUrl(QStringLiteral(
                           "https://api.siliconflow.cn/v1/chat/completions")),
                       QString::fromLatin1(kSiliconFlowVisionModel),
-                      QByteArray(kSiliconFlowApiKey).trimmed(),
+                      AK(kSiliconFlowApiKey),
                       kSiliconFlowMaxTokens);
 }
 
@@ -582,7 +660,7 @@ void ImageAiUtil::startNvidia()
                       QUrl(QStringLiteral(
                           "https://integrate.api.nvidia.com/v1/chat/completions")),
                       QString::fromLatin1(kNvidiaVisionModel),
-                      QByteArray(kNvidiaApiKey).trimmed(), kNvidiaMaxTokens);
+                      AK(kNvidiaApiKey), kNvidiaMaxTokens);
 }
 
 void ImageAiUtil::startOpenRouter()
@@ -591,7 +669,7 @@ void ImageAiUtil::startOpenRouter()
                       QUrl(QStringLiteral(
                           "https://openrouter.ai/api/v1/chat/completions")),
                       QString::fromLatin1(kOpenRouterVisionModel),
-                      QByteArray(kOpenRouterApiKey).trimmed(),
+                      AK(kOpenRouterApiKey),
                       kOpenRouterMaxTokens);
 }
 
@@ -611,15 +689,15 @@ void ImageAiUtil::startLlm7()
                       QUrl(QStringLiteral(
                           "https://api.llm7.io/v1/chat/completions")),
                       QString::fromLatin1(kLlm7VisionModel),
-                      QByteArray(kLlm7ApiKey).trimmed(), kLlm7MaxTokens);
+                      AK(kLlm7ApiKey), kLlm7MaxTokens);
 }
 
 void ImageAiUtil::startCloudflare()
 {
     const QByteArray accountId =
-        QByteArray(kCloudflareAccountId).trimmed();
+        AK(kCloudflareAccountId);
     const QByteArray token =
-        QByteArray(kCloudflareApiToken).trimmed();
+        AK(kCloudflareApiToken);
     if (accountId.isEmpty() || token.isEmpty()) {
         const Request done = m_active;
         qWarning().noquote() << QStringLiteral(
@@ -646,7 +724,7 @@ void ImageAiUtil::startDashScope()
                           "https://dashscope.aliyuncs.com/compatible-mode/v1"
                           "/chat/completions")),
                       QString::fromLatin1(kDashScopeVisionModel),
-                      QByteArray(kDashScopeApiKey).trimmed(),
+                      AK(kDashScopeApiKey),
                       kDashScopeMaxTokens);
 }
 
@@ -668,7 +746,7 @@ void ImageAiUtil::startVolcengine()
                           "https://ark.cn-beijing.volces.com/api/v3"
                           "/chat/completions")),
                       QString::fromLatin1(kVolcengineVisionModel),
-                      QByteArray(kVolcengineApiKey).trimmed(),
+                      AK(kVolcengineApiKey),
                       kVolcengineMaxTokens);
 }
 
@@ -679,7 +757,7 @@ void ImageAiUtil::startModelScope()
                           "https://api-inference.modelscope.cn/v1"
                           "/chat/completions")),
                       QString::fromLatin1(kModelScopeVisionModel),
-                      QByteArray(kModelScopeApiKey).trimmed(),
+                      AK(kModelScopeApiKey),
                       kModelScopeMaxTokens);
 }
 
@@ -690,7 +768,7 @@ void ImageAiUtil::startModelScopeIntl()
                           "https://api-inference.modelscope.ai/v1"
                           "/chat/completions")),
                       QString::fromLatin1(kModelScopeVisionModel),
-                      QByteArray(kModelScopeIntlApiKey).trimmed(),
+                      AK(kModelScopeIntlApiKey),
                       kModelScopeIntlMaxTokens);
 }
 
@@ -700,7 +778,7 @@ void ImageAiUtil::startGroq()
                       QUrl(QStringLiteral(
                           "https://api.groq.com/openai/v1/chat/completions")),
                       QString::fromLatin1(kGroqVisionModel),
-                      QByteArray(kGroqApiKey).trimmed(), kGroqMaxTokens);
+                      AK(kGroqApiKey), kGroqMaxTokens);
 }
 
 void ImageAiUtil::startHuggingFace()
@@ -709,7 +787,7 @@ void ImageAiUtil::startHuggingFace()
                       QUrl(QStringLiteral(
                           "https://router.huggingface.co/v1/chat/completions")),
                       QString::fromLatin1(kHuggingFaceVisionModel),
-                      QByteArray(kHuggingFaceApiKey).trimmed(),
+                      AK(kHuggingFaceApiKey),
                       kHuggingFaceMaxTokens);
 }
 
@@ -720,7 +798,7 @@ void ImageAiUtil::startGemini()
                           "https://generativelanguage.googleapis.com/v1beta"
                           "/openai/chat/completions")),
                       QString::fromLatin1(kGeminiVisionModel),
-                      QByteArray(kGeminiApiKey).trimmed(),
+                      AK(kGeminiApiKey),
                       kGeminiMaxTokens);
 }
 
@@ -741,7 +819,12 @@ void ImageAiUtil::startZai()
                       QUrl(QStringLiteral(
                           "https://api.z.ai/api/paas/v4/chat/completions")),
                       QString::fromLatin1(kZaiVisionModel),
+#ifdef QT3_BUILD
+                      // utf8() 已得 QCString，勿再包 QByteArray()（QMemArray 无构造/无 trim）
+                      zaiApiKey().utf8().stripWhiteSpace(),
+#else
                       QByteArray(zaiApiKey().toUtf8()).trimmed(),
+#endif
                       kZaiMaxTokens);
 }
 
@@ -757,14 +840,18 @@ void ImageAiUtil::startAiHorde()
         return;
     }
     QFile file(m_active.localPath);
-    if (!file.open(QIODevice::ReadOnly)) {
+    if (!file.open(kImgReadMode)) {
         const Request done = m_active;
         emit failed(done.requestId, done.imageUrl,
                     tr("读取本地图片失败"));
         finishActive();
         return;
     }
+#ifdef QT3_BUILD
+    const QByteArray b64 = qToBase64(file.readAll());
+#else
     const QByteArray b64 = file.readAll().toBase64();
+#endif
     file.close();
 
     QJsonObject form;
@@ -794,6 +881,9 @@ void ImageAiUtil::startAiHorde()
         QJsonDocument(root).toJson(QJsonDocument::Compact));
     m_reply = reply;
 
+#ifdef QT3_BUILD
+    using ::connect;
+#endif
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, active]() {
                 reply->deleteLater();
@@ -834,12 +924,19 @@ void ImageAiUtil::startAiHorde()
                 }
                 m_hordeJobId = jobId;
                 m_hordePolls = 0;
+#ifdef QT3_BUILD
+                m_pollTimer->start(kAiHordePollIntervalMs);  // 已 stop 过，重新起始周期
+#else
                 m_pollTimer->start();
+#endif
             });
 }
 
 void ImageAiUtil::pollAiHorde()
 {
+#ifdef QT3_BUILD
+    using ::connect;
+#endif
     if (m_hordeJobId.isEmpty() || m_reply) {
         return;
     }
@@ -897,7 +994,7 @@ void ImageAiUtil::pollAiHorde()
                 }
                 if (done) {
                     m_pollTimer->stop();
-                    m_hordeJobId.clear();
+                    m_hordeJobId = QString();   // 等价 clear()，Qt3 无 clear 成员（统一写法）
                     if (!caption.isEmpty()) {
                         emit descriptionReady(active.requestId,
                                               active.imageUrl, caption);
@@ -913,6 +1010,9 @@ void ImageAiUtil::pollAiHorde()
 
 void ImageAiUtil::issueGet(const QUrl& url)
 {
+#ifdef QT3_BUILD
+    using ::connect;
+#endif
     logHop(m_active.requestId, m_hopCount, "get", url);
     auto* reply = m_nam->get(makeRequest(url));
     m_reply = reply;
@@ -950,11 +1050,25 @@ void ImageAiUtil::issueGet(const QUrl& url)
 
                 if (reply->error() == QNetworkReply::NoError && redirected) {
                     // redirected 信号缺失时的兜底：按属性手动跟随一次
+#ifdef QT3_BUILD
+                    // Qt3 QVariant 无 toUrl()；qnam_shim 以 QUrl::operator QString()
+                    // 隐式转进 QVariant（实测 type=String），取串重建 QUrl
+                    QUrl target = QUrl(reply->attribute(
+                        QNetworkRequest::RedirectionTargetAttribute).toString());
+#else
                     QUrl target = reply->attribute(
                         QNetworkRequest::RedirectionTargetAttribute).toUrl();
+#endif
+#ifdef QT3_BUILD
+                    // Qt3 无 QUrl::isRelative()/resolved()；qurl_shim 等价函数
+                    if (qUrlIsRelative(target)) {
+                        target = qResolveUrl(reply->url(), target);
+                    }
+#else
                     if (target.isRelative()) {
                         target = reply->url().resolved(target);
                     }
+#endif
                     if (isDescription(QUrlQuery(target).queryItemValue(
                             QStringLiteral("q")).trimmed())) {
                         m_reply = nullptr;
@@ -989,12 +1103,24 @@ void ImageAiUtil::handleRedirect(QNetworkReply* reply, const QUrl& target)
         return; // 已被取消或已切到下一跳
     }
     const Request done = m_active;
+#ifdef QT3_BUILD
+    QUrl resolved = target;
+    if (qUrlIsRelative(resolved)) {
+        resolved = qResolveUrl(reply->url(), resolved);
+    }
+#else
     QUrl resolved = target;
     if (resolved.isRelative()) {
         resolved = reply->url().resolved(resolved);
     }
+#endif
     QString desc;
+#ifdef QT3_BUILD
+    // Qt3 QUrl 无 isEmpty()；toString().isEmpty() 等价判空
+    if (!resolved.toString().isEmpty()) {
+#else
     if (!resolved.isEmpty()) {
+#endif
         desc = QUrlQuery(resolved).queryItemValue(
             QStringLiteral("q")).trimmed();
     }

@@ -1,8 +1,14 @@
 #ifndef IMAGE_TMP_UPLOADER_H
 #define IMAGE_TMP_UPLOADER_H
 
+#ifdef QT3_BUILD
+#include <qobject.h>
+#include <qstring.h>
+#include "qglobaltype_shim.h"
+#else
 #include <QObject>
 #include <QString>
+#endif
 
 class QNetworkAccessManager;
 class QNetworkReply;

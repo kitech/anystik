@@ -221,6 +221,9 @@ private:
 public:
     QNetworkReply(QObject* parent = nullptr);
     ~QNetworkReply() override;
+    // Qt3 QObject 无 setParent/reparent：multi 等"父子所有权"由 reply 显式托管。
+    // public：QHttpMultiPart::setParent 生命周期垫会用（qnam_shim.cpp）。
+    void qnamAddOwned(QObject* o) { if (o) m_qnamOwned.push_back(o); }
     // 请求数据（EventPoller 建立句柄需要）
     QUrl requestedUrl;
     std::string method;
@@ -229,6 +232,7 @@ public:
     std::map<std::string,std::string> reqExtraHeaders;
     int reqTimeoutSec = 60000;
     bool reqAbort = false;
+    std::vector<QObject*> m_qnamOwned;   // qt3 setParent 模拟：reply 析构时连带删除
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -325,14 +329,18 @@ class QHttpPart
 public:
     void setHeader(QNetworkRequest::KnownHeaders header, const QVariant& value)
         { m_header = value.toString().utf8(); }
-    void setBody(const char* body) { m_body = body; }
+    void setBody(const char* body) { m_body = body ? body : ""; }
+    void setBody(const QByteArray& body)
+        { m_body.assign(body.data(), body.size()); }
+    void setBody(const QCString& body)
+        { m_body.assign(body.data(), body.length()); }
     void setBodyDevice(QIODevice* device);
     const char* body() const { return m_body.data(); }
-    int bodySize() const { return m_body.size(); }
+    int bodySize() const { return (int)m_body.size(); }
     const char* header() const { return m_header.data(); }
 private:
-    QCString m_header;
-    QCString m_body;
+    QCString m_header;        // Content-Disposition 的值（发射时前缀"Content-Disposition: "）
+    std::string m_body;       // 精确长度字节（图片/文本都无尾 NUL，bodySize() 即内容长）
 };
 
 class QHttpMultiPart : public QObject
@@ -343,6 +351,9 @@ public:
     explicit QHttpMultiPart(ContentType contentType = MixedType,
                             QObject* parent = nullptr)
         : QObject(parent), m_type(contentType) {}
+    // Qt4/6 原生语义：multi 由 reply 父子链持有；Qt3 QObject 无 setParent，
+    // 该垫片把所有权登记进 reply 的 m_qnamOwned，reply 析构时连带释放。
+    void setParent(QObject* p);
     void append(const QHttpPart& part) { m_parts.push_back(part); }
     const std::vector<QHttpPart>& parts() const { return m_parts; }
     int boundaryString() const { return m_boundary; }

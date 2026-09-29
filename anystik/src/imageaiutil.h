@@ -1,10 +1,19 @@
 #ifndef IMAGE_AI_UTIL_H
 #define IMAGE_AI_UTIL_H
 
+#ifdef QT3_BUILD
+#include <qobject.h>
+#include <qstring.h>
+#include <qcstring.h>
+#include <qurl.h>
+#include "qglobaltype_shim.h"
+#include "qqueue_shim.h"
+#else
 #include <QObject>
 #include <QString>
 #include <QByteArray>
 #include <QQueue>
+#endif
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -71,7 +80,14 @@ signals:
 private:
     explicit ImageAiUtil(QObject* parent = nullptr);
 
+#ifdef QT3_BUILD
+    // Qt3 的 QMetaObject::invokeMethod / SIGNAL()-SLOT() 连接只认 moc 里的槽名，
+    // startNext（fetchDescription 的 QueuedConnection 触发）与 pollAiHorde
+    // （QTimer::timeout 老式连接）必须并入 slots 分区；Qt6 编译不受影响。
+  private slots:
+#endif
     void startNext();
+    void pollAiHorde();
     void startBing();
     void startPollinations();
     void startZhipu();
@@ -92,7 +108,6 @@ private:
     void startGemini();
     void startOllama();
     void startZai();
-    void pollAiHorde();
     void startOpenAiVision(const QString& backendTag, const QUrl& url,
                            const QString& model, const QByteArray& apiKey,
                            int maxTokens, bool allowEmptyKey = false);

@@ -37,4 +37,20 @@
 #define QLatin1Char(c) QChar(c)
 #endif
 
+// QLatin1String 是 Qt 4.0 才引入的类；Qt3 无此类，且 Qt3 的 QString 也没有
+// startsWith(const QLatin1String&)/operator== 的 QLatin1String 重载。用一个最小
+// 类 + 隐式 QString 转换垫上：调用点的 QLatin1String("…") 在需要 const QString&
+// 处（startsWith/arg/==）经一次用户转换编译通过，latin1 语义等价。转 const char*
+// 就够，但不给（两次用户转换是非法的），只给 operator QString()。
+#if QT_VERSION < 0x040000
+class QLatin1String
+{
+public:
+    explicit QLatin1String(const char* s) : m_s(s) {}
+    operator QString() const { return QString::fromLatin1(m_s); }
+private:
+    const char* m_s;
+};
+#endif
+
 #endif // QLSTIK_QSTRING_SHIM_H

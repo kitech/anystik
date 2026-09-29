@@ -196,6 +196,7 @@ public:
     bool isEmpty() const;
     int  size() const;
     QJsonValue at(int i) const;              // 越界 → Undefined
+    QJsonValue first() const { return at(0); }  // 等价 at(0)，空数组 → Undefined
     void append(const QJsonValue& v);
     void removeAt(int i);
     const_iterator constBegin() const;

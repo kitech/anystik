@@ -41,6 +41,14 @@ typedef unsigned long long quint64;
 #define Q_INT64_C(c)   c##LL
 #define Q_UINT64_C(c)  c##ULL
 #endif
+// Qt3 无 qreal 与 qBound（课音：imagetmpuploader 进度百分比用）。
+// qreal 语义与 Qt 相同（double on this platform），qBound 对齐 Qt4+ 模板。
+typedef double qreal;
+template <typename T>
+inline const T& qBound(const T& val, const T& lo, const T& hi)
+{
+    return (val < lo) ? lo : ((hi < val) ? hi : val);
+}
 #endif
 
 static inline QString qAbsPath(const QFileInfo& fi)

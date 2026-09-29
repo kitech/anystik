@@ -203,6 +203,11 @@ QNetworkReply::QNetworkReply(QObject* parent)
 
 QNetworkReply::~QNetworkReply()
 {
+    // Qt3 setParent 模拟：析构时连带删除登记的多部分对象（模拟原生父子所有权）。
+    for (size_t i = 0; i < m_qnamOwned.size(); ++i) {
+        QObject* o = m_qnamOwned[i];
+        if (o) delete o;
+    }
 }
 
 // ── 信号（占位定义：只为取址，实际发射走 emit* 系列）──
@@ -507,13 +512,12 @@ bool QNetworkCookieJar::setCookiesFromUrl(
 // ─────────────────────────────────────────────────────────────────────────────
 void QHttpPart::setBodyDevice(QIODevice* device)
 {
-    QCString body;
+    m_body.clear();
     if (device && device->open(IO_ReadOnly)) {
         QByteArray d = device->readAll();
-        body = QCString(d.data(), d.size());
+        m_body.assign(d.data(), d.size());
         device->close();
     }
-    m_body = body;
 }
 
 QByteArray QHttpMultiPart::contentTypeHeader() const
@@ -524,6 +528,16 @@ QByteArray QHttpMultiPart::contentTypeHeader() const
     QCString ct = "multipart/form-data; boundary=";
     ct += QCString().setNum(m_boundary);
     return toCleanQBA(ct);
+}
+
+void QHttpMultiPart::setParent(QObject* p)
+{
+    // Qt4/6 原生：multi 挂为 reply 子对象，reply 析构连带删除。Qt3 QObject
+    // 无 reparent/子对象协议（仅构造期定父），此处把所有权登记进 reply 的
+    // m_qnamOwned，由 QNetworkReply 析构统一释放（qnam_shim.cpp）。
+    if (QNetworkReply* r = dynamic_cast<QNetworkReply*>(p)) {
+        r->qnamAddOwned(this);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -572,13 +586,15 @@ QNetworkReply* QNetworkAccessManager::post(const QNetworkRequest& req,
     QNetworkRequest r = req;
     QByteArray ct = multi->contentTypeHeader();
     r.contentType = std::string(ct.data(), ct.size());
-    QCString body;
+    // multipart 用 std::string 精确长度拼装：part 文件体可含 NUL 字节
+    // （图片），必须按 bodySize() 追加，不能走 C 字符串 strlen。
+    std::string body;
     QCString boundaryStr;
     boundaryStr.setNum(multi->boundaryString());
     for (size_t i = 0; i < multi->parts().size(); ++i) {
         const QHttpPart& p = multi->parts().at(i);
         body += "--";
-        body += boundaryStr;
+        body += boundaryStr.data();
         body += "\r\n";
         if (p.header() && p.header()[0]) {
             body += "Content-Disposition: ";
@@ -586,13 +602,13 @@ QNetworkReply* QNetworkAccessManager::post(const QNetworkRequest& req,
             body += "\r\n";
         }
         body += "\r\n";
-        body += p.body();
+        body.append(p.body(), p.bodySize());
         body += "\r\n";
     }
     body += "--";
-    body += boundaryStr;
+    body += boundaryStr.data();
     body += "--\r\n";
-    r.bodyData = std::string(body.data(), body.size());
+    r.bodyData = body;
     return sendCustomRequest(r, "POST");
 }
 

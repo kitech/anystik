@@ -1,5 +1,16 @@
 #include "imagetmpuploader.h"
 
+#ifdef QT3_BUILD
+#include "qstring_shim.h"
+#include "qnam_shim.h"
+#include "qconnect_slots.h"
+#include "qba_shim.h"
+#include "qjson_shim.h"
+#include <qdatetime.h>
+#include <qurl.h>
+#include <qfile.h>
+#include <qfileinfo.h>
+#else
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -12,8 +23,16 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDateTime>
+#endif
 
 namespace {
+
+// OpenMode 常量：Qt3 无 QIODevice::ReadOnly（用 IO_ReadOnly），其余版本原生。
+#ifdef QT3_BUILD
+const int kUploadReadMode = IO_ReadOnly;
+#else
+const QIODevice::OpenMode kUploadReadMode = QIODevice::ReadOnly;
+#endif
 
 // storage.to 三段流端点（复刻 fedlet/tmpfile.go）
 const QUrl kStorageToInitURL(QStringLiteral("https://storage.to/api/upload/init"));
@@ -75,13 +94,17 @@ QNetworkRequest makeRequest(const QUrl& url)
 QHttpMultiPart* buildMultiPart(Host host, const QString& filePath)
 {
     auto* file = new QFile(filePath);
-    if (!file->open(QIODevice::ReadOnly)) {
+    if (!file->open(kUploadReadMode)) {
         delete file;
         return nullptr;
     }
 
     auto* multi = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+#ifdef QT3_BUILD
+    // Qt3：QFile 非 QObject，无法挂父子；见 buildMultiPart 尾部 delete file
+#else
     file->setParent(multi);
+#endif
 
     auto addText = [multi](const QString& name, const QByteArray& value) {
         QHttpPart part;
@@ -90,11 +113,17 @@ QHttpMultiPart* buildMultiPart(Host host, const QString& filePath)
         part.setBody(value);
         multi->append(part);
     };
-    auto addFile = [multi, file](const QString& name) {
+    auto addFile = [multi, file, filePath](const QString& name) {
         QHttpPart part;
         part.setHeader(QNetworkRequest::ContentDispositionHeader,
             QVariant(QString::fromLatin1("form-data; name=\"%1\"; filename=\"%2\"")
-                .arg(name, QFileInfo(file->fileName()).fileName())));
+                .arg(name,
+#ifdef QT3_BUILD
+                     QFileInfo(filePath).fileName()   // Qt3 QFile 无 fileName()
+#else
+                     QFileInfo(file->fileName()).fileName()
+#endif
+                     )));
         part.setBodyDevice(file);
         multi->append(part);
     };
@@ -113,7 +142,13 @@ QHttpMultiPart* buildMultiPart(Host host, const QString& filePath)
             // 国内降级：带 1 小时过期时间，配合临时上传语义
             addText(QStringLiteral("expired_at"),
                 QDateTime::currentDateTime().addSecs(3600)
-                    .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")).toUtf8());
+                    .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))
+#ifdef QT3_BUILD
+                    .utf8()
+#else
+                    .toUtf8()
+#endif
+                    );
             addFile(QStringLiteral("file"));
             break;
         case Host::ScdnIo:
@@ -129,6 +164,11 @@ QHttpMultiPart* buildMultiPart(Host host, const QString& filePath)
         case Host::StorageTo:
             break;  // 三段流经 startStorageToStep，不在此构造 multipart
     }
+#ifdef QT3_BUILD
+    // Qt3：QHttpMultiPart::setBodyDevice 已在调用点读空 file（qnam_shim.cpp），
+    // QFile 又非 QObject 无法挂父子，这里显式释放，避免循环上传泄漏。
+    delete file;
+#endif
     return multi;
 }
 
@@ -137,7 +177,12 @@ QString parseUrl(Host host, const QByteArray& body)
     switch (host) {
         case Host::Catbox:
         case Host::Litterbox: {
-            const QString url = QString::fromUtf8(body).trimmed();
+            const QString url =
+#ifdef QT3_BUILD
+                QString::fromUtf8(body).stripWhiteSpace();   // Qt3 无 trimmed()
+#else
+                QString::fromUtf8(body).trimmed();
+#endif
             if (url.startsWith(QLatin1String("http"))) {
                 return url;
             }
@@ -202,7 +247,11 @@ void ImageTmpUploader::upload(const QString& filePath)
     m_cancelling = false;
     m_filePath = filePath;
     m_hostIndex = 0;
+    #ifdef QT3_BUILD
+    m_lastError = QString();   // Qt3 无 QString::clear()，赋空构造等价
+#else
     m_lastError.clear();
+#endif
     startNextHost();
 }
 
@@ -219,6 +268,9 @@ void ImageTmpUploader::cancel()
 
 void ImageTmpUploader::startNextHost()
 {
+#ifdef QT3_BUILD
+    using ::connect;   // qconnect_slots 全局模板进成员查找（§6.1 模式）
+#endif
     if (m_hostIndex >= kHostCount) {
         m_pending = false;
         emit failed(m_lastError.isEmpty() ? tr("图床不可用") : m_lastError);
@@ -297,16 +349,39 @@ void ImageTmpUploader::startNextHost()
 // storage.to 三段流：init(POST JSON) → PUT 原始字节到预签名 URL → confirm(POST JSON)
 void ImageTmpUploader::startStorageToStep(int step)
 {
+#ifdef QT3_BUILD
+    using ::connect;   // qconnect_slots 全局模板进成员查找（§6.1 模式）
+#endif
     if (!m_nam) {
         m_nam = new QNetworkAccessManager(this);
     }
+    #ifdef QT3_BUILD
+    // Qt3：QFileInfo::size() 返回 uint（扩宽到 qint64 安全）；utf8() 返回 QCString
+    const qint64 size = QFileInfo(m_filePath).size();
+    const QCString filename = QFileInfo(m_filePath).fileName().utf8();
+#else
     const QByteArray filename = QFileInfo(m_filePath).fileName().toUtf8();
     const qint64 size = QFileInfo(m_filePath).size();
+#endif
 
     // step 0/2：JSON POST init / confirm；step 1：PUT 原始字节
     QNetworkReply* reply = nullptr;
     QNetworkRequest req;
     if (step == 0 || step == 2) {
+#ifdef QT3_BUILD
+        // Qt3：QByteArray=QMemArray<char> 无 operator+/number，改用 QCString 拼
+        // （QCString is-a QByteArray，setNum 替代 number；字节与原生完全一致）。
+        QCString n;
+        n.setNum((long)size);
+        const QCString payload = step == 0
+            ? QCString("{\"filename\":\"") + filename
+                + QCString("\",\"content_type\":\"application/octet-stream\",\"size\":")
+                + n + "}"
+            : QCString("{\"r2_key\":\"") + m_storageR2Key.utf8()
+                + QCString("\",\"filename\":\"") + filename
+                + QCString("\",\"content_type\":\"application/octet-stream\",\"size\":")
+                + n + "}";
+#else
         const QByteArray payload = step == 0
             ? QByteArrayLiteral("{\"filename\":\"") + filename
                 + QByteArrayLiteral("\",\"content_type\":\"application/octet-stream\",\"size\":")
@@ -315,13 +390,14 @@ void ImageTmpUploader::startStorageToStep(int step)
                 + QByteArrayLiteral("\",\"filename\":\"") + filename
                 + QByteArrayLiteral("\",\"content_type\":\"application/octet-stream\",\"size\":")
                 + QByteArray::number(size) + QByteArrayLiteral("}");
+#endif
         req = makeRequest(step == 0 ? kStorageToInitURL : kStorageToConfURL);
         req.setHeader(QNetworkRequest::ContentTypeHeader,
                       QByteArrayLiteral("application/json"));
         reply = m_nam->post(req, payload);
     } else {
         auto* file = new QFile(m_filePath);
-        if (!file->open(QIODevice::ReadOnly)) {
+        if (!file->open(kUploadReadMode)) {
             delete file;
             ++m_hostIndex;
             startNextHost();
@@ -331,7 +407,12 @@ void ImageTmpUploader::startStorageToStep(int step)
         req.setHeader(QNetworkRequest::ContentTypeHeader,
                       QByteArrayLiteral("application/octet-stream"));
         reply = m_nam->put(req, file);
+#ifdef QT3_BUILD
+        // Qt3：QFile 非 QObject 无法挂父子；shim put(QIODevice*) 已读空 file
+        delete file;
+#else
         file->setParent(reply);
+#endif
     }
     m_reply = reply;
 

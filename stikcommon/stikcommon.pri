@@ -90,6 +90,39 @@ isEmpty(QT_VERSION) {
     STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/phonedb.h
 }
 
+# ══ 批次 3a：imagetmpuploader（QNAM multipart/raw 上传 + QJson 解析）══
+# Qt3 用 qnam_shim+qconnect_slots+qba_shim+qjson_shim；Qt6 走原生。Qt4 跳过——
+# 与 phonedb 同因（QNetworkReply::finished 在 Qt4.8 是 protected Q_SIGNAL，
+# 新式 connect 编不过），见上面 phonedb 注释与移植计划 §6.3b。
+# 模块内 QT3_BUILD 分支收口点：kUploadReadMode（IO_ReadOnly）、utf8()、
+# payload 用 QCString+setNum 拼（QByteArray=QMemArray<char> 无 operator+/number）、
+# using ::connect；QByteArrayLiteral 由 qba_shim.h 归属 Qt3→QCString。
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/imagetmpuploader.cpp
+    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/imagetmpuploader.h
+} else:!lessThan(QT_VERSION, 5.0.0) {
+    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/imagetmpuploader.cpp
+    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/imagetmpuploader.h
+}
+
+# ══ 批次 3b：imageaiutil（QNAM 视觉描述 + QJson + QImageReader 探测 + 轮询）══
+# Qt4 跳过：与 phonedb/imagetmpuploader 同因（QNetworkReply::finished 在 Qt4.8
+#     是 protected Q_SIGNAL，新式 connect 编不过，见 §6.3b 记录）。另 Qt4 无
+#     qInfo()（5.5+）/QImageReader.format() 语义亦有差异，一并按 skip 处理。
+# Qt3 new surfaces：qqueue_shim（QQueue<Request>）、qurl_shim（QUrlQuery /
+#     qToPercentEncoding / qResolveUrl / qUrlIsRelative）、qimagereader_shim
+#     （format 探测）、qdebug_shim（qInfo/qWarning 流）、qbytearray_shim
+#     （qToBase64）；QTimer setInterval/start、QMetaObject::invokeMethod PMF
+#     在源内 QT3_BUILD 收口；startNext/pollAiHorde 在 QT3_BUILD 纳入 slots 分区
+#     （Qt3QMetaObject::invokeMethod 与老式 SIGNAL/SLOT 连接只认槽名）。
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/imageaiutil.cpp
+    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/imageaiutil.h
+} else:!lessThan(QT_VERSION, 5.0.0) {
+    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/imageaiutil.cpp
+    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/imageaiutil.h
+}
+
 # ══ 批次 2a 垫片 ══
 # 头文件无条件登记（moc/依赖扫描用），.cpp 严格按版本条件挂载，避免 Qt5+ 出现
 # "QSaveFile/QJson/QStandardPaths 重复定义"。条件范式对齐 qlstik.pro：
@@ -98,7 +131,13 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qjson_shim.h \
                        $$STIKCOMMON_DIR/qstandardpaths_shim.h \
                        $$STIKCOMMON_DIR/qsavefile_shim.h \
                        $$STIKCOMMON_DIR/qnam_shim.h \
-                       $$STIKCOMMON_DIR/qconnect_slots.h
+                       $$STIKCOMMON_DIR/qconnect_slots.h \
+                       $$STIKCOMMON_DIR/qba_shim.h \
+                       $$STIKCOMMON_DIR/qqueue_shim.h \
+                       $$STIKCOMMON_DIR/qurl_shim.h \
+                       $$STIKCOMMON_DIR/qimagereader_shim.h \
+                       $$STIKCOMMON_DIR/qdebug_shim.h \
+                       $$STIKCOMMON_DIR/qbytearray_shim.h
 
 isEmpty(QT_VERSION) {
     # Qt3.5
