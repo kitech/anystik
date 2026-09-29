@@ -10,12 +10,57 @@
 #include <qglobal.h>
 #include <qcstring.h>
 #include <string>
+#include <string.h>
 
 // Qt3 无 QString::trimmed() / 无 QByteArray 成员（简单 typedef）——Qt3 提供
 // stripWhiteSpace()，语义等同（去首尾空白）。函数式宏把 .trimmed() 一次映射，
 // 避免 QString 与 QByteArray 两套调用点逐处收口。仅 QT3_BUILD 编译单元生效，
 // Qt 原生头在宏定义前已完成预处理，不受影响。
 #define trimmed() stripWhiteSpace()
+
+// ══ QByteArray::append（Qt4 起）═══════════════════════════════════════
+// Qt3 的 QByteArray 是 QMemArray<char>，只有 resize()/data()，无 append。
+// 注意 Qt3 的 resize() 不填充，故必须手工写字节；返回值语义对齐 Qt4 的
+// QByteArray&（Qt3 无法返回引用，故返回 QByteArray 值，调用点只当语句用）。
+#if QT_VERSION < 0x040000
+inline QByteArray qByteArrayAppend(QByteArray& a, const QByteArray& b)
+{
+    const uint n0 = a.size();
+    const uint n1 = b.size();
+    if (n1 == 0) {
+        return a;
+    }
+    a.resize(n0 + n1);
+    if (b.data() != 0) {
+        memcpy(a.data() + n0, b.data(), n1);
+    }
+    return a;
+}
+// QByteArray::number（Qt4 成员，Qt3 无）：整数 → 十进制 ASCII 字节
+inline QByteArray qNumberToByteArray(qint64 v)
+{
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", (long long)v);
+    QByteArray out;
+    const int n = (int)strlen(buf);
+    out.resize(n);
+    memcpy(out.data(), buf, n);
+    return out;
+}
+
+inline QByteArray qByteArrayAppend(QByteArray& a, const char* s)
+{
+    QByteArray t;
+    if (s == 0) {
+        return a;
+    }
+    const uint n = (uint)strlen(s);
+    t.resize(n);
+    memcpy(t.data(), s, n);
+    return qByteArrayAppend(a, t);
+}
+#define qByteArrayAppendStr(a, s) qByteArrayAppend((a), QCString(s))
+#endif
 
 // 标准 RFC4648 base64（无内嵌换行），与 Qt4+ 的 QByteArray::toBase64() 默认行为对齐。
 // 返回 QCString：其 length()/data() 语义可靠（QMemArray 的 size() 含尾 NUL，不可用于

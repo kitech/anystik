@@ -42,6 +42,7 @@
 #include <functional>
 
 #include "compatcore34.h"   // CustomEventBase / EventType34 / qFromUtf8 等
+#include "qlist_shim.h"    // QList 值容器（vendor TU 也 include 它，类型需一致）
 #include "qglobaltype_shim.h"   // Qt3: qint64 / qAbsPath / qMkdir
 
 // Qt3 的 QByteArray(=QMemArray<char>) 无 constData()（只有 data()）、无 '+='
@@ -53,6 +54,7 @@ inline const char* qbaConstData(const QByteArray& a) { return a.constData(); }
 #endif
 
 class QNetworkReplyEvent;
+class QNetworkAccessManager;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // QNetworkRequest（值语义）
@@ -114,6 +116,100 @@ private:
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SSL 类型（Qt3 没有 QtNetwork 的 QSslError/QSslCertificate/QCryptographicHash）
+//
+// 用途：vendor qwebdav 的 sslErrors/replyError 链路与 acceptSslCertificate 依赖
+// QSslError::certificate() 和 QSslCertificate::digest()（qwebdav.cpp:259-262）。
+// 这里的 QSslCertificate 是**数据载体**：指纹由 qsslprobe 用 OpenSSL 真实算出，
+// 校验本身由 curl/OpenSSL 完成，类型层不做任何桩断言。
+//
+// 注意：QCryptographicHash 在本垫片里只暴露 digest 计算所需的 Md5/Sha1；
+// QWebdavDirParser 用的 Md5 是 QSslCertificate::digest() 的实参。
+// ─────────────────────────────────────────────────────────────────────────────
+class QCryptographicHash
+{
+public:
+    enum Algorithm { Md5 = 0, Sha1 = 1 };
+    // Qt4+ 的 QCryptographicHash 是 QIODevice 子类（hash.addData/result）。
+    // QWebdav 只用 digest() 的枚举值，故此处只需枚举可被引用。
+    Algorithm algorithm() const { return m_alg; }
+    explicit QCryptographicHash(Algorithm a) : m_alg(a) {}
+
+private:
+    Algorithm m_alg;
+};
+
+class QSslCertificate
+{
+public:
+    QSslCertificate() {}
+    // 真实探测结果构造（qsslprobe 提供）
+    QSslCertificate(const QByteArray& md5, const QByteArray& sha1, const QString& pem)
+        : m_md5(md5), m_sha1(sha1), m_pem(pem) {}
+
+    bool isNull() const { return m_md5.isEmpty() && m_sha1.isEmpty(); }
+
+    // 与 Qt4+ 同语义：返回**原始**摘要字节（Md5 16B / Sha1 20B）。
+    // QWebdav::sslErrors 拿它和 hexToDigest() 出来的 pin 直接 == 比较。
+    QByteArray digest(QCryptographicHash::Algorithm a) const
+    {
+        return (a == QCryptographicHash::Md5) ? m_md5 : m_sha1;
+    }
+
+    QString toPem() const { return m_pem; }
+    QString subjectInfo(QCryptographicHash::Algorithm = QCryptographicHash::Sha1) const
+    {
+        return QString();   // QWebdav 未使用 subjectInfo/debugCertificate
+    }
+
+private:
+    QByteArray m_md5;
+    QByteArray m_sha1;
+    QString m_pem;
+};
+
+class QSslError
+{
+public:
+    // Qt4+ QSslError::SslError 枚举取值
+    enum SslError {
+        NoError = 0,
+        UnableToGetIssuerCertificate = 2,
+        SelfSignedCertificate = 9,
+        CertificateUntrusted = 11,
+        HostNameMismatch = 12,
+    };
+
+    QSslError() : m_err(NoError) {}
+    QSslError(SslError e, const QSslCertificate& cert) : m_err(e), m_cert(cert) {}
+
+    SslError error() const { return m_err; }
+    QSslCertificate certificate() const { return m_cert; }
+    QString errorString() const { return m_errorString; }
+
+private:
+    SslError m_err;
+    QSslCertificate m_cert;
+    QString m_errorString;
+};
+
+// QWebdav::provideAuthenication(QNetworkReply*, QAuthenticator*) 用
+class QAuthenticator
+{
+public:
+    QAuthenticator() {}
+    QString userName() const { return m_user; }
+    void setUserName(const QString& u) { m_user = u; }
+    QString password() const { return m_pass; }
+    void setPassword(const QString& p) { m_pass = p; }
+    QString realm() const { return m_realm; }
+    void setRealm(const QString& r) { m_realm = r; }
+
+private:
+    QString m_user, m_pass, m_realm;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // QNetworkReply —— QObject + 槽注册表
 // ─────────────────────────────────────────────────────────────────────────────
 class QNetworkReply : public QObject
@@ -146,6 +242,12 @@ public:
     void error(QNetworkReply::NetworkError code);
     void redirected(const QUrl& target);
     void metaDataChanged();
+    // Qt4+ 的两个信号：QWebdav connect/disconnect 这两个（qwebdav.cpp:180-181,456）
+    void errorOccurred(QNetworkReply::NetworkError code);
+    void redirectAllowed(const QUrl& target);
+    // Qt4+ 的 sslErrors 信号：TLS 校验失败时由垫片在发 finished/error 之前发射，
+    // 槽（QWebdav::sslErrors）据 pin 决定 ignoreSslErrors() 还是 abort()。
+    void sslErrors(const QList<QSslError>& errors);
 
     // QNAM 兼容接口
     QUrl url() const { return m_finalUrl; }
@@ -161,6 +263,27 @@ public:
     void abort();
     void disconnect() { m_slots.clear(); }
 
+    // ── SSL（QWebdav 用）──
+    // Qt4+ 语义：置位"忽略本次 TLS 错误"。本垫片在 sslErrors 派发返回后据此
+    // 把对端证书收进 CA bundle 并重发该请求（见 qnam_shim.cpp 的 retry 段）。
+    void ignoreSslErrors() { m_sslIgnore = true; }
+    // 本次传输是否因证书问题需要用户裁决
+    bool sslErrorsPending() const { return m_sslIgnore || m_sslAbortedByUser; }
+    // 探测到的对端证书（TLS 失败时填充，供 accept 后收录）
+    const QSslCertificate& probedCertificate() const { return m_sslCert; }
+    void setProbedCertificate(const QSslCertificate& c) { m_sslCert = c; }
+
+    // ── QIODevice 侧接口（QWebdavDirParser 轮询用）──
+    // Qt4+ QNetworkReply 继承 QIODevice；Qt3 QObject 没有这些，本垫片补最小集。
+    // 本垫片不继承 QIODevice（避免动到既有 readAll/缓冲布局），故按普通成员实现。
+    bool isFinished() const { return m_done; }
+    qint64 bytesAvailable() const { return (qint64)m_body.length(); }
+    qint64 bytesToWrite() const { return 0; }   // 上行走 reqData，无背压队列
+    void close() { }                            // 结果一次性投递，无需 close
+    // deleteLater() 直接继承 QObject 的（Qt3.5 qobject.h:174 已有，
+    // 依赖 DeferredDelete 事件；qlstik/src/main.cpp:87 有 app.exec() 事件循环，
+    // 故原生实现可用，无需自造）。
+
     // 内部：EventPoller done 结果落地（泵线程回调里调，仅写共享缓冲）
     void deliverResult(int httpCode, const std::string& curlErr,
                        const std::string& body,
@@ -174,6 +297,10 @@ public:
 
     // curl 错误串 → NetworkError 映射
     NetworkError mapCurlError(const std::string& err) const;
+
+    // TLS 链路内部实现（见 qnam_shim.cpp）
+    bool isTlsVerifyFailure(const std::string& err) const;
+    bool handleSslErrors();
 
     bool errorOccurred() const { return m_error != NoError; }
 
@@ -192,8 +319,22 @@ public:
     std::vector<ProgressSlot>& slots_downloadProgress() { return m_dp; }
     std::vector<ErrorSlot>& slots_error() { return m_er; }
     std::vector<RedirectSlot>& slots_redirected() { return m_rd; }
+    typedef std::function<void(const QList<QSslError>&)> SslErrorSlot;
+    std::vector<SslErrorSlot>& slots_sslErrors() { return m_ssl; }
+    // errorOccurred / redirectAllowed 复用既有注册表（同签名），无需新槽位
+    void emitErrorOccurred(NetworkError e) { emitError(e); }
+    void emitRedirectAllowed(const QUrl& t) { emitRedirected(t); }
+    void emitSslErrors(const QList<QSslError>& e) { for (size_t i=0;i<m_ssl.size();++i) m_ssl[i](e); }
+    // 由 sslErrors 派发后回调：QWebdav 选择了 ignore 还是 abort
+    void markSslAbortedByUser() { m_sslAbortedByUser = true; }
+    // TLS 失败后把证书收进 CA bundle 并重发；成功返回 true 表示已重发
+    bool acceptSslAndRetry();
+    QNetworkAccessManager* sslManager() const { return m_manager; }
 
-    void emitFinished() { runVoid("finished"); }
+    // Qt4+ 里 manager 的 finished(reply) 与 reply 的 finished() 同轮发射；
+    // 统一在这里补 manager 通知，保证各条错误路径都覆盖到（QWebdav::replyFinished
+    // 正是挂在 manager::finished 上收尾的）。实体在 .cpp：此处 manager 仅前置声明。
+    void emitFinished();
     void emitReadyRead() { runVoid("readyRead"); }
     void emitUpload(qint64 s, qint64 t);
     void emitDownload(qint64 r, qint64 t);
@@ -208,6 +349,14 @@ private:
     std::vector<ProgressSlot> m_dp;
     std::vector<ErrorSlot> m_er;
     std::vector<RedirectSlot> m_rd;
+    std::vector<SslErrorSlot> m_ssl;
+    bool m_sslIgnore = false;          // QWebdav 调了 ignoreSslErrors()
+    bool m_sslAbortedByUser = false;   // QWebdav emit checkSslCertifcate 后 abort()
+    bool m_sslRetried = false;         // 收录后已重发过一次，防无限重试
+    bool m_inSslDispatch = false;      // 正在派发 sslErrors（窗口内 abort 视为用户拒绝）
+    bool m_authRetried = false;        // 401 补 Authorization 后已重发过一次
+    QSslCertificate m_sslCert;         // 探测到的对端证书（accept 时收录）
+    QNetworkAccessManager* m_manager = nullptr;   // retry 时回投给 manager
     std::map<std::string, std::string> m_rawHdrs;
     std::map<int, QVariant> m_attrs;      // 含 HttpStatusCode / RedirectionTarget
     NetworkError m_error = NoError;
@@ -254,6 +403,9 @@ public:
     QNetworkReply* put(const QNetworkRequest& req, const QByteArray& data);
     QNetworkReply* put(const QNetworkRequest& req, QIODevice* data);
     QNetworkReply* deleteResource(const QNetworkRequest& req);
+    // WebDAV 动词（窄切面 QWebdavLite 需要；vendor qwebdav 也用）
+    QNetworkReply* mkcol(const QNetworkRequest& req);
+    QNetworkReply* propfind(const QNetworkRequest& req, const QByteArray& query);
     QNetworkReply* sendCustomRequest(const QNetworkRequest& req,
                                      const char* verb,
                                      const QByteArray& data = QByteArray());
@@ -263,9 +415,42 @@ public:
     void setTransferTimeout(int timeoutSec = 60000) { m_timeoutSec = timeoutSec; }
     int transferTimeout() const { return m_timeoutSec; }
 
+    // ── 「信号」：与 Qt4+ QNetworkAccessManager 同签名 ──
+    // QWebdav 继承本类（qwebdav.cpp:55），构造时连的是
+    //   connect(this, &QWebdav::finished, this, &QWebdav::replyFinished)
+    //   connect(this, &QWebdav::authenticationRequired, this, &QWebdav::provideAuthenication)
+    // 取址拿到的是本类这两个成员，故需走 qconnect_slots 的槽注册表（不 moc）。
+    void finished(QNetworkReply* reply);
+    void authenticationRequired(QNetworkReply* reply, QAuthenticator* authenticator);
+
+    typedef std::function<void(QNetworkReply*)> ReplySlot;
+    typedef std::function<void(QNetworkReply*, QAuthenticator*)> AuthSlot;
+    std::vector<ReplySlot>& slots_finished() { return m_finished; }
+    std::vector<AuthSlot>& slots_authRequired() { return m_authReq; }
+    void emitFinished(QNetworkReply* r)
+    {
+        for (size_t i = 0; i < m_finished.size(); ++i) m_finished[i](r);
+    }
+    // 401 时派发：槽（QWebdav::provideAuthenication）填好 authenticator 后，
+    // 垫片据此加 Authorization 头并重发（见 qnam_shim.cpp）。
+    void emitAuthenticationRequired(QNetworkReply* r, QAuthenticator* a)
+    {
+        for (size_t i = 0; i < m_authReq.size(); ++i) m_authReq[i](r, a);
+    }
+    // reply 侧回调 manager 的内部入口
+    void notifyReplyFinished(QNetworkReply* r) { emitFinished(r); }
+    void notifyAuthRequired(QNetworkReply* r, QAuthenticator* a)
+    {
+        emitAuthenticationRequired(r, a);
+    }
+    // 401 重发（垫片内部用，避免 reply 直接依赖 issue）
+    void reissue(QNetworkReply* r);
+
 private:
     QNetworkReply* createReply(const QNetworkRequest& req, const std::string& verb);
     void issue(QNetworkReply* r);
+    std::vector<ReplySlot> m_finished;
+    std::vector<AuthSlot> m_authReq;
     QNetworkCookieJar* m_cookieJar = nullptr;
     bool m_ownsJar = false;
     int m_timeoutSec = 60000;

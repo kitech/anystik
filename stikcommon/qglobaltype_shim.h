@@ -71,11 +71,17 @@ static inline bool qMkdir(const QString& path)
     if (p.isEmpty()) {
         return false;
     }
+    // Qt3 的 QDir::mkdir 对"已存在"返回 false，但 QDir::mkpath 语义是"已存在→true"。
+    // 本函数按注释承诺的 mkpath 语义实现，调用方（如 qcabundle 反复激活）依赖这一点。
+    if (QFileInfo(p).isDir()) {
+        return true;
+    }
     int slashPos = 0;
     while ((slashPos = p.find('/', slashPos + 1)) != -1) {
         QDir().mkdir(p.left(slashPos));
     }
-    return QDir().mkdir(p);
+    // 末级可能已被并发创建，补一次 isDir 判定
+    return QDir().mkdir(p) || QFileInfo(p).isDir();
 #else
     return QDir().mkpath(path);
 #endif

@@ -107,7 +107,7 @@ QMAKE_CFLAGS   += $$STIKCOMMON_CFLAGS
 QMAKE_CXXFLAGS += -O0
 QMAKE_CFLAGS   += -O0
 !isEmpty(QT_VERSION) {
-    greaterThan(QT_VERSION, 6.0.0) {
+    greaterThan(QT_VERSION, 5.0.0) {
         QMAKE_CXXFLAGS += -std=c++17
         QMAKE_CFLAGS   += -std=gnu17
     } else {

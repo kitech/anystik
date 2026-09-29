@@ -8,6 +8,9 @@
 
 #include "eventpoller.h"
 #include "compatcore34.h"   // qFromUtf8 / qToUtf8 / CustomEventBase
+#include "qsslprobe.h"      // 真实探测对端证书（OpenSSL 裸握手）
+#include "qcabundle.h"      // 已接受证书收录 + CURL_CA_BUNDLE 激活
+#include "qbytearray_shim.h"  // qToBase64（Qt3 Basic 认证）
 
 #include <cstdlib>
 #include <cstring>
@@ -39,6 +42,7 @@ static EventType34 qnamReplyEventType()
     static EventType34 t = toEventType34(QEvent::User + 120);
     return t;
 }
+
 
 static EventType34 qnamProgressEventType()
 {
@@ -267,6 +271,35 @@ void QNetworkReply::deliverResult(int httpCode, const std::string& curlErr,
 
     m_done = true;
     if (httpCode >= 400) {
+        // 401：先给 QWebdav::provideAuthenication 一次填 authenticator 的机会，
+        // 填了就补 Authorization 头重发（Qt 原生行为），不当作错误上报。
+        if (httpCode == 401 && !m_authRetried && m_manager) {
+            QAuthenticator auth;
+            m_manager->notifyAuthRequired(this, &auth);
+            if (!auth.userName().isEmpty() || !auth.password().isEmpty()) {
+                m_authRetried = true;
+                m_done = false;
+                const QString plain = auth.userName() + ":" + auth.password();
+                // Qt3 的 QByteArray(=QMemArray<char>) 无 (ptr,len) 构造
+                const QCString plainUtf8 = plain.utf8();
+                QByteArray user;
+                user.resize(plainUtf8.size());
+                if (user.data() != 0 && plainUtf8.data() != 0) {
+                    std::memcpy(user.data(), plainUtf8.data(), plainUtf8.size());
+                }
+#ifdef QT3_BUILD
+                const QCString b64 = qToBase64(user);
+                reqExtraHeaders["Authorization"] =
+                    std::string("Basic ") + std::string(b64.data() ? b64.data() : "");
+#else
+                reqExtraHeaders["Authorization"] =
+                    std::string("Basic ") +
+                    std::string(user.toBase64().constData());
+#endif
+                m_manager->reissue(this);
+                return;
+            }
+        }
         if (httpCode == 404) {
             m_error = ContentNotFoundError;
         } else if (httpCode == 401 || httpCode == 403) {
@@ -280,6 +313,11 @@ void QNetworkReply::deliverResult(int httpCode, const std::string& curlErr,
         return;
     }
     if (!curlErr.empty()) {
+        // TLS 校验失败：真实探测对端证书 → 派发 sslErrors → 按 QWebdav 的裁决
+        // （ignoreSslErrors 收录进 CA bundle 重发 / abort）。
+        if (isTlsVerifyFailure(curlErr) && handleSslErrors()) {
+            return;   // 已重发，等新结果
+        }
         m_error = mapCurlError(curlErr);
         m_errorString = QString::fromUtf8(curlErr.data(), curlErr.size());
         emitError(m_error);
@@ -329,9 +367,76 @@ QNetworkReply::NetworkError QNetworkReply::mapCurlError(const std::string& err) 
     return UnknownNetworkError;
 }
 
-QByteArray QNetworkReply::readAll()
+void QNetworkReply::emitFinished()
 {
-    return toCleanQBA(m_body);
+    // manager 先于 reply 自己收到 finished（Qt 原生同轮），QWebdav::replyFinished
+    // 挂在 manager::finished 上收尾读数据
+    if (m_manager) {
+        m_manager->notifyReplyFinished(this);
+    }
+    runVoid("finished");
+}
+
+// ── TLS 证书链路（对齐 Qt4+ QNetworkReply::sslErrors / ignoreSslErrors）──
+
+// EventPoller 传上来的是 curl_easy_strerror 文本，据此识别"证书不可信"类失败。
+// CURLE_PEER_FAILED_VERIFICATION(60)/CURLE_SSL_CACERT(77) 的文本含
+// "certificate"；CURLE_SSL_CONNECT_ERROR(35) 可能只是协议错，交给 mapCurlError
+// 报 SslHandshakeFailedError，不进 sslErrors 裁决链（避免把纯 TLS 故障
+// 误当成"证书可接受"）。
+bool QNetworkReply::isTlsVerifyFailure(const std::string& err) const
+{
+    if (err.find("certificate") == std::string::npos) {
+        return false;
+    }
+    return true;
+}
+
+// 返回 true 表示已收录证书并重发，调用方直接 return（不再报错）。
+bool QNetworkReply::handleSslErrors()
+{
+    if (m_manager == nullptr || m_sslRetried) {
+        return false;
+    }
+    // 真实探测对端证书（OpenSSL 裸握手，见 qsslprobe）
+    QSslProbeResult probe;
+    if (!qSslProbeSync(requestedUrl, probe)) {
+        return false;   // 连不上/非 TLS：不是"证书不可信"，按普通错误处理
+    }
+    const QSslCertificate cert(probe.md5, probe.sha1, probe.certPem);
+    m_sslCert = cert;
+
+    QList<QSslError> errs;
+    errs.append(QSslError(QSslError::SelfSignedCertificate, cert));
+
+    // 派发。QWebdav::sslErrors 内部二选一：
+    //   pin 匹配 → reply->ignoreSslErrors()
+    //   否则     → emit checkSslCertifcate(errors) + reply->abort()
+    m_inSslDispatch = true;
+    emitSslErrors(errs);
+    m_inSslDispatch = false;
+
+    if (m_sslIgnore && !m_sslAbortedByUser) {
+        if (qCaBundleTrust(probe.certPem) && qCaBundleActivate()) {
+            m_sslRetried = true;
+            m_done = false;
+            m_manager->reissue(this);
+            return true;
+        }
+    }
+    return false;   // 用户 abort 或收录失败：交回调用方走 error/finished
+}
+
+bool QNetworkReply::acceptSslAndRetry()
+{
+    if (m_sslIgnore && !m_sslAbortedByUser && !m_sslRetried && m_manager != nullptr &&
+        !m_sslCert.isNull() && qCaBundleTrust(m_sslCert.toPem()) && qCaBundleActivate()) {
+        m_sslRetried = true;
+        m_done = false;
+        m_manager->reissue(this);
+        return true;
+    }
+    return false;
 }
 
 QVariant QNetworkReply::attribute(QNetworkRequest::Attribute code,
@@ -380,6 +485,10 @@ QByteArray QNetworkReply::rawHeaderList() const
 
 void QNetworkReply::abort()
 {
+    // 处于 sslErrors 派发窗口时的 abort = QWebdav 走 checkSslCertifcate 后拒绝
+    if (m_inSslDispatch) {
+        m_sslAbortedByUser = true;
+    }
     m_aborted = true;
     m_error = OperationCanceledError;
     m_errorString = QString::fromUtf8("Request aborted");
@@ -543,6 +652,16 @@ void QHttpMultiPart::setParent(QObject* p)
 // ─────────────────────────────────────────────────────────────────────────────
 // QNetworkAccessManager
 // ─────────────────────────────────────────────────────────────────────────────
+// 「信号」实体：非 inline 外部函数，保证 &QNetworkAccessManager::finished 与
+// &QNetworkAccessManager::authenticationRequired 的地址唯一（qconnect_slots 靠取址区分）。
+void QNetworkAccessManager::finished(QNetworkReply*)
+{
+}
+
+void QNetworkAccessManager::authenticationRequired(QNetworkReply*, QAuthenticator*)
+{
+}
+
 QNetworkAccessManager::QNetworkAccessManager(QObject* parent)
     : QObject(parent)
 {
@@ -572,6 +691,21 @@ QNetworkReply* QNetworkAccessManager::get(const QNetworkRequest& req)
 QNetworkReply* QNetworkAccessManager::head(const QNetworkRequest& req)
 {
     return sendCustomRequest(req, "HEAD");
+}
+
+QNetworkReply* QNetworkAccessManager::mkcol(const QNetworkRequest& req)
+{
+    return sendCustomRequest(req, "MKCOL");
+}
+
+QNetworkReply* QNetworkAccessManager::propfind(const QNetworkRequest& req,
+                                               const QByteArray& query)
+{
+    // req 是 const&，改不了头：先按值拷一份再补 Depth/Content-Type
+    QNetworkRequest r(req);
+    r.setRawHeader("Depth", "1");
+    r.setRawHeader("Content-Type", "text/xml; charset=utf-8");
+    return sendCustomRequest(r, "PROPFIND", query);
 }
 
 QNetworkReply* QNetworkAccessManager::post(const QNetworkRequest& req,
@@ -669,6 +803,7 @@ QNetworkReply* QNetworkAccessManager::createReply(const QNetworkRequest& req,
     r->reqTimeoutSec = req.timeoutSec() > 0 ? req.timeoutSec() : m_timeoutSec;
     r->reqContentType = req.contentType;
     r->m_jar        = m_cookieJar;
+    r->m_manager    = this;
 
     const std::map<int,QVariant>& a = req.attributes();
     for (std::map<int,QVariant>::const_iterator it = a.begin(); it != a.end(); ++it) {
@@ -756,4 +891,9 @@ void QNetworkAccessManager::issue(QNetworkReply* r)
     ctx->jar = m_cookieJar;
 
     EventPoller::addRequest(hr, qnamDoneCb, ctx);
+}
+
+void QNetworkAccessManager::reissue(QNetworkReply* r)
+{
+    issue(r);
 }

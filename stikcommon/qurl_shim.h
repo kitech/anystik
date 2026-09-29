@@ -132,6 +132,19 @@ static inline QString qUrlRawString(const QUrl& u)
     return s;
 }
 
+// ── scheme 提取（Qt3 QUrl 无 scheme()）──
+// Qt3 只有 protocol()，且对无 scheme 的输入默认返回 "file"（同 qUrlRawString 的坑），
+// 故同样从原始串取：首个 ':' 之前的一段，转小写。相对/根路径返回空串。
+static inline QString qUrlScheme(const QUrl& u)
+{
+    const QString s = qUrlRawString(u);
+    const int colon = s.find(QChar(':'));
+    if (colon <= 0) {
+        return QString();
+    }
+    return s.left(colon).lower();
+}
+
 // ── 相对判定：绝对 http(s) 之外都算相对 ──
 static inline bool qUrlIsRelative(const QUrl& u)
 {

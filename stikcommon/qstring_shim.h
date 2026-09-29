@@ -16,6 +16,10 @@
 #include <qglobal.h>
 #endif
 
+#include <qstring.h>
+#include <qcstring.h>
+#include <string.h>
+
 #if QT_VERSION < 0x050a00
 #if QT_VERSION >= 0x040000
 #define qUtf8Printable(string) (string).toUtf8().constData()
@@ -51,6 +55,34 @@ public:
 private:
     const char* m_s;
 };
+#endif
+
+// ══ Qt3.5 缺失的 QString 成员（qwebdav 用到）══════════════════════════
+// toUtf8/toLocal8Bit/toLatin1：Qt3 分别叫 utf8()/local8Bit()/latin1()，
+// 都返回 QCString（与 QByteArray 同为 QMemArray<char>），可直接赋给 QByteArray。
+// chop：Qt3 无 QString::chop（裁掉尾部 n 字符）。
+// 注：刻意**不**提供 split 垫——Qt3 只有 split(const QString&, Qt::SplitFlags)，
+// 语义（是否保留空段）与 Qt4 的 split(QChar) 不同，误垫会静默改变解析结果；
+// 需要时用 split(QString(c)) 显式写。
+// clear()：Qt3 无（QString 在 Qt3 不可变语义地靠 = QString() 归零）。
+#if QT_VERSION < 0x040000
+// QCString 与 QByteArray 在 Qt3 是**不同类**（QByteArray=QMemArray<char>），
+// 无隐式转换；且 QCString(QByteArray) 构造实测不可靠，故按长度 memcpy。
+inline QByteArray qQStringToBA(const QCString& s)
+{
+    const int n = s.size();
+    if (n <= 0 || s.data() == 0) {
+        return QByteArray();
+    }
+    QByteArray out(n);
+    memcpy(out.data(), s.data(), n);
+    return out;
+}
+inline QByteArray qToUtf8BA(const QString& s)   { return qQStringToBA(s.utf8()); }
+inline QByteArray qToLatin1BA(const QString& s) { return qQStringToBA(s.latin1()); }
+inline QByteArray qToLocal8BA(const QString& s)  { return qQStringToBA(s.local8Bit()); }
+inline void qStringChop(QString& s, int n)       { if (n > 0) s = s.left(s.length() - n); }
+inline void qStringClear(QString& s)             { s = QString(); }
 #endif
 
 #endif // QLSTIK_QSTRING_SHIM_H

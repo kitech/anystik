@@ -71,6 +71,35 @@ void connect(QNetworkReply* sender,
     sender->slots_error().push_back(std::function<void(QNetworkReply::NetworkError)>(fn));
 }
 
+// ── manager 发送者（QWebdav 继承 QNetworkAccessManager）──
+// vendor qwebdav.cpp:67-68 连的是 manager 自身的两个信号：
+//   connect(this, &QWebdav::finished, this, &QWebdav::replyFinished)
+//   connect(this, &QWebdav::authenticationRequired, this, &QWebdav::provideAuthenication)
+// 取址得到的是 QNetworkAccessManager 的成员，故按 manager 槽表路由。
+// 发送者写 QNetworkAccessManager*，QWebdav* 会隐式转换上来。
+template <typename Receiver, typename Func>
+void connect(QNetworkAccessManager* sender,
+             void (QNetworkAccessManager::*sig)(QNetworkReply*),
+             Receiver* ctx,
+             Func fn)
+{
+    (void)ctx;
+    (void)sig;
+    sender->slots_finished().push_back(std::function<void(QNetworkReply*)>(fn));
+}
+
+template <typename Receiver, typename Func>
+void connect(QNetworkAccessManager* sender,
+             void (QNetworkAccessManager::*sig)(QNetworkReply*, QAuthenticator*),
+             Receiver* ctx,
+             Func fn)
+{
+    (void)ctx;
+    (void)sig;
+    sender->slots_authRequired().push_back(
+        std::function<void(QNetworkReply*, QAuthenticator*)>(fn));
+}
+
 // ── 一参 redirected ──
 template <typename Receiver, typename Func>
 void connect(QNetworkReply* sender,
@@ -80,6 +109,141 @@ void connect(QNetworkReply* sender,
 {
     (void)sig; (void)ctx;
     sender->slots_redirected().push_back(std::function<void(const QUrl&)>(fn));
+}
+
+// ── sslErrors（QWebdav::sslErrors 接受链）──
+template <typename Receiver, typename Func>
+void connect(QNetworkReply* sender,
+             void (QNetworkReply::*sig)(const QList<QSslError>&),
+             Receiver* ctx,
+             Func fn)
+{
+    (void)ctx;
+    (void)sig;
+    sender->slots_sslErrors().push_back(std::function<void(const QList<QSslError>&)>(fn));
+}
+
+// ── 成员函数指针槽（vendor qwebdav 的写法）──
+// 上面几个重载只接 lambda；vendor 传的是 &QWebdav::replyFinished 这种成员函数
+// 指针，需要把接收者 ctx 绑上才能变成可调用对象。
+template <typename C, typename F>
+inline std::function<void()> qBindVoid(C* ctx, F fn)
+{
+    return [ctx, fn]() { (ctx->*fn)(); };
+}
+
+template <typename C, typename A, typename F>
+inline std::function<void(A)> qBind1(C* ctx, F fn)
+{
+    return [ctx, fn](A a) { (ctx->*fn)(a); };
+}
+
+template <typename C, typename A, typename B, typename F>
+inline std::function<void(A, B)> qBind2(C* ctx, F fn)
+{
+    return [ctx, fn](A a, B b) { (ctx->*fn)(a, b); };
+}
+
+template <typename Receiver, typename Class>
+void connect(QNetworkReply* sender, void (QNetworkReply::*sig)(), Receiver* ctx,
+             void (Class::*fn)())
+{
+    (void)sig;
+    // 无参信号：finished / readyRead / metaDataChanged 内部按信号名分表，
+    // 这里统一注册到 finished 表（调用方用哪个信号已由成员函数签名区分不了，
+    // 故以 sig 取址分派，与上面 lambda 版保持一致）。
+    if (sig == &QNetworkReply::readyRead) {
+        sender->slots_readyRead().push_back(qBindVoid(ctx, fn));
+    } else {
+        sender->slots_finished().push_back(qBindVoid(ctx, fn));
+    }
+}
+
+template <typename Receiver, typename Class>
+void connect(QNetworkReply* sender,
+             void (QNetworkReply::*sig)(qint64, qint64), Receiver* ctx,
+             void (Class::*fn)(qint64, qint64))
+{
+    (void)sig;
+    sender->slots_downloadProgress().push_back(qBind2<Receiver, qint64, qint64>(ctx, fn));
+}
+
+template <typename Receiver, typename Class>
+void connect(QNetworkReply* sender,
+             void (QNetworkReply::*sig)(QNetworkReply::NetworkError), Receiver* ctx,
+             void (Class::*fn)(QNetworkReply::NetworkError))
+{
+    (void)sig;
+    sender->slots_error().push_back(
+        qBind1<Receiver, QNetworkReply::NetworkError>(ctx, fn));
+}
+
+template <typename Receiver, typename Class>
+void connect(QNetworkReply* sender, void (QNetworkReply::*sig)(const QUrl&),
+             Receiver* ctx, void (Class::*fn)(const QUrl&))
+{
+    (void)sig;
+    sender->slots_redirected().push_back(qBind1<Receiver, const QUrl&>(ctx, fn));
+}
+
+template <typename Receiver, typename Class>
+void connect(QNetworkReply* sender,
+             void (QNetworkReply::*sig)(const QList<QSslError>&), Receiver* ctx,
+             void (Class::*fn)(const QList<QSslError>&))
+{
+    (void)sig;
+    sender->slots_sslErrors().push_back(
+        qBind1<Receiver, const QList<QSslError>&>(ctx, fn));
+}
+
+template <typename Receiver, typename Class>
+void connect(QNetworkAccessManager* sender,
+             void (QNetworkAccessManager::*sig)(QNetworkReply*), Receiver* ctx,
+             void (Class::*fn)(QNetworkReply*))
+{
+    (void)sig;
+    sender->slots_finished().push_back(qBind1<Receiver, QNetworkReply*>(ctx, fn));
+}
+
+template <typename Receiver, typename Class>
+void connect(QNetworkAccessManager* sender,
+             void (QNetworkAccessManager::*sig)(QNetworkReply*, QAuthenticator*),
+             Receiver* ctx,
+             void (Class::*fn)(QNetworkReply*, QAuthenticator*))
+{
+    (void)sig;
+    sender->slots_authRequired().push_back(
+        qBind2<Receiver, QNetworkReply*, QAuthenticator*>(ctx, fn));
+}
+
+// ── disconnect（vendor qwebdav.cpp:180-181 收尾时解两个连接）──
+// 槽参数类型刻意放宽（Func 泛型）：Qt 原生 disconnect 只按**信号**移除连接，
+// 不校验槽签名，而 vendor 正是把无参 replyReadyRead 挂在 redirectAllowed 上解。
+// 垫片无连接 id，按「清空对应槽表」处理；QWebdav 每轮新建实例，语义等价。
+template <typename Receiver, typename Func>
+void disconnect(QNetworkReply* sender, void (QNetworkReply::*sig)(), Receiver*, Func)
+{
+    if (sig == &QNetworkReply::readyRead) {
+        sender->slots_readyRead().clear();
+    } else {
+        sender->slots_finished().clear();
+    }
+}
+
+template <typename Receiver, typename Func>
+void disconnect(QNetworkReply* sender,
+                void (QNetworkReply::*sig)(QNetworkReply::NetworkError), Receiver*, Func)
+{
+    (void)sig;
+    sender->slots_error().clear();
+}
+
+template <typename Receiver, typename Func>
+void disconnect(QNetworkReply* sender, void (QNetworkReply::*sig)(const QUrl&),
+                Receiver*, Func)
+{
+    (void)sig;
+    sender->slots_redirected().clear();
 }
 
 #endif // QCONNECT_SLOTS_H
