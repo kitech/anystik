@@ -294,3 +294,24 @@ unifiedPushTopicLength = 14     // 总长度必须 14 字符（含 "up"）
   - `ne_xml.c:351-356` handler 栈语义：从**父元素的 handler** 起沿 `next`
     向下遍历，返回 `>0` 接受（值即该元素 state）、`0`=DECLINE（剪枝）、
     `<0` 中止解析；`<100` 为 `NE_XML_STATE_TOP` 保留
+
+## doctest（单元测试框架）
+
+- **Name**: doctest/doctest
+- **Upstream**: https://github.com/doctest/doctest
+- **License**: MIT（`doctest/LICENSE.txt`）
+- **版本**: **2.4.11**（`DOCTEST_VERSION_MAJOR/MINOR/PATCH = 2/4/11` 已 grep 核实）
+- **Files**:
+  - `doctest/doctest.h`（单头，321644 字节，v2.4.11 发布版原文，未改一字）
+- **为何是这个版本**：`qldox/run_tests`（2026-09 前遗留二进制，源码已丢）的调试信息里
+  编译单元为 `test_main.cpp` + `test_md5.cpp` + `test_emojiutil.cpp` +
+  `test_translate_util.cpp` + `test_compat34_time.cpp`，二进制内嵌版本串 `2.4.11`；
+  同串 `2.2.5` 经核实是 `GLIBC_2.2.5` 符号版本，可排除。**按同一版本 vendor 以保持一致。**
+- **能力**: header-only；`TEST_CASE`/`SUBCASE`/`CHECK_EQ`/`REQUIRE_EQ`；Console 与 JUnit
+  XML reporter；命令行过滤（长短双别名，如 `--test-case=`/`-tc=`/`--dt-test-case=`，
+  短名定义见 `doctest.h:6614-6630`）
+- **已验证与本仓 Qt3 的兼容**：`qldox/run_tests` 链接 `libqt-mt.so.3`（即曾对着 Qt 3.5
+  真实编译运行），且本次已用 `-DQT3_BUILD -lqt-mt` 实测编译运行通过 —— Qt 3.5 的
+  `signals`/`slots`/`emit` 宏与 doctest 无冲突
+- **用途**: `stikcommon/` 与 `qlstik/` 两处单元测试套件的框架。include 路径为
+  `anystik/vendor` 根（与 `pugixml` 同一手法），写作 `#include "doctest/doctest.h"`

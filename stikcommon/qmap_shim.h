@@ -138,32 +138,42 @@ public:
 
 // 跨 const/非 const 迭代器比较的实体定义（类内只能声明：两个嵌套类互相引用时
 // 至少有一个不完整）。参数类型用完整限定名是因为 QMapShim 是类模板。
+//
+// ⚠ 比较前必须把 QMapIterator **转成** QMapConstIterator，不能直接
+//   `m_it == o.baseIt()`：Qt3 里这两个是互不相干的类，qmap.h:130 的 operator==
+//   只接 QMapIterator，qmap.h:251 的只接 QMapConstIterator，彼此没有跨类型的
+//   operator==。类内注释说的「包装类可从对方构造（qmap.h:246）」只保证**构造**
+//   可转换（QMapConstIterator(const QMapIterator&) : node(it.node)），
+//   不等于可比较 —— 直接比会报 no match for operator==。
+//   因本文件是模板，未被实例化时编译器不报错，故此前一直潜伏；
+//   已由 stikcommon/test_shims.cpp 的跨 const 互比用例暴露。
+//   语义不变：两个 operator== 本质都是比 node 指针，而转换构造就是拷贝 node。
 template <class K, class V>
 inline bool qlstik_qt3::QMapShim<K, V>::iterator::operator==(
     const qlstik_qt3::QMapShim<K, V>::const_iterator& o) const
 {
-    return m_it == o.baseIt();
+    return base_const_iterator(m_it) == o.baseIt();
 }
 
 template <class K, class V>
 inline bool qlstik_qt3::QMapShim<K, V>::iterator::operator!=(
     const qlstik_qt3::QMapShim<K, V>::const_iterator& o) const
 {
-    return m_it != o.baseIt();
+    return base_const_iterator(m_it) != o.baseIt();
 }
 
 template <class K, class V>
 inline bool qlstik_qt3::QMapShim<K, V>::const_iterator::operator==(
     const qlstik_qt3::QMapShim<K, V>::iterator& o) const
 {
-    return m_it == o.baseIt();
+    return *this == base_const_iterator(o.baseIt());
 }
 
 template <class K, class V>
 inline bool qlstik_qt3::QMapShim<K, V>::const_iterator::operator!=(
     const qlstik_qt3::QMapShim<K, V>::iterator& o) const
 {
-    return m_it != o.baseIt();
+    return *this != base_const_iterator(o.baseIt());
 }
 
 #define QMap qlstik_qt3::QMapShim
