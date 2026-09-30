@@ -39,9 +39,18 @@
 #ifndef QWEBDAVDIRPARSERLITE_H
 #define QWEBDAVDIRPARSERLITE_H
 
+// 跨版本头：本 .cpp 自 2026-09-30 起**真正进入 qlstik 应用构建**
+// （此前只登记了头、.cpp 漏挂，见 .pri 批次 3c-1 第五阶段段末的补记），
+// 故 Qt3 与 Qt6 都要编。两版头文件名不同（小写 vs 驼峰），不能混用。
+#ifdef QT3_BUILD
 #include <qobject.h>
 #include <qstring.h>
 #include <qdatetime.h>
+#else
+#include <QObject>
+#include <QString>
+#include <QDateTime>
+#endif
 #include <functional>
 #include <vector>
 #include "qglobaltype_shim.h"
@@ -50,8 +59,28 @@ class QWebdavLite;
 class QNetworkReply;
 class QWebdavItemLite;
 
-class QWebdavDirParserLite
+// ── 为何现在有 QObject 基类（2026-09-30 补）────────────────────────────
+// 本类原先**不是 QObject 子类**，只因为 3c-1 阶段唯一的使用者是 /tmp 下的
+// 独立探针，探针是栈上分配 + 手工 push std::function，故「非 QObject + 槽表」
+// 够用。但它唯一的真实消费者 davbisync 把它当 QObject 用，实测 4 处全挂：
+//   davbisync.cpp:116  p->deleteLater()   → has no member named 'deleteLater'
+//   davbisync.cpp:115  disconnect(p,nullptr,this,nullptr) → 无匹配重载
+//   davbisync.cpp:120  connect(p,&QObject::destroyed,...) → 无匹配重载
+//   davbisync.cpp:122  connect(p,...,finished,...) → 无匹配重载（无 PMF 模板）
+// 且构造函数原本 `Q_UNUSED(parent)` 把 parent 直接丢弃，没有父子接管。
+// 加上 QObject 基类即可一次解决前 3 类 + parent 接管，**且不需要 Q_OBJECT**：
+// QObject 基类本身就提供 deleteLater / disconnect / &QObject::destroyed /
+// 父子所有权，这四项都不依赖本类自己的元对象。
+//
+// 为何仍保留 std::function 槽表（而非纯 moc 信号）：3c-1 的 207 e2e 探针
+// （/tmp/opencode/dav207e.cpp:58-63）就是栈上分配本类 + 手工 push 槽，那个绿门
+// 不能被这次改造撞掉。故 emit* 是**唯一发射点**，同时打两条路：
+//   1. 遍历 slots_*（Qt3 消费路径 + 207 探针）
+//   2. emit 原生信号（Qt4+ 消费路径，davbisync 走这条）
+// 两条路内容一致，不存在「只有一端收到」的分叉。
+class QWebdavDirParserLite : public QObject
 {
+    Q_OBJECT
 public:
     explicit QWebdavDirParserLite(QObject* parent = 0);
     ~QWebdavDirParserLite();
@@ -69,6 +98,25 @@ public:
     void abort();
 
     // ── 垫片信号（非 moc）──
+    // 原生信号（Qt4+ 走这里；moc 由 qlstik.pro 的 CONFIG += moc 生成，
+    // 头已在 stikcommon.pri:143 的 STIKCOMMON_HEADERS 里登记）。
+    // ⚠ 信号名不能与下面的 emit* 方法同名，故用 finished / errorChanged，
+    //   发射统一走 emit*（那里同时打原生信号与槽表）。
+signals:
+    void finished();
+    void errorChanged(const QString& e);
+
+public:
+    // ⚠ 上面 signals: 段必须**只**放两条信号声明，紧跟一个 public: 重新打开。
+    //   漏掉这个 public: 会让下面这些 typedef / slots_* / emit* 全被归进
+    //   signals 段，Qt 3.5 的 moc 会把它们当信号解析，对
+    //   `std::vector<FinishedSlot>& slots_finished()` 报
+    //     Warning: Unexpected variable declaration.
+    //   随后 moc_qwebdavdirparserlite.cpp 编译期炸：
+    //     error: 'FinishedSlot' was not declared in this scope
+    //     error: no declaration matches 'int& QWebdavDirParserLite::slots_finished()'
+    //   （"int&" 是 moc 把返回类型也猜错了。已实测，非推断。）
+
     // finished 无参：davbisync.cpp:122 的 lambda 就是无参。
     typedef std::function<void()> FinishedSlot;
     std::vector<FinishedSlot>& slots_finished() { return m_slotsFinished; }
@@ -77,6 +125,7 @@ public:
         for (size_t i = 0; i < m_slotsFinished.size(); ++i) {
             m_slotsFinished[i]();
         }
+        emit finished();
     }
 
     // errorChanged 只记日志、不中断（davbisync.cpp:127-130），但**必须真触发**，
@@ -88,6 +137,7 @@ public:
         for (size_t i = 0; i < m_slotsErrorChanged.size(); ++i) {
             m_slotsErrorChanged[i](e);
         }
+        emit errorChanged(e);
     }
 
 private:
@@ -110,4 +160,11 @@ private:
     std::vector<ErrorSlot> m_slotsErrorChanged;
 };
 
+// ── Qt3/Qt4+ 的分工（范式对齐 qwebdavlite.h:191-200 的既有约定）────────
+//   Qt3   —— 无 PMF connect，走下面的 slots_* 槽表（已验证的 207 探针即此路）。
+//   Qt4+  —— 走原生 QObject::connect(成员函数指针)，靠上面 Q_OBJECT + moc。
+// ⚠ 不要在 Qt4+ 下再定义全局 connect 模板：那会与原生重载产生歧义
+//   （实测报 "static assertion failed: No Q_OBJECT in the class with the
+//   signal"，因为 QObject::connect 作为**成员函数**先于 ADL 被查到）。
+//   这条约束在 qwebdavlite.h:191-200 已写明，此处不重复实现模板。
 #endif

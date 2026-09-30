@@ -2,7 +2,12 @@
 #include "qwebdavdirparserlite.h"
 #include "qwebdavitemlite.h"
 #include "qwebdavlite.h"
+// qnam_shim.h **无任何版本守卫**（内部直接 include <qcstring.h> 等 Qt3 小写头），
+// 只能在 Qt3 下包含；Qt4+ 的 QNetworkRequest/Reply 由 qwebdavlite.h 的条件包含
+// 带进来（qwebdavlite.h:49-56）。守卫形式照抄同族文件，不自创。
+#if !defined(QT_VERSION) || QT_VERSION < 0x040000
 #include "qnam_shim.h"
+#endif
 #include "qdatetime_shim.h"
 
 // 207 XML 解析走 dav207pugi.cpp（pugixml 后端），**不用 QDom**。
@@ -20,15 +25,16 @@
 // （Qt3 侧 QString(const char*) 是 Latin-1，绝不能用）。
 #include "dav207iface.h"
 
-#include <qurl.h>
 #include <stdio.h>
 #include <algorithm>
-#include "qlist_shim.h"
+// 注：原先此处 include "qlist_shim.h"，实测本文件 QList/QValueList **零引用**
+// （容器已全改 std::vector，见 getList 的 std::vector<QWebdavItemLite>& 出参），
+// 是 3c-1 改 QDom 时的残留。该头是 Qt3-only（内部 include <qvaluelist.h>），
+// 留着会让本 .cpp 无法进 Qt5+ 构建。零引用已用 grep 核实，非推断。
 
 QWebdavDirParserLite::QWebdavDirParserLite(QObject* parent)
-    : m_webdav(0), m_reply(0), m_busy(false), m_abort(false)
+    : QObject(parent), m_webdav(0), m_reply(0), m_busy(false), m_abort(false)
 {
-    Q_UNUSED(parent);
 }
 
 QWebdavDirParserLite::~QWebdavDirParserLite()
@@ -132,11 +138,15 @@ void QWebdavDirParserLite::onReplyFinished(QNetworkReply* reply)
 #endif
 
     if (reply->error() != QNetworkReply::NoError) {
-        emitErrorChanged(QString("webdav dir: %1").arg(reply->errorString()));
+        // ⚠ 走 fromUtf8 而非 QString(const char*)：Qt3 的 QString(const char*)
+        // 按 Latin-1 逐字节解释源文件里的 UTF-8 字节，中文会碎成一串 U+00xx
+        // 假字符。三处错误文案统一按此处理（含下面两处中文）。
+        emitErrorChanged(QString::fromUtf8("webdav dir: %1")
+                             .arg(reply->errorString()));
     } else if (status != 207) {
         // 207 Multi-Status 是 PROPFIND 列表的唯一成功状态码。其它 2xx（如某些
         // 服务器对 Depth:1 回 200）按错误处理并把真实码报出去，不静默返回空表。
-        emitErrorChanged(QString("webdav dir: 期望 207 Multi-Status，实收 %1")
+        emitErrorChanged(QString::fromUtf8("webdav dir: 期望 207 Multi-Status，实收 %1")
                              .arg(status));
     } else {
         const QByteArray data = reply->readAll();
@@ -173,7 +183,7 @@ void QWebdavDirParserLite::parseMultiResponse(const QByteArray& data)
                                (size_t)rootPathBA.size());
     if (!Dav207::parseMultiStatus(data.data(), (size_t)data.size(),
                                   rootPath, res)) {
-        emitErrorChanged(QString("webdav dir: 207 响应体非合法 XML"));
+        emitErrorChanged(QString::fromUtf8("webdav dir: 207 响应体非合法 XML"));
         return;
     }
 
@@ -181,9 +191,17 @@ void QWebdavDirParserLite::parseMultiResponse(const QByteArray& data)
     // IIS 回绝对 URL，两种形态都要比对）。
     const QString selfPath = m_webdav->absolutePath(m_path);
     // dav207 层已剥掉 rootPath，故 selfPath 也要剥同样的前缀才可比。
+    // ⚠ 显式 QString::fromUtf8：rootPath 可能含非 ASCII（云目录名可以是中文），
+    //   传 const char* 给 startsWith 在 Qt3 下会走 QString(const char*) 的
+    //   Latin-1 通道 → 与下面的 selfStripped（fromUtf8 来的）永远比不相等，
+    //   结果是容器自身比不掉、被当成一个条目混进列表。
     QString selfStripped = selfPath;
-    if (!rootPath.empty() && selfStripped.startsWith(rootPath.c_str())) {
-        selfStripped.remove(0, (int)rootPath.length());
+    if (!rootPath.empty()) {
+        const QString rootPathQ = QString::fromUtf8(rootPath.c_str(),
+                                                    (uint)rootPath.length());
+        if (!rootPathQ.isEmpty() && selfStripped.startsWith(rootPathQ)) {
+            selfStripped.remove(0, rootPathQ.length());
+        }
     }
 
     for (size_t i = 0; i < res.size(); ++i) {

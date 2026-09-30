@@ -158,8 +158,30 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qjson_shim.h \
 STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qwebdavlite.cpp \
                       $$STIKCOMMON_DIR/qwebdavtransport.cpp
 
+# ⚠ 2026-09-30 补记：qwebdavdirparserlite.cpp **原先根本没挂载**——上面
+# STIKCOMMON_HEADERS 只登记了 .h，.cpp 漏了，于是 qlstik 应用构建里从没有这个
+# 文件（build-qt3/ 与 build-qt6/ 下均无其 .o，实测确认）。此前所有「207 解析层
+# 已完成、Qt3/Qt6 双门绿」的结论都只覆盖 /tmp 下独立探针（探针自己编这个 .cpp），
+# **双门从未编译或链接过它**。这是验证缺口，不是「已完成」的真实状态。
+#
+# 现无条件挂载：2026-09-30 同时把类改成了真 QObject（加 Q_OBJECT + 原生
+# finished()/errorChanged()，QObject 基类提供 deleteLater/disconnect/
+# &QObject::destroyed/父子接管），否则 davbisync 这唯一真实消费者用不了它
+# （实测 4 处全挂，见 qwebdavdirparserlite.h 顶部「为何现在有 QObject 基类」）。
+# moc 由 qlstik.pro 的 CONFIG += moc 生成，头已在上面 HEADERS 段登记。
+# 无条件挂载的前提是本 .cpp 已跨版本：其头已按 QT3_BUILD 条件包含小写/驼峰头。
+STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qwebdavdirparserlite.cpp
+
+# ── 批次 3c-2：davbisync 的本地贴纸库窄切面 ──
+# davbisync.cpp 原本 include stickerstore.h 并有约 20 处 StickerStore::instance()
+# 调用，而 stickerstore.cpp 有 4196 行且自身尚未适配 Qt3（属批次 5）。故抽出
+# 只含那 9 个方法的接口，见 davlocalsource.h 顶部的依赖面实测。
+STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/davlocalsource.cpp
+STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/davlocalsource.h
+
 # ── 批次 3c-1 第五阶段：207 解析层（pugixml 后端，替代 QDom）────────────
-# 计划里 3c-2 是 davbisync 本体接入，勿与此处混淆。
+# 注（2026-09-30）：下方 qwebdavdirparserlite.cpp 的挂载补记见「批次 3c-1 QWebdavLite」
+# 段；DavLocalSource 属批次 3c-2，与本阶段的 davbisync 本体接入是两件事。
 # 为何不用 QDom：Qt3 与 Qt5/6 的 QString/QDom 语义不一致，且都是**静默产生错误
 # 数据**而非报错（utf8()/latin1() 共用静态转换缓冲区互相覆盖；QString(const char*)
 # 在 Qt3 按 Latin-1 展开 UTF-8 字节；QDom::elementsByTagName 只比本地名、忽略命名
