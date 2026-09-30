@@ -65,6 +65,10 @@ bool isDavPrefixed(const char* name)
     if (!colon) {
         return true;               // 无前缀：默认 DAV:
     }
+    // ⚠ 只作**兜底**，不再作主判据。主判据是 isDavNode() 的命名空间 URI。
+    //   保留 D/d/dav/DAV/a/A 白名单是为了「响应压根没声明 DAV 命名空间」时
+    //   仍能解析（有些服务器偷懒不写 xmlns），而合法但少见的其他前缀
+    //   （wsgidav 的 ns0:、部分 Java/Go 实现的 lp1: 等）由 URI 判据放行。
     static const char* kOk[] = { "D", "DAV", "d", "dav", "a", "A" };
     const size_t plen = (size_t)(colon - name);
     for (size_t i = 0; i < sizeof(kOk) / sizeof(kOk[0]); ++i) {
@@ -74,6 +78,79 @@ bool isDavPrefixed(const char* name)
         }
     }
     return false;
+}
+
+// 按 XML 规范解析元素所属的命名空间 URI（「最近的祖先 xmlns 声明优先」）。
+//
+// 为什么自己走一遍而不用 pugixml 的 namespace_uri()：**本仓库 vendor 的
+// pugixml 公开头里没有这个访问器** —— .cpp 内部给 XPath 实现了
+// （pugixml.cpp:9020），但 pugixml.hpp 的 xml_node 公开接口里被拿掉了
+// （1.15 与系统 1.16 都查过，都没有）。依赖内部符号/内联函数既脆又不可移植，
+// 故只用公开 API（first_attribute / name / value / parent）按规范走声明链。
+// pugixml 是纯 C++，Qt3/Qt6 行为一致。
+//
+// 前缀为空（无冒号的名字）时查默认声明 xmlns=。
+const char* elementNsUri(pugi::xml_node n)
+{
+    if (!n) {
+        return 0;
+    }
+    const char* nm = n.name();
+    if (!nm) {
+        return 0;
+    }
+    const char* colon = std::strchr(nm, ':');
+    const size_t plen = colon ? (size_t)(colon - nm) : 0;
+    for (pugi::xml_node cur = n; cur; cur = cur.parent()) {
+        for (pugi::xml_attribute a = cur.first_attribute(); a;
+             a = a.next_attribute()) {
+            const char* an = a.name();
+            if (!an) {
+                continue;
+            }
+            if (plen == 0) {
+                if (std::strcmp(an, "xmlns") == 0) {
+                    return a.value();
+                }
+                continue;
+            }
+            // xmlns:prefix=...，且 prefix 恰为本元素前缀
+            if (std::strncmp(an, "xmlns:", 6) == 0
+                && std::strncmp(an + 6, nm, plen) == 0
+                && an[6 + plen] == 0) {
+                return a.value();
+            }
+        }
+    }
+    return 0;
+}
+
+// ★ 主判据：按**命名空间 URI** 判 DAV 成员，不再看前缀名字。
+//
+//   为什么要改：原实现只认前缀白名单 {D,DAV,d,dav,a,A}。XML 前缀是**任意的**，
+//   服务器爱用什么就用什么 —— wsgidav 4.3.5 默认吐 `ns0:`（实测见
+//   davsync_e2e：整份 207 被判非法，pastes/ 及其内容全部消失，目录扫描静默
+//   退化成「只有根」），不少 Java/Go/.NET 的 DAV 实现也用生成前缀。
+//   整份丢弃比报错更难查，因为 parseMultiStatus 只 return false，调用方
+//   只能从「列不出子目录」倒推。
+//
+//   URI 判据把原有诉求一并满足：
+//     - 第三方命名空间的同名元素仍被排除（x:collection 的 URI 是
+//       http://example.com/evil ≠ DAV:）—— probe.xml evilns 用例覆盖；
+//     - `xmlns:D` 被重新指派到非 DAV URI 也能正确识别 —— 这是前缀名
+//       判据**原理上做不到**的（它只看名字，不看绑定）。
+bool isDavNode(pugi::xml_node n)
+{
+    if (!n) {
+        return false;
+    }
+    const char* uri = elementNsUri(n);
+    if (uri && *uri) {
+        return std::strcmp(uri, "DAV:") == 0;
+    }
+    // 没声明任何命名空间：无前缀的按 DAV: 收，带前缀的走白名单兜底
+    //（兼容压根不写 xmlns 的偷懒服务器）。
+    return isDavPrefixed(n.name());
 }
 
 // 找第一个本地名匹配 localName 的 DAV: 子节点。
@@ -92,8 +169,7 @@ pugi::xml_node davChild(pugi::xml_node parent, const char* localName)
         }
         const char* colon = std::strchr(nm, ':');
         if (colon && std::strcmp(colon + 1, localName) == 0) {
-            // 必须确属 DAV:，否则第三方命名空间的同名元素会被误取
-            if (isDavPrefixed(nm)) {
+            if (isDavNode(n)) {
                 return n;
             }
             continue;
@@ -122,7 +198,7 @@ void forEachDavChild(pugi::xml_node parent, const char* localName, F fn)
         }
         const char* colon = std::strchr(nm, ':');
         if (colon && std::strcmp(colon + 1, localName) == 0) {
-            if (isDavPrefixed(nm)) {
+            if (isDavNode(n)) {
                 fn(n);
             }
         } else if (!colon && std::strcmp(nm, localName) == 0) {
@@ -383,8 +459,9 @@ bool parseMultiStatus(const char* body, size_t len,
         const char* nm = root.name();
         const char* colon = nm ? std::strchr(nm, ':') : 0;
         const char* local = colon ? colon + 1 : nm;
+        // 根元素同样按命名空间 URI 判 DAV:（见 isDavNode 注释）。
         if (!local || std::strcmp(local, "multistatus") != 0 ||
-            !isDavPrefixed(nm)) {
+            !isDavNode(root)) {
             return false;
         }
     }
@@ -461,7 +538,7 @@ bool parseMultiStatus(const char* body, size_t len,
                 }
                 const char* colon = std::strchr(pn, ':');
                 const char* local = colon ? colon + 1 : pn;
-                if (!isDavPrefixed(pn)) {
+                if (!isDavNode(p)) {
                     continue;                          // 非 DAV: 属性，跳过
                 }
                 if (std::strcmp(local, "getcontentlength") == 0) {

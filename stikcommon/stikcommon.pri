@@ -179,6 +179,18 @@ STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qwebdavdirparserlite.cpp
 STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/davlocalsource.cpp
 STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/davlocalsource.h
 
+# ── 批次 3c-2：davbisync 本体（SyncEngine）─────────────────────────────
+# ⚠ 这两个文件是 **stikcommon 自己的移植副本**，不是 anystik 的原件。
+# 原件 anystik/src/davbisync.{h,cpp} 保持零改动（2026-09-30 曾因直接改原件
+# 导致 anystik 链接失败——原件依赖 vendor/qwebdav/*，而 vendor 那套已回滚、
+# 且构建系统不允许为移植改 anystik/CMakeLists.txt）。
+# 移植副本与原件的差异全部集中在 Qt 版本垫片层，逻辑逐行对应，改动记在
+# davbisync.cpp 顶部的 QT3_BUILD 分支注释里。
+# 依赖：davlocalsource（本地库窄切面）+ qwebdavlite + qwebdavdirparserlite
+#      + qwebdavitemlite（均已挂载）+ davbisync_baseline（批次 2a，引用原件）
+STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/davbisync.cpp
+STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/davbisync.h
+
 # ── 批次 3c-1 第五阶段：207 解析层（pugixml 后端，替代 QDom）────────────
 # 注（2026-09-30）：下方 qwebdavdirparserlite.cpp 的挂载补记见「批次 3c-1 QWebdavLite」
 # 段；DavLocalSource 属批次 3c-2，与本阶段的 davbisync 本体接入是两件事。

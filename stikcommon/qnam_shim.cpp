@@ -328,7 +328,15 @@ void QNetworkReply::deliverResult(int httpCode, const std::string& curlErr,
         return;
     }
 
-    m_body = QCString(body.data(), (int)body.size());
+    // ★ 曾写成 m_body = QCString(body.data(), (int)body.size()) —— 那是
+    //   **丢字节的根源**。该 ctor 的第二参在 Qt3 里是**长度上限**而非精确
+    //   长度（qcstring.h: "deep copy, max length"），无法表达 Content-Length
+    //   决定的定长响应体；本机实测得到的长度会在 maxlen-1/maxlen 间随缓冲区
+    //   后续字节跳变（详见 qnam_shim.h 中 m_body 的注释）。后果是每个响应体
+    //   都少最后一个字节；207 少掉的恰是根元素的 '>'，XML 变截断文档 →
+    //   dav207 解析失败 → 云端被当成空目录 → 全量重传。
+    //   std::string 赋值是精确长度、不掺 NUL，故改用它。
+    m_body = body;
 
     // 响应头 Set-Cookie → cookie jar（跨请求会话；EventPoller 后端）
     if (m_jar) {
@@ -451,19 +459,18 @@ bool QNetworkReply::acceptSslAndRetry()
 
 QByteArray QNetworkReply::readAll()
 {
-    // 实测（Qt 3.5 /opt/qt338sh）：QMemArray<char>::size() 就是数据长度，
-    // **不含**尾 NUL —— 此前「size() 含尾 NUL、要用 length()」是错的判断
-    // （QByteArray 根本没有 length()），已按实测纠正。
-    // 仍需逐字节拷：QMemArray 赋值是**浅拷贝共享**底层数组，
-    // 先赋值再清 m_body 会连带把返回值一起清掉。
+    // m_body 是 std::string，size() 就是响应体的精确字节数（见 qnam_shim.h
+    // 里 m_body 的注释：为什么不能用 QCString 存体）。
+    // 仍需逐字节拷到新 QByteArray：Qt3 的 QMemArray 赋值是**浅拷贝共享**，
+    // 直接返回 m_body 的视图再清空会把返回值一起清掉。
     const int n = (int)m_body.size();
     if (n <= 0) {
-        m_body = QCString();
+        m_body.clear();
         return QByteArray();
     }
     QByteArray out(n);
-    memcpy(out.data(), m_body.data(), n);
-    m_body = QCString();
+    memcpy(out.data(), m_body.data(), (size_t)n);
+    m_body.clear();
     return out;
 }
 

@@ -49,6 +49,21 @@ inline const T& qBound(const T& val, const T& lo, const T& hi)
 {
     return (val < lo) ? lo : ((hi < val) ? hi : val);
 }
+
+// qMax / qMin：Qt 3.5 的 qglobal.h 里**没有**（实测 grep qglobal.h 无定义，
+// 只有 Qt4.0 才作为模板加入）。davbisync 的进度百分比（1305）与速率下限
+// （1380）用到，语义与 Qt4+ 完全一致，故补齐。
+// ⚠ 形参顺序是 Qt4+ 的 qMax(a, b) / qBound(val, lo, hi) 两套，别混用。
+template <typename T>
+inline const T& qMax(const T& a, const T& b)
+{
+    return (a < b) ? b : a;
+}
+template <typename T>
+inline const T& qMin(const T& a, const T& b)
+{
+    return (b < a) ? b : a;
+}
 #endif
 
 static inline QString qAbsPath(const QFileInfo& fi)

@@ -301,7 +301,9 @@ public:
     // Qt4+ QNetworkReply 继承 QIODevice；Qt3 QObject 没有这些，本垫片补最小集。
     // 本垫片不继承 QIODevice（避免动到既有 readAll/缓冲布局），故按普通成员实现。
     bool isFinished() const { return m_done; }
-    qint64 bytesAvailable() const { return (qint64)m_body.length(); }
+    // std::string::size() 才是字节数；QCString::length() 少 1（不含尾 NUL），
+    // 换成 std::string 后必须同步改，否则每个响应都少报 1 字节。
+    qint64 bytesAvailable() const { return (qint64)m_body.size(); }
     qint64 bytesToWrite() const { return 0; }   // 上行走 reqData，无背压队列
     void close() { }                            // 结果一次性投递，无需 close
     // deleteLater() 直接继承 QObject 的（Qt3.5 qobject.h:174 已有，
@@ -367,7 +369,26 @@ public:
 
 private:
     void runVoid(const std::string& name);
-    QCString m_body;                                   // Qt3: QCString 可 +=
+    // 响应体用 std::string 存**精确长度字节**，不要用 QCString。
+    //
+    // 文档依据（Qt 3.3/3.5 的 qcstring.h，注释与本地 /opt/qt338sh 一致）：
+    //   QCString( int size );                    // allocate size incl. \0
+    //   QCString( const char *str, uint maxlen ); // deep copy, max length
+    // 第二参是**长度上限**而不是精确长度 —— 它最多拷 maxlen 字节、遇 NUL 即停。
+    // 定长二进制体（HTTP 响应体长度由 Content-Length 决定）无法用它表达。
+    //
+    // 本机实测（Qt 3.5）：以「17 字节内容 + maxlen=17」调用，得到的长度
+    // 不是 17，而是在 16/17 之间随**偏移 17 之后的缓冲区内容**跳变
+    // （缓冲区填满 'x' 时得 16；只写前 17 字节、其后为栈上残值时得 17）；
+    // 填满 'x' 的输入还会直接触发 `double free or corruption` 堆损坏。
+    // 无论具体成因如何，该 ctor 都不适合承载响应体，改用 std::string 赋值
+    // （精确长度，无 NUL 参与）。
+    //
+    // 真实后果：qnam_shim.cpp 的 deliverResult 曾用它装 HTTP 响应体，导致
+    // **每个响应体都少最后一个字节**。207 的最后一字节恰好是根元素的
+    // '>'，于是 XML 变成截断文档 → dav207 解析失败 → 云端被当成空目录
+    // → 全量重传。本文件的其它类（QHttpPart 等）一律用 std::string 存体。
+    std::string m_body;
     std::map<std::string,std::vector<VoidSlot>> m_slots;   // finished/readyRead
     std::vector<ProgressSlot> m_up;
     std::vector<ProgressSlot> m_dp;

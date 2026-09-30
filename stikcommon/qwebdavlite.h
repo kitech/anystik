@@ -121,6 +121,12 @@ public:
     void errorChanged(QString error);
     typedef std::function<void(QString)> ErrorSlot;
     std::vector<ErrorSlot>& slots_errorChanged() { return m_slotsErrorChanged; }
+    // 显式订阅（Qt4+ 侧专用）。为什么需要：本类不声明 Q_OBJECT，原生
+    // QObject::connect 的成员函数指针重载在 Qt6 会命中 qobject.h:241 的
+    //   static_assert(HasQ_OBJECT_Macro<...>::Value)
+    // 而本文件末尾那个 connect 垫片模板只编在 Qt3（Qt4+ 压不过原生重载）。
+    // 故 Qt4+ 侧改走这里，不参与 connect 重载决议。Qt3 侧两者等价。
+    void subscribeErrorChanged(ErrorSlot fn) { m_slotsErrorChanged.push_back(fn); }
     void emitErrorChanged(const QString& e)
     {
         for (size_t i = 0; i < m_slotsErrorChanged.size(); ++i) {
@@ -189,8 +195,12 @@ protected:
 //     warning: invalid use of incomplete type 'class QWebdavLite'
 //   ——是警告不是错误，能编过，但依赖的是 GCC 宽容的延迟解析，换编译器即炸。
 //
-// 仅 Qt3 分支定义：Qt4+ 走原生 QObject::connect（成员函数指针重载），此时
-// 再定义一个全局 connect 模板会与原生重载产生歧义。
+// ★ 本模板**仅 Qt3** 定义。Qt4+ 侧不要指望原生 QObject::connect：
+//   本类不声明 Q_OBJECT，Qt6 实测会命中 qobject.h:241 的
+//     static assertion failed: No Q_OBJECT in the class with the signal
+//   而本模板在 Qt4+ 也压不过原生重载（原生那个是类作用域里的成员模板，
+//   sender 走派生→基类转换即可匹配；本模板只能靠 ADL 进入重载集，抵不过）。
+//   故 Qt4+ 侧一律用下面的 subscribeErrorChanged() 显式订阅，不走 connect。
 template <typename Receiver, typename Func>
 void connect(QWebdavLite* sender,
              void (QWebdavLite::*sig)(QString),
