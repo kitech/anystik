@@ -81,6 +81,15 @@ inline QString qFormatRfc1123DateTime(const QDateTime& dt)
     return QLocale(QLocale::English).toString(dt.toUTC(),
                                                QString("ddd, dd MMM yyyy hh:mm:ss"));
 }
+
+// 替 QDateTime::fromMSecsSinceEpoch()：Qt 3.5 **无**此成员（实测
+// `grep -c fromMSecsSinceEpoch /opt/qt338sh/include/qdatetime.h` = 0），
+// Qt4.1+ 原生具备。207 解析层 dav207pugi.cpp 输出的 getlastmodified 是
+// epoch 毫秒，调用点需跨版本拿 QDateTime，故两侧都提供、调用点零分支。
+inline QDateTime qDateTimeFromMsecs(qint64 msecs)
+{
+    return QDateTime::fromMSecsSinceEpoch(msecs);
+}
 #endif // QT_VERSION < 0x040000
 
 #endif // QLSTIK_QDATETIME_SHIM_H

@@ -140,6 +140,8 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qjson_shim.h \
                        $$STIKCOMMON_DIR/qbytearray_shim.h \
                        $$STIKCOMMON_DIR/qwebdavtransport.h \
                        $$STIKCOMMON_DIR/qwebdavlite.h \
+                       $$STIKCOMMON_DIR/qwebdavdirparserlite.h \
+                       $$STIKCOMMON_DIR/qwebdavitemlite.h \
                        $$STIKCOMMON_DIR/qsslprobe.h \
                        $$STIKCOMMON_DIR/qcabundle.h \
                        $$STIKCOMMON_DIR/qdatetime_shim.h \
@@ -155,6 +157,20 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qjson_shim.h \
 # QNetworkAccessManager::issue() 分流；GET/POST 仍走 EventPoller（那边本来就对）。
 STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qwebdavlite.cpp \
                       $$STIKCOMMON_DIR/qwebdavtransport.cpp
+
+# ── 批次 3c-1 第五阶段：207 解析层（pugixml 后端，替代 QDom）────────────
+# 计划里 3c-2 是 davbisync 本体接入，勿与此处混淆。
+# 为何不用 QDom：Qt3 与 Qt5/6 的 QString/QDom 语义不一致，且都是**静默产生错误
+# 数据**而非报错（utf8()/latin1() 共用静态转换缓冲区互相覆盖；QString(const char*)
+# 在 Qt3 按 Latin-1 展开 UTF-8 字节；QDom::elementsByTagName 只比本地名、忽略命名
+# 空间）。dav207pugi.cpp 全程 std::string，不过 Qt，两版行为一致。
+# 第三方库本体在 anystik/vendor/pugixml（MIT，1.15），需把 vendor 根加进 include
+# 路径才能让 "pugixml/pugixml.hpp" 解析（vendor/include 已在下面登记，但 pugixml
+# 不在其下）。
+STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/dav207pugi.cpp \
+                      $$ANYSTIK_SRC_DIR/../vendor/pugixml/pugixml.cpp
+STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/dav207iface.h
+STIKCOMMON_INCLUDES += $$ANYSTIK_SRC_DIR/../vendor
 
 # qdatetime_shim：qwebdavlite 的 put() 要发 RFC1123 Date 头（qDateTimeToUtc +
 # qFormatDateTime）。该 .cpp 通篇是 Qt3 专用写法（QChar::upper / QString::lower /

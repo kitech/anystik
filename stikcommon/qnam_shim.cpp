@@ -357,6 +357,13 @@ QNetworkReply::NetworkError QNetworkReply::mapCurlError(const std::string& err) 
         err.find("Timeout") != std::string::npos) {
         return TimeoutError;
     }
+    // QWebdavTransport 自己的两条早退（见 qwebdavtransport.cpp send()）。
+    // 归到 UnknownNetworkError 之外的 ConnectionRefused 更贴切：泵没起来
+    // 或 curl 句柄建不出来，都是「连都连不上」而非「传输中断」。
+    if (err.find("transport not ready") != std::string::npos ||
+        err.find("curl_easy_init failed") != std::string::npos) {
+        return ConnectionRefusedError;
+    }
     if (err.find("Connection refused") != std::string::npos) {
         return ConnectionRefusedError;
     }

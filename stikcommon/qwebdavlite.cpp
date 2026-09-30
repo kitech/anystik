@@ -54,6 +54,16 @@ void QWebdavLite::provideAuthentication(QNetworkReply*, QAuthenticator* auth)
 
 QWebdavLite::~QWebdavLite() {}
 
+// ── 信号（占位定义：只为取址，实际发射走 emitErrorChanged）──
+// 本类刻意不声明 Q_OBJECT、不用 moc（见 qwebdavlite.h 末尾），故「伪信号」
+// 必须像 qnam_shim.cpp:220-227 那样手动给一个空定义：qconnect_slots.h 的
+// connect 重载只拿成员函数指针来区分同名信号，并不调用它；但 `&QWebdavLite::
+// errorChanged` 取址会生成一条**外部未定义符号**的引用。
+// 实测漏掉这行时的报错是链接期
+//   undefined reference to `QWebdavLite::errorChanged(QString)'
+// ——编译能过（模板匹配上了），只有链接才炸，很容易误判成「模板写错了」。
+void QWebdavLite::errorChanged(QString) {}
+
 // ═══ 连接配置 ═══════════════════════════════════════════════════════
 void QWebdavLite::setConnectionSettings(QWebdavConnectionType connectionType,
                                         const QString& hostname,
@@ -229,6 +239,18 @@ QNetworkReply* QWebdavLite::createRequest(const QString& method, QNetworkRequest
     // GET/POST 也照样走这里：全部交给 QWebdavTransport 泵。
     // 显式限定基类：本类有个同名 QString 版 sendCustomRequest 会遮蔽基类。
     // QString→QByteArray 无隐式转换（Qt3 下 QMemArray 更没有），故手工转。
+    //
+    // ★ timeout 必须在 sendCustomRequest **之前**设，两个分支都适用。
+    //   Qt3：垫片在 sendCustomRequest 内部就把 req.timeoutSec() 拷进
+    //        QNetworkReply::reqTimeoutSec（qnam_shim.cpp:851），再由 issue()
+    //        传给 QWebdavTransport::send（qnam_shim.cpp:993）。
+    //   Qt4+：原生 QNetworkAccessManager 同样在发包时快照 timeout。
+    //   请求一旦发出，之后再改这份 req 就是死代码。实测：原先把这段放在调用
+    //   之后，超时功能**完全不生效**（探针 /slow 挂到 15s 兜底才返回，
+    //   而非 2s 限额）。
+    if (m_transferTimeoutMsecs > 0) {
+        req.setTransferTimeout(m_transferTimeoutMsecs);
+    }
 #if !defined(QT_VERSION) || QT_VERSION < 0x040000
     // Qt3 垫片：打标记，要求 issue() 把这个请求交给自建泵。**所有**动词都打，
     // 因为 qldox EventPoller 没有 401 → Basic Auth 重发链（grep -c 401 = 0），
@@ -253,9 +275,6 @@ QNetworkReply* QWebdavLite::createRequest(const QString& method, QNetworkRequest
     if (reply != 0) {
         m_lastReply = reply;
         attachErrorBridge(reply);
-        if (m_transferTimeoutMsecs > 0) {
-            req.setTransferTimeout(m_transferTimeoutMsecs);
-        }
     }
     return reply;
 }
@@ -288,35 +307,40 @@ void QWebdavLite::attachErrorBridge(QNetworkReply* reply)
 QString QWebdavLite::describeError(QNetworkReply* reply) const
 {
     if (reply == 0) {
-        return QString("WebDAV: 无效 reply");
+        return QString::fromUtf8("WebDAV: 无效 reply");
     }
     // 优先用垫片/原生给的文字串（curl 错误原文），它比枚举码可读得多。
     const QString detail = reply->errorString();
+    // ★ 本函数所有非 ASCII 字面量必须走 QString::fromUtf8()，**不能**用
+    //   QString("中文")。Qt3 的 QString(const char*) 按 Latin-1 逐字节解释，
+    //   源文件里的 UTF-8 字节会被拆成一串 U+00xx 假字符；再经 qToUtf8BA
+    //   重新编码就成了双重编码乱码，davbisync 日志里全是「èµæºä¸å¬å¨」。
+    //   与 207 解析那个坑同源（见 移植计划.md §6.3e-1 第五阶段根因 2）。
     // 注：ContentAccessDenied 在 Qt3 垫片与 Qt6.7 原生里**同名**（都无 Error
     // 后缀），不需要版本分支；早期 Qt5 才短暂有过 ContentAccessDeniedError。
     switch (reply->error()) {
     case QNetworkReply::ContentAccessDenied:
-        return QString("WebDAV: 认证/访问被拒（401/403）") +
-               (detail.isEmpty() ? QString() : QString(" - ") + detail);
+        return QString::fromUtf8("WebDAV: 认证/访问被拒（401/403）") +
+               (detail.isEmpty() ? QString() : QString::fromUtf8(" - ") + detail);
     case QNetworkReply::ContentNotFoundError:
-        return QString("WebDAV: 资源不存在（404）") +
-               (detail.isEmpty() ? QString() : QString(" - ") + detail);
+        return QString::fromUtf8("WebDAV: 资源不存在（404）") +
+               (detail.isEmpty() ? QString() : QString::fromUtf8(" - ") + detail);
     case QNetworkReply::ConnectionRefusedError:
-        return QString("WebDAV: 连接被拒") +
-               (detail.isEmpty() ? QString() : QString(" - ") + detail);
+        return QString::fromUtf8("WebDAV: 连接被拒") +
+               (detail.isEmpty() ? QString() : QString::fromUtf8(" - ") + detail);
     case QNetworkReply::HostNotFoundError:
-        return QString("WebDAV: 主机名解析失败") +
-               (detail.isEmpty() ? QString() : QString(" - ") + detail);
+        return QString::fromUtf8("WebDAV: 主机名解析失败") +
+               (detail.isEmpty() ? QString() : QString::fromUtf8(" - ") + detail);
     case QNetworkReply::TimeoutError:
-        return QString("WebDAV: 超时") +
-               (detail.isEmpty() ? QString() : QString(" - ") + detail);
+        return QString::fromUtf8("WebDAV: 超时") +
+               (detail.isEmpty() ? QString() : QString::fromUtf8(" - ") + detail);
     case QNetworkReply::SslHandshakeFailedError:
-        return QString("WebDAV: TLS 握手/证书校验失败") +
-               (detail.isEmpty() ? QString() : QString(" - ") + detail);
+        return QString::fromUtf8("WebDAV: TLS 握手/证书校验失败") +
+               (detail.isEmpty() ? QString() : QString::fromUtf8(" - ") + detail);
     default:
         break;
     }
-    return detail.isEmpty() ? QString("WebDAV: 请求失败") : detail;
+    return detail.isEmpty() ? QString::fromUtf8("WebDAV: 请求失败") : detail;
 }
 
 QNetworkReply* QWebdavLite::createRequest(const QString& method, QNetworkRequest& req,

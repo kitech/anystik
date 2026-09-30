@@ -41,9 +41,21 @@ public:
                            bool aborted);
 
     // 起泵线程（幂等）。与 EventPoller::start() 同样需要显式调用。
+    //
+    // ★ 一次性语义：**同一进程内 start() 之后不可再 start()**。
+    //   Pump 是 QThread 单例，stop() 里的 wait() 一旦 join 过，QThread 就不可能
+    //   第二次 start（Qt 明确不支持重启线程）。故 stop() 是终态：调过之后
+    //   isReady() 恒为 false，后续 start() 静默无操作（不是错误）。
+    //   现有唯一调用方 qlstik/src/main.cpp 就是「开机 start、退出 stop」，
+    //   不需要重启；真要重启只能把 Pump 改成可重建的指针，属另一件事。
     static void start();
 
     // 停泵线程并 join（幂等）。进程退出前调用。
+    //
+    // ★ 不会阻塞：即便有在途请求（服务端收下连接却永不响应），也会主动把
+    //   easy handle 从 multi 摘除后清理，毫秒级返回。见 .cpp run() 里的
+    //   「停机必须主动拆掉在途 easy」注释——那里记着只置 cancel 标志会导致
+    //   wait() 永久阻塞的实测事故。
     static void stop();
 
     static bool isReady();

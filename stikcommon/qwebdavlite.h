@@ -172,4 +172,34 @@ protected:
     std::vector<ErrorSlot> m_slotsErrorChanged;
 };
 
+#if !defined(QT_VERSION) || QT_VERSION < 0x040000
+// ── QWebdavLite 自身的 errorChanged(QString) 的 connect 重载 ──
+// 为什么要专门写一个：davbisync.cpp:105 连的是
+//   connect(m_webdav, &QWebdav::errorChanged, this, [](const QString&){...});
+// 而 QWebdavLite 既不是 QNetworkReply 也不是 QNetworkAccessManager，
+// qconnect_slots.h 里所有重载的发送者参数都对不上 → 实测编译报
+//   no matching function for call to 'connect(QWebdavLite*,
+//     void (QWebdavLite::*)(QString), QWebdavLite*, lambda(const QString&))'
+// 即调用方**连都连不上**这个槽，等于 errorChanged 整条链是断的。
+//
+// ★ 为什么模板定义放在**这里**（类定义之后）而不是 qconnect_slots.h：
+//   发送者类型 QWebdavLite* 不依赖模板参数，故成员访问在**模板定义处**
+//   就完成名字查找。若把定义放进 qconnect_slots.h（它在 qwebdavlite.h:51
+//   被包含，此时类还没定义），GCC 会报
+//     warning: invalid use of incomplete type 'class QWebdavLite'
+//   ——是警告不是错误，能编过，但依赖的是 GCC 宽容的延迟解析，换编译器即炸。
+//
+// 仅 Qt3 分支定义：Qt4+ 走原生 QObject::connect（成员函数指针重载），此时
+// 再定义一个全局 connect 模板会与原生重载产生歧义。
+template <typename Receiver, typename Func>
+void connect(QWebdavLite* sender,
+             void (QWebdavLite::*sig)(QString),
+             Receiver* ctx,
+             Func fn)
+{
+    (void)sig; (void)ctx;
+    sender->slots_errorChanged().push_back(std::function<void(QString)>(fn));
+}
+#endif
+
 #endif // QWEBDAVLITE_H

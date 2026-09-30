@@ -2,9 +2,15 @@
 
 #include <qwaitcondition.h>
 #include <curl/curl.h>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <algorithm>
+
+// qint64：Qt 3.5 的 qglobal.h **没有** typedef（Qt4 起才补上），项目统一由
+// qglobaltype_shim.h 在 QT_VERSION < 0x040000 分支里补。空闲计时要用它。
+#include "qglobaltype_shim.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 泵线程与任务表
@@ -16,6 +22,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace {
+
+// 单调时钟（毫秒）。不能用 time(NULL)/gettimeofday：前者秒粒度、后者会被
+// 调时（夏令时/NTP 回拨）打断，导致「两次进度间隔」算出负数或超大值。
+// CLOCK_MONOTONIC 不受调时影响，正是空闲计时需要的语义。
+qint64 nowMs()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (qint64)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 
 struct Task
 {
@@ -31,9 +47,20 @@ struct Task
     QWebdavTransport::DoneCb cb;
     void* ud;
     curl_slist* hdrs;
+    // ── 空闲超时 ──
+    // 语义：**连续无字节流动**的毫秒数；<=0 关闭。任何方向的字节流动
+    // （响应头/响应体/上传体）都重置 lastProgressMs。
+    //
+    // ★ 为什么不用 CURLOPT_TIMEOUT：那是「总时长」上限，与 davbisync 的需求
+    //   相反。davbisync.cpp:102 写的是「空闲超时：仅在连续无字节传输时计时，
+    //   且随上传/下载进度重置；大图留余量」，它传 90000ms 是为了让慢速大图
+    //   传完，不是给整个传输 90s 硬上限。按总时长实现，6 秒慢速吐 30 字节
+    //   的传输会被 2s 限额误杀（探针 /dribble 就是这个判别式）。
+    int idleTimeoutMs;
+    qint64 lastProgressMs;
 
     Task() : easy(0), status(0), uploadPos(0), cancel(0), reported(false),
-             cb(0), ud(0), hdrs(0) {}
+             cb(0), ud(0), hdrs(0), idleTimeoutMs(0), lastProgressMs(0) {}
 };
 
 size_t writeCb(char* ptr, size_t sz, size_t nm, void* ud)
@@ -41,6 +68,7 @@ size_t writeCb(char* ptr, size_t sz, size_t nm, void* ud)
     Task* t = (Task*)ud;
     if (t != 0 && sz * nm > 0) {
         t->respBody.append(ptr, sz * nm);
+        t->lastProgressMs = nowMs();   // 下行有字节 → 重置空闲计时
     }
     return sz * nm;
 }
@@ -60,6 +88,7 @@ size_t readCb(char* buf, size_t sz, size_t nm, void* ud)
     const size_t n = (left < want) ? left : want;
     memcpy(buf, t->uploadBuf.data() + t->uploadPos, n);
     t->uploadPos += n;
+    t->lastProgressMs = nowMs();       // 上行有字节 → 重置空闲计时
     return n;
 }
 
@@ -70,6 +99,9 @@ size_t headerCb(char* ptr, size_t sz, size_t nm, void* ud)
         return sz * nm;
     }
     const size_t total = sz * nm;
+    // 响应头（含状态行）到达也算有进展：服务端可能先吐头再慢慢吐体，
+    // 此时 body 尚无字节，但链路是活的，不该判空闲。
+    t->lastProgressMs = nowMs();
     size_t len = total;
     while (len > 0 && (ptr[len - 1] == '\r' || ptr[len - 1] == '\n')) {
         --len;
@@ -151,13 +183,30 @@ protected:
                 }
             }
             if (m_quit) {
-                // 还有在途任务：先把它们中止掉（cancel 置位）
+                // ★ 停机必须**主动拆掉**在途 easy，不能只置 cancel 标志。
+                //   原先只做 `*cancel = true`，但这个标志 curl 根本不读，
+                //   easy handle 会继续跑到底；而循环的退出条件是
+                //   `m_quit && m_live.empty()`，m_live 只在 CURLMSG_DONE
+                //   （传输真的结束）或空闲超时巡检时才排空。
+                //   ⇒ 服务端「收下连接但永不响应」时，QWebdavTransport::stop()
+                //   里的 p.wait() 会**永久阻塞**，应用退不出。
+                //   （未设 setTransferTimeout 的请求连空闲巡检都兜不住。）
+                //
+                // 这里刻意**不回调** DoneCb：停机时上层（reply / davbisync）
+                // 可能已销毁，回调会打进悬垂指针。回调与否对退出无影响，
+                // 语义上「进程正在退出」也不是需要上报告警的故障。
+                // 尾部的收尾清理块照常跑；m_live 已清空，不会二次释放。
                 QMutexLocker lock(&m_mutex);
                 for (size_t i = 0; i < m_live.size(); ++i) {
-                    if (m_live[i]->cancel != 0) {
-                        *m_live[i]->cancel = true;
+                    Task* t = m_live[i];
+                    if (t->cancel != 0) {
+                        *t->cancel = true;   // 告知调用方「是被停机中止的」
                     }
+                    curl_multi_remove_handle(m_multi, t->easy);
+                    curl_easy_cleanup(t->easy);
+                    delete t;
                 }
+                m_live.clear();
             }
             // ★ 关键：poll 只负责「等」，真正驱动传输的是 perform。
             // 官方 libcurl-multi 文档原话：
@@ -185,6 +234,52 @@ protected:
                 }
             }
 
+            // ── 空闲超时巡检 ──
+            // 放在 poll 之后、curl_multi_info_read 之前：超时的 easy 必须先
+            // 从 multi 摘掉，否则它还会补一条 CURLMSG_DONE 上来，
+            // 与这里的回调重复投递。
+            //
+            // 锁内只做「摘除 + 收集」，回调在锁外发（与 CURLMSG_DONE 路径一致，
+            // 避免回调里若再碰 QWebdavTransport/QNAM 就自死锁）。
+            std::vector<Task*> idleDead;
+            if (!m_live.empty()) {
+                const qint64 now = nowMs();
+                QMutexLocker lock(&m_mutex);
+                for (size_t i = 0; i < m_live.size(); ) {
+                    Task* t = m_live[i];
+                    if (t->idleTimeoutMs > 0 &&
+                        now - t->lastProgressMs >= (qint64)t->idleTimeoutMs) {
+                        curl_multi_remove_handle(m_multi, t->easy);
+                        idleDead.push_back(t);
+                        m_live.erase(m_live.begin() + i);
+                        continue;   // erase 后本下标已是下一个元素，不能自增
+                    }
+                    ++i;
+                }
+            }
+            for (size_t i = 0; i < idleDead.size(); ++i) {
+                Task* t = idleDead[i];
+                if (!t->reported) {
+                    t->reported = true;
+                    if (t->cb != 0) {
+                        // 错误串必须含大写 "Timeout"：垫片的 mapCurlError 只认
+                        // "timed out"（小写 t）与 "Timeout"（大写 T）两个子串，
+                        // 写成小写 "idle timeout" 会落到 UnknownNetworkError。
+                        char buf[128];
+                        snprintf(buf, sizeof(buf),
+                                 "Idle Timeout: no data for %d ms",
+                                 t->idleTimeoutMs);
+                        // aborted=false：空闲超时是**故障**不是用户中止。
+                        // 传 true 会让 deliverResult 走 aborted 分支，把原因
+                        // 覆盖成无意义的 "Request aborted"（见下 DONE 路径注释）。
+                        t->cb(t->ud, t->status, std::string(buf), t->respBody,
+                              t->respHeaders, false);
+                    }
+                }
+                curl_easy_cleanup(t->easy);
+                delete t;
+            }
+
             int msgsLeft = 0;
             CURLMsg* msg = 0;
             while ((msg = curl_multi_info_read(m_multi, &msgsLeft)) != 0) {
@@ -206,8 +301,18 @@ protected:
                 curl_multi_remove_handle(m_multi, e);
                 remove(t);
 
-                const bool aborted = (t->cancel != 0 && *t->cancel)
-                                     || (msg->data.result != CURLE_OK);
+                // ★ aborted 只表示「**调用方主动取消**」，不再兼指 curl 失败。
+                //   原先是 `cancel || result != CURLE_OK`，两者混在一起，后果是：
+                //   任何 curl 层失败（连接被拒 / DNS 失败 / TLS 失败 / 空闲超时）
+                //   都以 aborted=true 上报，而垫片的 deliverResult 见到
+                //   aborted=true 就走 aborted 分支，直接把 errorString 定成
+                //   "Request aborted" 并 return —— 传上来的真实 curl 错误串被
+                //   **整个丢弃**，mapCurlError 根本没机会跑。
+                //   实测症状：连接被拒、404、401 的 errorChanged 原因全都是
+                //   一句 "Request aborted"，毫无信息量。
+                //   现在 curl 失败只经 err 串上报（aborted=false），
+                //   deliverResult 会走 `if (!curlErr.empty())` → mapCurlError。
+                const bool aborted = (t->cancel != 0 && *t->cancel);
                 if (!t->reported) {
                     t->reported = true;
                     const char* err = (msg->data.result == CURLE_OK)
@@ -304,10 +409,13 @@ void QWebdavTransport::send(const std::string& method,
                             volatile bool* cancel)
 {
         if (!isReady()) {
-        // 与 EventPoller 一致的失败语义：立刻回调，让上层照常走错误路径
+        // 与 EventPoller 一致的失败语义：立刻回调，让上层照常走错误路径。
+        // aborted=false：这是故障不是用户取消，原因靠 err 串上报。
+        // 传 true 会让 deliverResult 走 aborted 分支，原因被替换成
+        // "Request aborted"，真实的 "transport not ready" 就丢了。
         if (cb != 0) {
             cb(userdata, 0, "transport not ready", std::string(),
-               std::map<std::string, std::string>(), true);
+               std::map<std::string, std::string>(), false);
         }
         return;
     }
@@ -318,13 +426,18 @@ void QWebdavTransport::send(const std::string& method,
     t->cb = cb;
     t->ud = userdata;
     t->cancel = cancel;
+    t->idleTimeoutMs = timeoutMsecs;
+    // ★ 发包前就以当前时刻起算：连接建立 + TLS 握手这段时间里 readCb/headerCb
+    //   都还没被调过，若把 lastProgressMs 留 0，第一次巡检就会把刚入队的
+    //   任务误判成「已空闲 timeoutMs 毫秒」。
+    t->lastProgressMs = nowMs();
 
     t->easy = curl_easy_init();
     if (t->easy == 0) {
         delete t;
         if (cb != 0) {
             cb(userdata, 0, "curl_easy_init failed", std::string(),
-               std::map<std::string, std::string>(), true);
+               std::map<std::string, std::string>(), false);
         }
         return;
     }
@@ -335,12 +448,14 @@ void QWebdavTransport::send(const std::string& method,
     curl_easy_setopt(t->easy, CURLOPT_NOPROGRESS, 1L);
     curl_easy_setopt(t->easy, CURLOPT_SSL_SESSIONID_CACHE, 0L);
     if (timeoutMsecs > 0) {
-        // 毫秒 → 秒（向上取整，至少 1s；0 视为不限）
-        long secs = (long)((timeoutMsecs + 999) / 1000);
-        if (secs < 1) {
-            secs = 1;
-        }
-        curl_easy_setopt(t->easy, CURLOPT_TIMEOUT, secs);
+        // ★ 这里**不设** CURLOPT_TIMEOUT / CURLOPT_LOW_SPEED_*。
+        //   空闲超时由 Pump 循环自己巡检 Task::lastProgressMs 实现（见
+        //   run() 里的「空闲超时巡检」），因为语义是「字节流动即重置」，
+        //   而 curl 现有的几个超时选项都给不出这个语义：
+        //     CURLOPT_TIMEOUT        总时长上限（会误杀慢速大图）
+        //     CURLOPT_CONNECTTIMEOUT 只管连接建立阶段
+        //     CURLOPT_LOW_SPEED_*    按**平均速度**判定，且久未在 libcurl 使用
+        //   保持 t->idleTimeoutMs 即可，这里只是留个记录。
     }
 
     // ★ 本传输层存在的核心：真正把 verb 传给 curl。

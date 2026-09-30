@@ -15,6 +15,10 @@
 
 TEMPLATE = app
 TARGET = qlstik
+# 207 多状态响应解析**不再用 QDom**：走 stikcommon/dav207pugi.cpp（pugixml）。
+# 原先挂 xml 模块（QDomDocument）是因为 Qt3 的 QDom 与 QString 编码语义不一致、
+# 且 elementsByTagName 只比本地名忽略命名空间，实测把 /dir/笔记.txt 污染成
+# /dir/笔记.txt<U+006C>。故摘掉 xml 模块，少一个 Qt 依赖。
 QT = core gui widgets network
 CONFIG += moc
 CONFIG += sdk_no_version_check
