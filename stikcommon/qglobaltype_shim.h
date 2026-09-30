@@ -13,8 +13,9 @@
 //
 // ══ QIODevice 打开模式 ═════════════════════════════════════════════════
 // Qt3 的 QIODevice 用 IO_ReadOnly/IO_WriteOnly/IO_ReadWrite 宏且无枚举成员，
-// Qt4+ 用 QIODevice::ReadOnly 等枚举——这是没法放进一个类型里的差异，交给
-// davbisync_baseline.cpp 顶部的"Qt3 API 适配区"集中映射，本头不管。
+// Qt4+ 用 QIODevice::ReadOnly 等枚举——这是没法放进一个类型里的差异，一律走
+// qOpenReadOnly() 自由函数（与 qAbsPath/qMkdir 同范式），实现见文件末尾。
+
 //
 // ══ qAbsPath() / qMkdir() ══════════════════════════════════════════════
 // Qt3 没有 QFileInfo::absolutePath()（用 QT3_SUPPORT 的 dirPath(true)），也没有
@@ -28,10 +29,14 @@
 #include <qstring.h>
 #include <qdir.h>
 #include <qfileinfo.h>
+#include <qiodevice.h>
+#include <qfile.h>
 #else
 #include <QString>
 #include <QDir>
 #include <QFileInfo>
+#include <QIODevice>
+#include <QFile>
 #endif
 
 #if QT_VERSION < 0x040000
@@ -99,6 +104,49 @@ static inline bool qMkdir(const QString& path)
     return QDir().mkdir(p) || QFileInfo(p).isDir();
 #else
     return QDir().mkpath(path);
+#endif
+}
+
+// ── qOpenReadOnly()：QIODevice 打开模式（Qt3 宏 / Qt4+ 枚举）──────────────
+// Qt3 的 QIODevice 只有 IO_ReadOnly/IO_WriteOnly/IO_ReadRead 宏、类作用域里
+// **没有** ReadOnly 枚举；Qt4+ 才有 QIODevice::ReadOnly。这差异没法塞进类型，
+// 故按本文件 qAbsPath/qMkdir 的同款范式给自由函数（见上"QIODevice 打开模式"）。
+//
+// 不用宏的原因：Qt3 下 `QIODevice::ReadOnly` 本身是语法错误，没法用一个宏把
+// 整段 `QIODevice::ReadOnly` 文本换成合法表达式；宏必须逐调用点写，反而更易漏。
+// #if < 0x050000 覆盖 Qt3/Qt4/Qt5 前的 IO_ReadOnly 宏（Qt5 起该宏已移除，
+// Qt5+ 走 QIODevice::ReadOnly 枚举）。本机只装了 Qt3 与 Qt6，Qt4/5 未实测。
+inline bool qOpenReadOnly(QIODevice& dev)
+{
+#if QT_VERSION < 0x050000
+    return dev.open(IO_ReadOnly);
+#else
+    return dev.open(QIODevice::ReadOnly);
+#endif
+}
+
+// ── qOpenWriteOnly()：QIODevice 写模式（Qt3 宏 / Qt4+ 枚举）────────────────
+// 同 qOpenReadOnly，Qt3 用 IO_WriteOnly 宏，Qt4+ 用 QIODevice::WriteOnly 枚举。
+inline bool qOpenWriteOnly(QIODevice& dev)
+{
+#if QT_VERSION < 0x050000
+    return dev.open(IO_WriteOnly);
+#else
+    return dev.open(QIODevice::WriteOnly);
+#endif
+}
+
+// ── qFileWrite()：QFile 写字节（Qt3 是 writeBlock，无 write）───────────────
+// Qt3 的 QFile 只有 Q_LONG writeBlock(const char*, Q_ULONG)（qfile.h:88），
+// 整个 QFile 都没有 Qt4+ 的 write(const QByteArray&)。语义一致（写全部、
+// 返回实际写入字节数），故按 QIODevice/qMkdir 同范式给自由函数。
+inline long qFileWrite(QFile& f, const QByteArray& data)
+{
+#if QT_VERSION < 0x040000
+    // Qt3 的 writeBlock 只吃裸指针 + 长度，不能直接传 QByteArray。
+    return (long)f.writeBlock(data.data(), (Q_ULONG)data.size());
+#else
+    return (long)f.write(data);
 #endif
 }
 

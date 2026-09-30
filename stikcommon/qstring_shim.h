@@ -181,4 +181,111 @@ inline void qStringListRemoveDuplicates(QStringList& list)
 }
 #endif
 
+
+// ── QString::toLower()/indexOf()/lastIndexOf()（Qt3 命名不同）───────────────
+// Qt3 的 QString 里（/opt/qt338sh/include/qstring.h 实测）：
+//   toLower()   无；有 QString lower() const          → :522，返回**新串**
+//   indexOf()   无；有 int find(QChar, int, bool)     → :469
+//   lastIndexOf() 无；有 int findRev(QChar, int, bool) → :478
+// 三者语义与 Qt4+ 对应成员一致，故 Qt3 分支直接转调 Qt3 原语，Qt4+ 转调原生。
+//
+// 放在「Qt3 大块」之外：本组是跨版本统一入口，Qt4+ 也走本函数，这样调用点
+// 不用写版本分支。块内只有 Qt3 才编译，Qt6 侧会缺这几个名字。
+#if QT_VERSION < 0x040000
+inline QString qToLower(const QString& s) { return s.lower(); }
+inline int     qIndexOf(const QString& s, QChar c, int from = 0)
+{
+    return s.find(c, from);
+}
+inline int     qIndexOf(const QString& s, const QString& sub, int from = 0)
+{
+    return s.find(sub, from);
+}
+inline int     qLastIndexOf(const QString& s, QChar c)
+{
+    return s.findRev(c);
+}
+inline int     qLastIndexOf(const QString& s, const QString& sub)
+{
+    return s.findRev(sub);
+}
+#else
+inline QString qToLower(const QString& s) { return s.toLower(); }
+inline int     qIndexOf(const QString& s, QChar c, int from = 0)
+{
+    return s.indexOf(c, from);
+}
+inline int     qIndexOf(const QString& s, const QString& sub, int from = 0)
+{
+    return s.indexOf(sub, from);
+}
+inline int     qLastIndexOf(const QString& s, QChar c)
+{
+    return s.lastIndexOf(c);
+}
+inline int     qLastIndexOf(const QString& s, const QString& sub)
+{
+    return s.lastIndexOf(sub);
+}
+#endif
+
+// ── QString::fromUtf16() / fromStdU16String()（Qt4.1+ 才有）─────────────────
+// EIF 贴纸的表名/分组名在 CFB 里是 UTF-16LE，需从 char16_t 序列构造 QString。
+// Qt3 的 QString 内部**本来就是 UTF-16**（QChar = ushort），故不需要任何转码：
+// 直接走 Qt3 的深拷贝构造 QString(const QChar*, uint)（qstring.h:408）即可，
+// 零转码即语义正确（这正是 QString::fromUtf16 在 Qt4 的做法）。
+#if QT_VERSION < 0x040000
+inline QString qFromUtf16(const char16_t* chars, int n)
+{
+    // char16_t 与 Qt3 的 QChar 同为 16 位无符号，static_cast 零成本且无值变化。
+    // n 传 0 时 Qt3 会构造空串；QString::fromUtf16 同样允许 size=0。
+    return QString(reinterpret_cast<const QChar*>(chars), (uint)n);
+}
+#else
+inline QString qFromUtf16(const char16_t* chars, int n)
+{
+    return QString::fromUtf16(reinterpret_cast<const ushort*>(chars), n);
+}
+#endif
+
+// std::u16string 与 char16_t 序列布局一致（Qt4 的 fromStdU16String 也只做
+// reinterpret_cast + 长度）。char16_t 属 C++11，需在 Qt3 下确认编译器支持。
+inline QString qFromStdU16String(const std::u16string& s)
+{
+#if QT_VERSION < 0x040000
+    return qFromUtf16(s.data(), (int)s.size());
+#else
+    return QString::fromStdU16String(s);
+#endif
+}
+
+// ── QString::split()（Qt4 才有；Qt3 的 QString 与 QRegExp 都没有 split）─────
+// EIF 解析用 body.split(QLatin1Char(':')) / split(QLatin1Char('\\'))，
+// 只用到「按单个字符切、保留空段」这一种形态。Qt3 无 split，且 Qt3 的
+// QStringList 是 QValueList<QString>（无 += / << 的某些重载差异），故手写。
+// 语义对齐 Qt4 QString::split(QChar)：
+//   * 默认 Qt::KeepEmptyParts，段数 = 分隔符个数 + 1（连续分隔符产生空段）
+//   * 空输入返回含一个空串的列表
+#if QT_VERSION < 0x040000
+inline QStringList qSplit(const QString& s, QChar sep)
+{
+    QStringList out;
+    int start = 0;
+    for (;;) {
+        const int ix = s.find(sep, start);
+        if (ix < 0) { out << s.mid(start); break; }
+        out << s.mid(start, ix - start);
+        start = ix + 1;
+    }
+    return out;
+}
+#else
+inline QStringList qSplit(const QString& s, QChar sep)
+{
+    // Qt4+ 的 split 默认 Qt::KeepEmptyParts，与上面 Qt3 实现的空段行为一致
+    // （Qt4 默认就是 KeepEmptyParts，只有 Qt::SkipEmptyParts 才丢空段）。
+    return s.split(sep);
+}
+#endif
+
 #endif // QLSTIK_QSTRING_SHIM_H

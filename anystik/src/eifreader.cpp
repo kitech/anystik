@@ -2,6 +2,14 @@
 
 #include "compoundfilereader.h"
 
+// 垫片必须**在 QT3_BUILD 分支之外**include：stikcommon 的这批自由函数
+// （qbaFromRaw/qbaConstData/qTrimmed/qSplit/qLastIndexOf/qToLower/
+// qOpenReadOnly/qFileWrite…）本身就是跨版本统一入口，Qt4+ 分支有原生实现可转调。
+// 若只给 Qt3 include，Qt6 侧就只剩裸方法名，编译不过。
+#include "qba_shim.h"
+#include "qglobaltype_shim.h"
+#include "qstring_shim.h"
+
 #ifdef QT3_BUILD
 #include <qcstring.h>
 #include <qdir.h>
@@ -34,7 +42,7 @@ constexpr uint8_t kCfbMagic[8] = {0xD0, 0xCF, 0x11, 0xE0,
 const QByteArray kFaceMarker()
 {
     static const QByteArray bytes =
-        QByteArray("\x98\xeb\x9f\xeb\x99\xeb\xad\xeb\x82\xeb\x87\xeb"
+        qbaFromRaw("\x98\xeb\x9f\xeb\x99\xeb\xad\xeb\x82\xeb\x87\xeb"
                    "\x8e\xeb\x84\xeb\x99\xeb\x8c\xeb", 20);
     return bytes;
 }
@@ -42,8 +50,8 @@ const QByteArray kFaceMarker()
 // UTF-16LE（uint16 数组，native == LE）转 UTF-8 QString
 QString u16ToQString(const uint16_t* chars, int count)
 {
-    return QString::fromUtf16(reinterpret_cast<const char16_t*>(chars),
-                              count);
+    return qFromUtf16(reinterpret_cast<const char16_t*>(chars),
+                      count);
 }
 
 // eif 组目录名（如 "1"、"我的表情"）文件系统安全化
@@ -51,13 +59,17 @@ QString sanitizeGroup(const QString& group)
 {
     QString out = group;
     const QString dangerous = QStringLiteral("\\/:*?\"<>|");
-    for (QChar& c : out) {
+    // Qt3 的 QString::operator[] const 返回 QChar **值拷贝**（qstring.h:799），
+    // 不能 `for (QChar& c : out)` 取址改写，故用下标循环 + 按位改 QChar。
+    for (int ci = 0; ci < out.length(); ++ci) {
+        QChar c = out[ci];
         if (c == QLatin1Char('\n') || c == QLatin1Char('\r')
             || dangerous.contains(c)) {
             c = QLatin1Char('_');
         }
+        out[ci] = c;
     }
-    if (out.trimmed().isEmpty()) {
+    if (qTrimmed(out).isEmpty()) {
         out = QStringLiteral("group");
     }
     return out;
@@ -68,7 +80,7 @@ QString sanitizeGroup(const QString& group)
 bool isEifFile(const QByteArray& head)
 {
     return head.size() >= 8
-        && memcmp(head.constData(), kCfbMagic, 8) == 0;
+        && memcmp(qbaConstData(head), kCfbMagic, 8) == 0;
 }
 
 QHash<QString, QHash<QString, int>> decodeFaceDat(const QByteArray& dat,
@@ -85,17 +97,17 @@ QHash<QString, QHash<QString, int>> decodeFaceDat(const QByteArray& dat,
     const int markerLen = marker.size();
 
     // Face.dat 按下标顺序逐行扫描，行间以 \n 分隔（含 \r\n 的 \r 一并 trim）
-    const char* p = dat.constData();
+    const char* p = qbaConstData(dat);
     const char* end = p + dat.size();
     while (p < end) {
         const char* nl = static_cast<const char*>(memchr(p, '\n', end - p));
         const char* lineEnd = nl ? nl : end;
-        QByteArray line(p, int(lineEnd - p));
-        line = line.trimmed();
+        QByteArray line = qbaFromRaw(p, int(lineEnd - p));
+        line = qbaTrimmed(line);
         p = lineEnd + (nl ? 1 : 0);
         if (line.isEmpty()) continue;
 
-        const int start = line.indexOf(marker);
+        const int start = qbaIndexOf(line, marker);
         if (start < 0) continue;
 
         // 标记之后跳过 4 字节分隔头，再找「重复三次的密钥」定位段落
@@ -129,25 +141,28 @@ QHash<QString, QHash<QString, int>> decodeFaceDat(const QByteArray& dat,
 
         // XOR 解码段落（排他边界到 endIx-1，末尾 0 值字节跳过）
         QByteArray decoded;
-        decoded.reserve(endIx - seek + 1);
+        qbaReserve(decoded, endIx - seek + 1);
         for (int i = seek - 1; i < endIx && i < line.size(); ++i) {
             const int c = static_cast<unsigned char>(line.at(i)) ^ key;
-            if (c != 0) decoded.append(char(c));
+            if (c != 0) qbaAppend(decoded, char(c));
         }
         const QString text = QString::fromUtf8(decoded);
 
         // 形如 "UserDataCustomFace:分组\文件名" 或 "分组\文件名"
         QString body = text;
-        if (body.split(QLatin1Char(':')).size() > 1) {
+        if (qSplit(body, QLatin1Char(':')).size() > 1) {
             if (!body.startsWith(QStringLiteral("UserDataCustomFace:"))) {
                 continue;
             }
             body = body.mid(int(qstrlen("UserDataCustomFace:")));
         }
-        const QStringList parts = body.split(QLatin1Char('\\'));
+        const QStringList parts = qSplit(body, QLatin1Char('\\'));
         if (parts.size() < 2) continue;
-        const QString group = parts.at(0);
-        const QString file = parts.at(1);
+        // Qt3 的 QStringList 是 QValueList<QString>，at() 返回**迭代器**而非
+        // const QString&（不能直接拷进 QString），用 operator[] 取值——与
+        // qstring_shim.h 里 qStringListRemoveDuplicates 的既有处理一致。
+        const QString group = parts[(int)0];
+        const QString file = parts[(int)1];
         if (group.isEmpty() || file.isEmpty()) continue;
 
         auto& inner = result[group];
@@ -170,7 +185,7 @@ bool extractEif(const QString& eifPath,
     if (imageCount) *imageCount = 0;
 
     QFile in(eifPath);
-    if (!in.open(QIODevice::ReadOnly)) {
+    if (!qOpenReadOnly(in)) {
         if (errOut) *errOut = QStringLiteral("无法打开 eif：") + eifPath;
         return false;
     }
@@ -185,7 +200,7 @@ bool extractEif(const QString& eifPath,
     QString internalErr;
 
     try {
-        CFB::CompoundFileReader cf(buf.constData(), size_t(buf.size()));
+        CFB::CompoundFileReader cf(qbaConstData(buf), size_t(buf.size()));
 
         // 1) 先遍历收集 Face.dat 与 Face2.dat（含分组索引）
         QByteArray faceDat;
@@ -197,7 +212,7 @@ bool extractEif(const QString& eifPath,
                     if (nameLen == int(qstrlen("Face.dat"))
                         && u16ToQString(e->name, nameLen)
                                == QLatin1String("Face.dat")) {
-                        faceDat = QByteArray(int(e->size), Qt::Uninitialized);
+                        faceDat = qbaUninit(int(e->size));
                         cf.ReadFile(e, 0, faceDat.data(),
                                     size_t(faceDat.size()));
                     }
@@ -226,16 +241,16 @@ bool extractEif(const QString& eifPath,
                     // 组名取该流所在目录的最后一段（CFB 的 dir 形如 "1"）。
                     // 根级流（dir 为空，如 Face.dat 之外的其他 dat）不属于任何
                     // 分组，参照读码逻辑直接跳过。
-                    const QString dirStr = QString::fromStdU16String(dir);
+                    const QString dirStr = qFromStdU16String(dir);
                     if (dirStr.isEmpty()) return;
                     QString group = dirStr;
-                    const int lastSep = group.lastIndexOf(QLatin1Char('\\'));
+                    const int lastSep = qLastIndexOf(group, QLatin1Char('\\'));
                     if (lastSep >= 0) group = group.mid(lastSep + 1);
                     group = sanitizeGroup(group);
 
                     const QDir target(outDir + QLatin1Char('/') + group);
                     QString base, ext;
-                    const int dot = name.lastIndexOf(QLatin1Char('.'));
+                    const int dot = qLastIndexOf(name, QLatin1Char('.'));
                     if (dot >= 0) {
                         base = name.left(dot);
                         ext = name.mid(dot + 1);
@@ -244,7 +259,7 @@ bool extractEif(const QString& eifPath,
                     }
 
                     // 掩膜/临时流即 `xxfix.bmp`：名字以 fix/tmp/tmb 结尾
-                    const QString lowerBase = base.toLower();
+                    const QString lowerBase = qToLower(base);
                     if (lowerBase.endsWith(QLatin1String("fix"))
                         || lowerBase.endsWith(QLatin1String("tmp"))
                         || lowerBase.endsWith(QLatin1String("tmb"))) {
@@ -255,34 +270,41 @@ bool extractEif(const QString& eifPath,
                     QString stem = base;
                     const auto gIt = groupMap.constFind(group);
                     if (gIt != groupMap.constEnd()) {
-                        const auto& inner = gIt.value();
+                        // Qt3 的 QMapConstIterator 没有 value()（Qt4.1+ 才有），
+                        // 用 *it 取值——同形且语义一致。
+                        const auto& inner = *gIt;
                         const auto fIt = inner.constFind(name);
                         if (fIt != inner.constEnd()) {
                             stem = QStringLiteral("%1").arg(
-                                fIt.value(), 4, 10, QLatin1Char('0'));
+                                *fIt, 4, 10, QLatin1Char('0'));
                         }
                     }
-                    const QString suffix = ext.toLower().isEmpty()
-                        ? QStringLiteral("img") : ext.toLower();
+                    const QString suffix = qToLower(ext).isEmpty()
+                        ? QStringLiteral("img") : qToLower(ext);
                     const QString outPath = target.filePath(
                         stem + QLatin1Char('.') + suffix);
 
-                    if (!target.exists() && !target.mkpath(
-                            QStringLiteral("."))) {
+                    // Qt3 的 QDir 无 mkpath（只能 mkdir 一层），用 stikcommon 的
+                    // qMkdir（语义对齐 QDir::mkpath：已存在→true）。注意此处
+                    // 传的是 target.path()（即 <outDir>/<group>），不是字面 "."：
+                    // 原写法 target.mkpath(".") 在 Qt4+ 下恒真（对已存在目录
+                    // 建 "."），实际靠 QFile 写入时自建目录兜底；这里补成显式
+                    // 建目录，与该行「无法创建分组目录」的报错语义一致。
+                    if (!target.exists() && !qMkdir(target.path())) {
                         internalErr = QStringLiteral("无法创建分组目录：")
                                       + group;
                         return;
                     }
 
-                    QByteArray data(int(e->size), Qt::Uninitialized);
+                    QByteArray data = qbaUninit(int(e->size));
                     cf.ReadFile(e, 0, data.data(), size_t(e->size));
 
                     QFile of(outPath);
-                    if (!of.open(QIODevice::WriteOnly)) {
+                    if (!qOpenWriteOnly(of)) {
                         internalErr = QStringLiteral("无法写表情文件");
                         return;
                     }
-                    of.write(data);
+                    qFileWrite(of, data);
                     of.close();
                     ++extracted;
                 }
@@ -308,7 +330,7 @@ QString describeEif(const QString& eifPath, QString* errOut)
 {
     QString result;
     QFile in(eifPath);
-    if (!in.open(QIODevice::ReadOnly)) {
+    if (!qOpenReadOnly(in)) {
         if (errOut) *errOut = QStringLiteral("无法打开 eif：") + eifPath;
         return result;
     }
@@ -322,7 +344,7 @@ QString describeEif(const QString& eifPath, QString* errOut)
     int realImages = 0;
     QStringList groupNames;
     try {
-        CFB::CompoundFileReader cf(buf.constData(), size_t(buf.size()));
+        CFB::CompoundFileReader cf(qbaConstData(buf), size_t(buf.size()));
         cf.EnumFiles(cf.GetRootEntry(), -1,
             [&](const CFB::COMPOUND_FILE_ENTRY* e,
                 const std::u16string& dir, int) {
@@ -330,7 +352,7 @@ QString describeEif(const QString& eifPath, QString* errOut)
                 const int nameLen = int(e->nameLen / 2) - 1;
                 const QString name = u16ToQString(e->name, nameLen);
                 const auto first = dir.empty()
-                    ? name : QString::fromStdU16String(dir) + QChar('\\') + name;
+                    ? name : qFromStdU16String(dir) + QChar('\\') + name;
                 if (isDir) {
                     ++groups;
                     groupNames.append(name);

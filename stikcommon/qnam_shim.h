@@ -42,16 +42,14 @@
 #include <functional>
 
 #include "compatcore34.h"   // CustomEventBase / EventType34 / qFromUtf8 等
+#include "qba_shim.h"       // qbaConstData 等 QByteArray 垫片（qba_constdata 定义在此）
 #include "qlist_shim.h"    // QList 值容器（vendor TU 也 include 它，类型需一致）
 #include "qglobaltype_shim.h"   // Qt3: qint64 / qAbsPath / qMkdir
 
 // Qt3 的 QByteArray(=QMemArray<char>) 无 constData()（只有 data()）、无 '+='
-// 与 const char* 构造。这里只补 constData()；'+=/构造' 场景统一走 QCString。
-#ifdef QT3_BUILD
-inline const char* qbaConstData(const QByteArray& a) { return a.data(); }
-#else
-inline const char* qbaConstData(const QByteArray& a) { return a.constData(); }
-#endif
+// 与 const char* 构造。qbaConstData 已在 qba_shim.h 定义（Qt3 → data()，
+// Qt4+ → constData()），本头直接复用它，避免两处定义报 redefinition。
+// qba_shim.h 不 include 本头，故无循环依赖。
 
 class QNetworkReplyEvent;
 class QNetworkAccessManager;

@@ -37,13 +37,27 @@ STIKCOMMON_SOURCES  += $$MYVENDOR_SOURCES $$QLDOX_SOURCES
 STIKCOMMON_HEADERS  += $$QLDOX_HEADERS
 STIKCOMMON_INCLUDES += $$MYVENDOR_INCLUDES $$QLDOX_INCLUDES
 
-# ══ 批次 1：myi18n / davobfus（eifreader 暂缓：Qt 3.5 的 QByteArray 是
-#     typedef QMemArray<char>，无法用垫片补 Qt4 方法，需真移植，见移植计划 §6.3）══
+# ══ 批次 1：myi18n / davobfus / eifreader ══
+# eifreader 原为 1c 暂缓项（「Qt 3.5 的 QByteArray 是 typedef QMemArray<char>，
+# 无法用垫片补 Qt4 方法」）。批次 5 复查后暂缓理由已不成立：
+#   * eifreader.h:4-14 与 eifreader.cpp:5-19 都已有 #ifdef QT3_BUILD 双分支
+#     include（上次会话铺的），Qt3 走 qcstring/qstring/qstringlist 小写头
+#   * 其 QHash 依赖已有 stikcommon/qhash_shim.h（856 字节）兜住
+#   * eifreader.cpp:3 的 compoundfilereader.h 在 anystik/vendor/include/，
+#     482 行、Qt 符号 0 个（只 include <algorithm>/<stdint.h>/<string.h>/
+#     <exception>/<stdexcept>/<functional>/<string>），头文件-only 且 Qt-free
+#   * qlstik.pro 已含 -I../../anystik/vendor/include，include 路径无需新增
+# 函数体里尚无 Qt3 分支，剩余的 Qt4 QByteArray 方法（constData/indexOf/
+# reserve/append 等 8 处）由编译实测决定是否还需补垫，不预先下结论。
 ANYSTIK_SRC_DIR = $$STIKCOMMON_DIR/../anystik/src
 
 # myi18n：L0 引用 anystik/src（Qt3 侧靠 stikcommon/*_shim.h 兜类级缺口）
 STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/myi18n.cpp
 STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/myi18n.h
+
+# eifreader：批次 5 因 StickerStore 的 runInstallEif 依赖而提前解冻（见移植计划 §6.3j）
+STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/eifreader.cpp
+STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/eifreader.h
 
 # davobfus：已拷入本目录（手写源，anystik/src 侧是 .cpp.tmpl 模板 +
 # 真实 key 占位；qlstik 不注入 key，只验证代码可编可链）
