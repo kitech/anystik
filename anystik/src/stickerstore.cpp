@@ -35,7 +35,14 @@
 #include <QNetworkRequest>
 #include <QSet>
 #include <QtConcurrent/QtConcurrent>
+#ifdef QT3_BUILD
+// Qt3 无 qzipreader 私有类：用 stikcommon/qzipreader_shim（按 Qt 6.7 的
+// corelib/io/qzip.cpp 移植，与 Qt6 原生逐项行为对拍通过，见
+// stikcommon/stikcommon.pri「批次 5：QZipReader 分版本实现」段）。
+#include "qzipreader_shim.h"
+#else
 #include <QtCore/private/qzipreader_p.h>
+#endif
 #include <QTemporaryFile>
 #include "../vendor/tangora_gif.h"
 #include <zlib.h>

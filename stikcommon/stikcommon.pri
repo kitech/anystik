@@ -278,6 +278,36 @@ isEmpty(QT_VERSION) {
                          $$STIKCOMMON_DIR/qsavefile_shim.cpp
 }
 
+# ── 批次 5：QZipReader 分版本实现 ───────────────────────────────────────
+# 需求：stickerstore.cpp:3715 用 QZipReader 解贴纸包。Qt5/6 用原生
+# <QtCore/private/qzipreader_p.h>，Qt3 无此私有类（Qt3 把 zip 读写留在
+# qlstik 不需要的 QZip/QZipSource 里，且 3.5.0 的 QZipReader 尚不存在）。
+# 故 Qt3 侧用 stikcommon/qzipreader_shim.{h,cpp}——按 Qt 6.7 的
+# src/corelib/io/qzip.cpp 逐函数移植的行为等价实现。
+#
+# 对拍证据（2026-10-01，~/ztprobe）：
+#   同一份 parity.cpp 分别链接 Qt6 原生与 Qt3 shim，对 10 个 fixture
+#   （normal / stored / symlink / dirs / traversal / comment / bomb /
+#     corrupt / notzip / 不存在）× 2 种目标目录状态（预建 / 不预建）
+#   输出 151 行，stdout **0 差异**：fileInfoList 的 filePath/isValid/
+#   isDir/isFile/isSymLink/permissions/size/crc 全同，extractAll 返回值全同，
+#   落盘后的树形结构与文件 mode 全同（含 Qt6 的既有怪癖：混合平铺/嵌套条目时
+#   QString::left(-1) 返回整串导致给平铺文件建同名目录而写文件失败）。
+#   唯一有意差异：Qt6 对损坏/非 zip 会 qWarning 两行诊断，shim 不打；
+#   属 stderr 诊断输出，不影响行为。
+#
+# 顺带纠正了一处历史误判：Qt3 与 Qt6 的 QFileInfo::PermissionSpec **数值编码
+# 不同**——Qt3 是八进制字面量（ReadOwner=04000=2048），Qt6 是十六进制
+# （ReadOwner=0x4000=16384）。同一组 rwx 位在两侧数值不同（0x6600 vs 0xd80
+# 即同一个 0o6600），比对时必须按语义而非数值。
+#
+# .h 无条件登记（moc/依赖扫描），.cpp 严格按版本挂载，避免 Qt5+ 重复定义
+# QZipReader（范式对齐上面的 qdatetime_shim.cpp）。
+STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qzipreader_shim.h
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qzipreader_shim.cpp
+}
+
 # myi18n 的 settings_trace.h 在 anystik 侧；davobfus 的 libobfuscate 在 vendor
 STIKCOMMON_INCLUDES += $$ANYSTIK_SRC_DIR \
                        $$ANYSTIK_SRC_DIR/../vendor/include
