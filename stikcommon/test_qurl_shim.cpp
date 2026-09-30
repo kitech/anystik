@@ -22,6 +22,13 @@ static QString raw(const QUrl& u)
     return qUrlRawString(u);
 }
 
+// qUrlRemoveFilename 的断言直接比 toString()（不用 qUrlRawString）：本函数的
+// 4 处生产/对拍输入全带 "https://" scheme，不受 Qt3 无-scheme 污染影响。
+static QString rmf(const QString& s)
+{
+    return qUrlRemoveFilename(QUrl(s)).toString();
+}
+
 TEST_CASE("qUrlHexVal: 十六进制取值，非法返回 -1")
 {
     CHECK_EQ(qUrlHexVal(QChar('0')), 0);
@@ -100,15 +107,18 @@ TEST_CASE("QUrlQuery: 按 key 取 query 值，缺失/无值返回空串")
 // ⚠ 不能用 QByteArray(want) 构造期望值：Qt3 的 QMemArray<char> 没有 const char*
 //   构造函数（qmemarray.h:62 只有 QMemArray(int size)），会报 invalid conversion
 //   from 'const char*' to 'int'；若开了 -fpermissive 更会被当成「按指针值定长的
-//   数组」而静默错分配。改用 QCString 作比较右操作数。
+//   数组」而静默错分配。改用 QString 作比较右操作数。
 //
-// 主契约按 C 字符串取内容：QCString(data, size) 是 qstrncpy 语义（长度含终止 NUL，
-// 会少一字符），正好把返回值末尾那个 NUL 去掉，得到逻辑字符串。
+// ⚠ 也不能再用 QCString(got.data(), got.size())：那个是 qstrncpy 语义，
+//   **按 maxlen 少拷一字符**。qToPercentEncoding 修成精确长度后（不再带尾 NUL），
+//   这么取会砍掉最后一个字符，实测 "a b" 得 "a%20" 而非 "a%20b"。
+//   现在改走 QString::fromLatin1(data, size)——Qt3 有 (const char*, int) 重载，
+//   长度显式、无 NUL 语义，且结果全为 ASCII（百分号编码输出必然如此）。
 static void checkEnc(const QString& in, const char* want)
 {
     const QByteArray got = qToPercentEncoding(in);
-    const QCString gotStr(got.data(), got.size());
-    CHECK(gotStr == QCString(want));
+    const QString gotStr = QString::fromLatin1(got.data(), (int)got.size());
+    CHECK(gotStr == QString(want));
 }
 
 TEST_CASE("qToPercentEncoding: 保留 -_.~ 与 alnum，其余按 UTF-8 转 %XX")
@@ -129,28 +139,34 @@ TEST_CASE("qToPercentEncoding: 保留 -_.~ 与 alnum，其余按 UTF-8 转 %XX")
     CHECK(QString::fromLatin1(QCString(empty.data(), empty.size())).isEmpty());
 }
 
-TEST_CASE("qToPercentEncoding 已知缺陷: size() 比逻辑长度大 1（切片带走终止 NUL）")
+TEST_CASE("qToPercentEncoding: 返回定长 QByteArray，无尾部 NUL（已修的缺陷）")
 {
-    // 根因：函数声明返回 QByteArray，实现却是 `return QCString(out.c_str())`。
-    // QCString 按 NUL 终止分配（qcstring.h:135「allocate size incl. \0」），
-    // 派生→基类切片拷贝时把那个 NUL 也复制进 QMemArray<char>，故 size() 多 1。
-    // 头文件注释只防了 QCString(const char*, uint) 的 qstrncpy 坑，漏了切片这条。
+    // ★ 这条原是「已知缺陷」用例：函数声明返回 QByteArray，实现却是
+    //   `return QCString(out.c_str())`。QCString 按 NUL 终止分配
+    //   （qcstring.h:135「allocate size incl. \0」），派生→基类切片拷贝时把
+    //   那个 NUL 也复制进 QMemArray<char>，故 size() 比逻辑长度大 1。
+    //   实测「猫喵」18 字节编码结果返回 size()==19、末字节 0x00。
+    // 现已改为「先 QByteArray(int size) 精确分配 + 逐字节填」
+    // （Qt3.3 的 QByteArray 只有 QByteArray() / QByteArray(int) 两个构造函数，
+    //  没有 Qt3.4+/Qt4 的 QByteArray(const char*, uint)），size() 回到逻辑长度。
     //
-    // 为何一直没炸：唯一生产调用方 anystik/src/imageaiutil.cpp:406 把它交给
-    // QString::fromLatin1，Qt3 按 QCString::length()（即 strlen）取长度，
-    // 末尾 NUL 不可见 → 实测 "a b" 得到恰为 a%20b 的 5 字符，结果正确。
-    // 只有把返回值当**定长缓冲**用 .size() 时才会踩到；全仓无此用法。
-    //
-    // 本条把缺陷显式钉住而非掩盖：修 shim 后此用例会失败，届时应连同
-    // imageaiutil 的调用约定一起复核，再决定是否改断言。
+    // 当初没炸是因为生产调用方都把它当 C 字符串用（QString::fromLatin1 /
+    //   fromUtf8 按 strlen 取长，末尾 NUL 不可见）。但 imagesearchclient 的
+    //   QString::fromUtf8(QLSTIK_PCT_ENCODE(kw)) 这条链一旦有人改成按 .size()
+    //   切片，NUL 就会进 URL，故按精确长度钉死。
     const QByteArray a = qToPercentEncoding(QString("a"));
-    CHECK_EQ(a.size(), 2);          // 逻辑 1
+    CHECK_EQ(a.size(), 1);
     const QByteArray sp = qToPercentEncoding(QString("a b"));
-    CHECK_EQ(sp.size(), 6);         // 逻辑 5
+    CHECK_EQ(sp.size(), 5);
     const QByteArray empty = qToPercentEncoding(QString(""));
-    CHECK_EQ(empty.size(), 1);      // 逻辑 0
-    // 但按 C 字符串用是对的（data() 上的 NUL 终止完好）
-    CHECK_EQ(QCString(a.data(), a.size()).length(), 1u);
+    CHECK_EQ(empty.size(), 0);
+    // 非 ASCII：末字节是编码字符（%AA 的 'A'），不是 0x00
+    const QByteArray cn = qToPercentEncoding(QString::fromUtf8("\xe7\x8c\xab\xe5\x92\xaa"));
+    CHECK_EQ(cn.size(), 18);
+    CHECK_EQ((unsigned char)cn.at(cn.size() - 1), (unsigned char)'A');
+    // 整串按精确长度读回来（不能用 QCString(data, size)，那是 qstrncpy 少拷一字符）
+    CHECK(QString::fromLatin1(cn.data(), (int)cn.size())
+          == QString("%E7%8C%AB%E5%92%AA"));
 }
 
 TEST_CASE("qUrlRawString: 剥掉 Qt3 对无 scheme 输入注入的 file: 污染")
@@ -251,4 +267,35 @@ TEST_CASE("qResolveUrl: 绝对/根路径/协议相对/目录相对 + 统一规�
     // base 带 query/fragment 时，目录相对只取其目录部分
     const QUrl base3("http://h/a/b.html?x=1#f");
     CHECK(raw(qResolveUrl(base3, QUrl("c.png"))) == QString("http://h/a/c.png"));
+}
+
+TEST_CASE("qUrlRemoveFilename: 等价 QUrl::adjusted(QUrl::RemoveFilename)")
+{
+    // 期望值全部取自 **Qt6.7.3 实测**（/tmp/opencode/probe-b2/url6.cpp 直接调
+    // QUrl::adjusted(QUrl::RemoveFilename) 打出来），不凭记忆写：
+    //   "https://a.com/x/y.html?q=1"    → "https://a.com/x/?q=1"   ← query 保留
+    //   "https://a.com/x/y.html?q=1#f" → "https://a.com/x/?q=1#f" ← fragment 也保留
+    //   "https://a.com/x/"             → "https://a.com/x/"        （原样）
+    //   "https://a.com/"               → "https://a.com/"          （原样）
+    //   "https://a.com"                → "https://a.com"           （不加尾斜杠）
+    // 早先按记忆写过「丢 query/fragment」和「无 path 也补斜杠」两处，Qt6 实测
+    // 证明都是错的，已改实现（只动 path 分量，query/fragment 由 setPath 自然保留）。
+    CHECK(rmf("https://a.com/x/y.html?q=1")    == QString("https://a.com/x/?q=1"));
+    CHECK(rmf("https://a.com/x/y.html?q=1#f") == QString("https://a.com/x/?q=1#f"));
+    CHECK(rmf("https://a.com/x/")             == QString("https://a.com/x/"));
+    CHECK(rmf("https://a.com/")               == QString("https://a.com/"));
+    CHECK(rmf("https://www.qudoutu.cn/hot/")  == QString("https://www.qudoutu.cn/hot/"));
+    CHECK(rmf("https://koishi.js.org/QFace/assets/qq_emoji/_index.json")
+          == QString("https://koishi.js.org/QFace/assets/qq_emoji/"));
+    // query 里的 '/' 不能把截断点带偏：path 分量是 /a/b.html，应截到 /a/
+    CHECK(rmf("https://h/a/b.html?q=x/y") == QString("https://h/a/?q=x/y"));
+
+    // ⚠ 与 Qt6 的一处残留差异：Qt3 的 QUrl 自己会把空 path 规范成 "/"，
+    //   故 QUrl("https://a.com").toString() 在 Qt3 下已是 "https://a.com/"
+    //   （实测 path()=="/"、toString()=="https://a.com/"）。本函数已原样返回 u，
+    //   差异来自 Qt3 的 toString 而非本函数，故此处按 Qt3 实测写断言。
+    //   对 sitelistclient 无影响：kSites 里 6 个 HTML 站的 defaultUrl 全以 '/'
+    //   结尾，path 已是目录走原样分支；QFace 有显式 baseUrl，走不到这里。
+    CHECK(rmf("https://a.com") == QString("https://a.com/"));
+    CHECK_EQ(QUrl(QString("https://a.com")).path(), QString("/"));
 }

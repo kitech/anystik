@@ -123,6 +123,29 @@ isEmpty(QT_VERSION) {
     STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/imageaiutil.h
 }
 
+# ══ 批次 2c：sitelistclient / imagesearchclient（QNAM + QRegularExpression）══
+# Qt4 跳过：与 phonedb/imagetmpuploader/imageaiutil 同因（QNetworkReply::finished
+#     在 Qt4.8 是 protected Q_SIGNALS，新式 connect 编不过），见上面 phonedb 注释
+#     与移植计划 §6.3b。Qt3 走 qnam_shim + qconnect_slots + qregularexpression_shim
+#     + qurl_shim + qstring_shim + qcoreapplication_shim；Qt5+ 走原生。
+# 模块内 QT3_BUILD 分支收口点：
+#   sitelistclient  —— <img> 正则 / QUrl 相对解析 / QFace JSON 索引 / UA+Referer
+#   imagesearchclient —— m= 与 data-bem= 两级正则 / QUrl::toPercentEncoding /
+#                       QStringList::removeDuplicates（Qt3 侧稳定去重垫片）
+# 两个 pimpl 已从 QObject 降为**普通 C++ 类**（Q_OBJECT / moc 在 .cpp 里），
+# 因为 Qt3 qmake 1.07a 不对 .cpp 跑 moc，`connect` 的 context 改用 owner。
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/sitelistclient.cpp \
+                           $$ANYSTIK_SRC_DIR/imagesearchclient.cpp
+    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/sitelistclient.h \
+                           $$ANYSTIK_SRC_DIR/imagesearchclient.h
+} else:!lessThan(QT_VERSION, 5.0.0) {
+    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/sitelistclient.cpp \
+                           $$ANYSTIK_SRC_DIR/imagesearchclient.cpp
+    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/sitelistclient.h \
+                           $$ANYSTIK_SRC_DIR/imagesearchclient.h
+}
+
 # ══ 批次 2a 垫片 ══
 # 头文件无条件登记（moc/依赖扫描用），.cpp 严格按版本条件挂载，避免 Qt5+ 出现
 # "QSaveFile/QJson/QStandardPaths 重复定义"。条件范式对齐 qlstik.pro：
@@ -145,6 +168,7 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qjson_shim.h \
                        $$STIKCOMMON_DIR/qsslprobe.h \
                        $$STIKCOMMON_DIR/qcabundle.h \
                        $$STIKCOMMON_DIR/qdatetime_shim.h \
+                       $$STIKCOMMON_DIR/qregularexpression_shim.h \
                        $$STIKCOMMON_DIR/qglobaltype_shim.h
 
 # ── 批次 3c-1 QWebdavLite：自建 verb-aware 传输 + DAV 窄切面 ──

@@ -158,6 +158,11 @@ public:
     const_iterator constBegin() const;
     const_iterator constEnd() const;
 
+    // range-for 支持（Qt5/6 原生有）。当前消费方未用，但 QJsonArray 已补，
+    // 此处一并补齐以免后续模块再踩同一个编译错误。
+    const_iterator begin() const { return constBegin(); }
+    const_iterator end() const { return constEnd(); }
+
     qjsonshim::Tree* tree() const { return m_tree; }
     cJSON* node() const { return m_node; }
 
@@ -177,6 +182,10 @@ public:
     public:
         const_iterator() : m_tree(0), m_cur(0) {}
         QJsonValue value() const { return QJsonValue(m_tree, m_cur); }
+        // range-for（`for (const auto& v : arr)`）需要 operator*；Qt5/6 原生的
+        // QJsonArray::const_iterator 都有。sitelistclient.cpp 的 parseQFace
+        // 就靠它遍历 QFace 索引数组，缺了直接编不过。
+        QJsonValue operator*() const { return QJsonValue(m_tree, m_cur); }
         const_iterator& operator++() { if (m_cur) m_cur = m_cur->next; return *this; }
         const_iterator operator++(int) { const_iterator t(*this); ++*this; return t; }
         bool operator==(const const_iterator& o) const { return m_cur == o.m_cur; }
@@ -201,6 +210,13 @@ public:
     void removeAt(int i);
     const_iterator constBegin() const;
     const_iterator constEnd() const;
+
+    // range-for（`for (const auto& v : arr)`）需要 begin()/end()，Qt5/6 的
+    // QJsonArray 原生就有。sitelistclient.cpp 的 parseQFace 用了
+    // `for (const auto& v : doc.array())`，只给 constBegin/constEnd 编不过
+    // （实测报 "'begin' was not declared in this scope"）。
+    const_iterator begin() const { return constBegin(); }
+    const_iterator end() const { return constEnd(); }
 
     qjsonshim::Tree* tree() const { return m_tree; }
     cJSON* node() const { return m_node; }

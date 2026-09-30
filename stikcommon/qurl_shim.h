@@ -112,9 +112,66 @@ static inline QByteArray qToPercentEncoding(const QString& input)
             out += HEX[c & 0xF];
         }
     }
-    // QCString(const char*, uint) 是 qstrncpy 语义（len 含终止 NUL，会少 1 字符）；
-    // 编码输出无内嵌 NUL，用 QCString(const char*) 的 strlen 构造。
-    return QCString(out.c_str());
+    // 精确长度构造。
+    //
+    // ⚠ 踩过的坑：QCString → QByteArray 的隐式转换会**按 QCString::length()
+    //   拷贝**，而 Qt3 的 length() **含终止 NUL**（实测「猫喵」的 18 字节编码
+    //   结果返回 size()==19，末字节 0x00）。fromUtf8 会丢掉尾部 NUL，故
+    //   imagesearchclient 的 QString::fromUtf8(QLSTIK_PCT_ENCODE(kw)) 这条链
+    //   实测干净（url=[https://x/y?q=%E7%8C%AB%E5%92%AA]，无 NUL）；但任何按
+    //   size() 切片或交给 C API 的用法都会被尾部 NUL 坑到，故这里给精确长度。
+    //
+    // ⚠ Qt3.3 的 QByteArray **只有 QByteArray() 和 QByteArray(int size)**
+    //   两个构造函数（实测声明见 /opt/qt338sh/include/qcstring.h），
+    //   没有 Qt3.4+/Qt4 的 QByteArray(const char*, uint)，故不能一步构造，
+    //   只能先按 size 分配再逐字节填。QCString(const char*, uint) 也不行：
+    //   它的结果 length() 同样含 NUL，切过去还是多 1。
+    QByteArray ba((int)out.size());
+    char* d = ba.data();
+    for (size_t i = 0; i < out.size(); ++i) {
+        d[i] = out[i];
+    }
+    return ba;
+}
+
+// ── QUrl::adjusted(QUrl::RemoveFilename) 等价 ───────────────────────────
+// sitelistclient.cpp:166 用 `url.adjusted(QUrl::RemoveFilename)` 把列表页 URL
+// 变成「目录基址」（供 <img src> 相对路径解析）。Qt3 QUrl 无 adjusted()（Qt4.0
+// 才引入），也无 RemoveFilename 枚举。
+//
+// ★ 语义以 Qt6.7.3 实测为准（早先按记忆写错过两处，见下方「已修正」）：
+//   "https://a.com/x/y.html?q=1"  → "https://a.com/x/?q=1"   ← **query 保留**
+//   "https://a.com/x/y.html?q=1#f"→ "https://a.com/x/?q=1#f" ← fragment 也保留
+//   "https://a.com/x/"            → "https://a.com/x/"        （原样）
+//   "https://a.com/"              → "https://a.com/"          （原样）
+//   "https://a.com"               → "https://a.com"           （**不加尾斜杠**）
+//   "https://www.qudoutu.cn/hot/" → "https://www.qudoutu.cn/hot/"
+// 已修正的错误认知：① RemoveFilename 不丢 query/fragment；② 无 path 时不补斜杠。
+//
+// 实现只改 path 分量（用 QUrl 自己的 path()/setPath()），query/fragment
+// 自然被 setPath 保留——不要去动整串，否则 query 里的 '/' 会把 findRev 带偏。
+//
+// 已知残留差异（Qt3 自身的 toString 规范化，与本函数无关）：
+//   输入 "https://a.com" 时本函数原样返回 u，但 Qt3 的 QUrl 会把空 path 规范成
+//   "/"（path() 返回 "/"，toString() 返回 "https://a.com/"），Qt6 则保持
+//   "https://a.com"。实测：QT3 path("/")、toString("https://a.com/")。
+//   对 sitelistclient 无影响 —— kSites 里 6 个 HTML 站的 defaultUrl 全部以 '/'
+//   结尾，path 已是目录，本函数原样返回，QFace 有显式 baseUrl 走不到这里。
+//   （同类 Qt3 toString 污染见下方 qUrlRawString 的说明。）
+static inline QUrl qUrlRemoveFilename(const QUrl& u)
+{
+    QString p = u.path();
+    if (p.isEmpty() || p.endsWith("/")) {
+        return u;                        // 无 path，或已是目录：原样
+    }
+    const int slash = p.findRev(QChar('/'));
+    QUrl out(u);
+    if (slash == -1) {
+        out.setPath("/");                // 相对路径且不含 '/'：退到根
+    } else {
+        out.setPath(p.left(slash + 1));
+    }
+    return out;
 }
 
 // ── Qt3 QUrl 的"原始串"提取 ──

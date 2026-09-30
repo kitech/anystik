@@ -20,9 +20,17 @@ public:
     static void installTranslator(QTranslator* t) {
         if (qApp) qApp->installTranslator(t);
     }
+    // encoding 必须显式给 QApplication::UnicodeUTF8。
+    // Qt3 的 translate() 默认 encoding = DefaultCodec，按 Qt 应用的 locale 猜编码
+    // （无 GUI locale 时退 Latin-1），于是源码里的 UTF-8 中文字面量会被逐字节
+    // 当 Latin-1 展开：sitelistclient.cpp 的 "站点加载失败：%1" 会变成乱码，
+    // 且是**静默**的（不报错，只是文案坏）。Qt4+ 的 translate 把 sourceText
+    // 当 UTF-16 字面量，构造即正确；Qt3 侧只能靠这个显式 encoding 对齐。
+    // 兜底分支（无 qApp）本来就用 QString::fromUtf8，与之同语义。
     static QString translate(const char* context, const char* sourceText,
                              const char* disambiguation = 0) {
-        return qApp ? qApp->translate(context, sourceText, disambiguation)
+        return qApp ? qApp->translate(context, sourceText, disambiguation,
+                                      QApplication::UnicodeUTF8)
                     : QString::fromUtf8(sourceText);
     }
     static QApplication* instance() { return qApp; }

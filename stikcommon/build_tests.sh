@@ -31,6 +31,7 @@ test_qwebdavlite.cpp
 test_dav207.cpp
 test_qdatetime_shim.cpp
 test_qurl_shim.cpp
+test_qregularexpression_shim.cpp
 test_shims.cpp
 test_qconnect_slots.cpp
 test_qmkdir.cpp
