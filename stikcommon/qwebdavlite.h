@@ -42,8 +42,19 @@
 #include "qba_shim.h"           // qbaToHex / qbaFromHex
 #include "qurl_shim.h"
 #include "qdatetime_shim.h"     // qDateTimeToUtc / qFormatDateTime
+// Qt3 没有 QNetworkAccessManager（Qt3 的 QNetwork 是同步的、接口也完全不同），
+// 走 stikcommon 的垫片；Qt4+ 用 Qt 原生的。qnam_shim.h 整个是 Qt3 专用
+// （内部含 Qt3 才有的 qcstring.h / qstringlist.h 等），无条件包含会让 Qt5+ 构建
+// 直接 fatal error，故必须按版本分支。
+#if !defined(QT_VERSION) || QT_VERSION < 0x040000
 #include "qnam_shim.h"          // QNetworkAccessManager / Request / Reply
 #include "qconnect_slots.h"     // 垫片 connect/disconnect 模板
+#else
+#include <qnetworkaccessmanager.h>
+#include <qnetworkrequest.h>
+#include <qnetworkreply.h>
+#include <qauthenticator.h>     // Qt5+ 从 qnetwork.h 拆出独立头
+#endif
 
 class QIODevice;
 
@@ -132,6 +143,16 @@ protected:
     QString buildUrl(const QString& path);
     void emitSslErrorsOnReply(QNetworkReply* reply);
 
+    // 认证槽（QNetworkAccessManager::authenticationRequired）。填 m_username/
+    // m_password；垫片收到 401 时回调，据此补 Authorization 头并重发一次。
+    void provideAuthentication(QNetworkReply* reply, QAuthenticator* auth);
+
+    // 每个 reply 挂一张「网络错误 → errorChanged」桥接表。垫片侧的
+    // 认证/SSL/协议失败大多最终落成 error(code)，靠这个把内因吐给 davbisync。
+    // 表由 QNetworkReply 持有（它就是 QObject），随 reply 析构自动销毁。
+    void attachErrorBridge(QNetworkReply* reply);
+    QString describeError(QNetworkReply* reply) const;
+
     QWebdavConnectionType m_connectionType;
     QString m_hostname;
     int m_port;
@@ -142,7 +163,9 @@ protected:
     QString m_sslCertDigestSha1;
     int m_transferTimeoutMsecs;
     QNetworkReply* m_lastReply;
-    QMap<QNetworkReply*, QIODevice*> m_inDataDevices;
+    // 注：原 m_inDataDevices（QMap<QNetworkReply*, QIODevice*>）已删。它只写
+    // 不读，且存的裸指针指向调用方 put() 里的栈上 QBuffer，put() 返回即悬垂。
+    // 请求体现在 createRequest() 内当场读出，见 .cpp 同名注释。
     QMap<QNetworkReply*, QIODevice*> m_outDataDevices;
     QNetworkReply* m_authenticator_lastReply;
     QAuthenticator m_authenticator;

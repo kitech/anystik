@@ -137,7 +137,45 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qjson_shim.h \
                        $$STIKCOMMON_DIR/qurl_shim.h \
                        $$STIKCOMMON_DIR/qimagereader_shim.h \
                        $$STIKCOMMON_DIR/qdebug_shim.h \
-                       $$STIKCOMMON_DIR/qbytearray_shim.h
+                       $$STIKCOMMON_DIR/qbytearray_shim.h \
+                       $$STIKCOMMON_DIR/qwebdavtransport.h \
+                       $$STIKCOMMON_DIR/qwebdavlite.h \
+                       $$STIKCOMMON_DIR/qsslprobe.h \
+                       $$STIKCOMMON_DIR/qcabundle.h \
+                       $$STIKCOMMON_DIR/qdatetime_shim.h \
+                       $$STIKCOMMON_DIR/qglobaltype_shim.h
+
+# ── 批次 3c-1 QWebdavLite：自建 verb-aware 传输 + DAV 窄切面 ──
+# qwebdavtransport 为何必须存在：qldox/eventpoller.cpp 是只读依赖，全文没有
+# CURLOPT_CUSTOMREQUEST，仅在 `if (req.method == "POST")` 分支设 POSTFIELDS。
+# 故凡非 GET/POST 的动词（MKCOL/MOVE/DELETE/OPTIONS/HEAD/PROPFIND）经它发出
+# 都会退回 curl 默认行为 → 一律 GET，且带体请求的 body 被丢弃。
+# e2e 实测（改造前）：9 个请求服务端全部收到 GET，PUT 的 9 字节 body 变 0。
+# qldox 不可改（项目约束），故 qlstik 侧自带 curl_multi 泵并由
+# QNetworkAccessManager::issue() 分流；GET/POST 仍走 EventPoller（那边本来就对）。
+STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qwebdavlite.cpp \
+                      $$STIKCOMMON_DIR/qwebdavtransport.cpp
+
+# qdatetime_shim：qwebdavlite 的 put() 要发 RFC1123 Date 头（qDateTimeToUtc +
+# qFormatDateTime）。该 .cpp 通篇是 Qt3 专用写法（QChar::upper / QString::lower /
+# stripWhiteSpace / QDateTime::currentDateTime(Qt::TimeSpec) 等，Qt5+ 全被移除），
+# 只能在 Qt3 编译；Qt4+ 侧这两个函数改由 qdatetime_shim.h 内的 inline 原生实现
+# 提供（详见该头的版本分支注释），故 .cpp 仍按 isEmpty(QT_VERSION) 挂载。
+#
+# ⚠ 踩过的坑：曾把本行挪到无条件挂载（以为 .cpp 跨版本，实测 6 处 Qt3 写法），
+#   结果 Qt6 侧编 qdatetime_shim.o 直接失败。凡「.cpp 挂不挂」要跟头里
+#   「声明可见性」对齐，否则 Qt6 链接期必出 undefined reference。
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qdatetime_shim.cpp
+}
+
+# ── SSL 证书探测与 CA bundle（QWebdavLite 的自签证书接受链依赖）──
+# qsslprobe：裸 socket + SSL_connect 取真实证书（不经 Qt3 缺失的 QSslSocket 能力）
+# qcabundle：合并系统根证书与用户接受的自签证书，经 CURL_CA_BUNDLE 激活
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qsslprobe.cpp \
+                         $$STIKCOMMON_DIR/qcabundle.cpp
+}
 
 isEmpty(QT_VERSION) {
     # Qt3.5

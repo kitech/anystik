@@ -24,6 +24,10 @@
 #include <qglobal.h>
 #include <qdatetime.h>
 #include <qstring.h>
+#include <qlocale.h>
+
+// ══ 全部声明都是 Qt3 专用实现的对外接口（.cpp 仅在 QT3_BUILD 下编译）══
+#if QT_VERSION < 0x040000
 
 qint64 qDateTimeToMsecs(const QDateTime& dt);
 QDateTime qDateTimeFromMsecs(qint64 msecs);
@@ -47,5 +51,36 @@ QDateTime qParseIsoDateTime(const QString& s);
 // 替 QLocale::toDateTime(s)：依次尝试 RFC1123 / RFC850 / asctime / ISO /
 // "d MMM yyyy hh:mm:ss" / "d MMM yyyy"，全失败返回无效。
 QDateTime qParseDateTimeAuto(const QString& s);
+
+// ── Qt4+ 分支：上面这些在 Qt4+ 全部有原生对应，故 .cpp 只在 Qt3 编译 ──────
+// qdatetime_shim.cpp 通篇是 Qt3 专用写法（QChar::upper / QString::lower /
+// stripWhiteSpace / QDateTime::currentDateTime(Qt::TimeSpec) / QDate(QDate) 等
+// 6 类，Qt5+ 全被移除），无法跨版本编译。但 QWebdavLite::put() 要发 RFC1123
+// Date 头，正需要 qDateTimeToUtc + qFormatDateTime 这两个。Qt4+ 直接用原生：
+//   toUTC() 本就是"保持绝对时刻、输出 UTC 墙钟"，与 qDateTimeToUtc 语义完全一致；
+//   QLocale::toString(QDateTime, fmt) 是 qFormatDateTime 的原生等价物。
+//   解析类的 qParse* 无原生对应且当前无人调用（唯一使用者 QWebdavLite 只用上面
+//   两个），故 Qt4+ 侧不提供，确需时再补。
+//
+// ⚠ 结构陷阱：这里必须用 #else 挂在上面的 `#if QT_VERSION < 0x040000` 对面。
+//   若写成嵌套的 `#if QT_VERSION >= 0x040000`，它会被外层 Qt3 守卫套死，
+//   Qt6 下永远进不去，表现为「qDateTimeToUtc was not declared」。
+#else
+inline QDateTime qDateTimeToUtc(const QDateTime& dt)
+{
+    return dt.toUTC();
+}
+
+inline QString qFormatDateTime(const QDateTime& dt, const char* fmt)
+{
+    return QLocale().toString(dt, QString::fromLatin1(fmt));
+}
+
+inline QString qFormatRfc1123DateTime(const QDateTime& dt)
+{
+    return QLocale(QLocale::English).toString(dt.toUTC(),
+                                               QString("ddd, dd MMM yyyy hh:mm:ss"));
+}
+#endif // QT_VERSION < 0x040000
 
 #endif // QLSTIK_QDATETIME_SHIM_H

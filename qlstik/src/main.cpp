@@ -9,6 +9,7 @@
 #include "ThemeManager.h"
 #include "systemtrayicon.h"
 #include "eventpoller.h"
+#include "qwebdavtransport.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -79,12 +80,28 @@ int main(int argc, char* argv[])
     // 共享模块的 QNAM 网络调用在 Qt3 下由 compat/qt3/qnam_shim 转接到此引擎。
     EventPoller::start();
 
+    // WebDAV 动词传输泵（批次 3c-1）。为什么必须独立于 EventPoller：
+    // qldox/eventpoller.cpp 是只读依赖，全文没有 CURLOPT_CUSTOMREQUEST，
+    // 只在 `if (req.method == "POST")` 分支设 POSTFIELDS，故非 GET/POST 动词
+    // （MKCOL/MOVE/DELETE/OPTIONS/HEAD/PROPFIND）经它发出会一律退化成 GET
+    // 且请求体被丢弃。qldox 不可改，故自建一个真正认动词的 curl_multi 泵，
+    // 由 QNetworkAccessManager::issue() 分流：GET/POST 仍走 EventPoller，
+    // 其余走本泵。两个泵互不干扰，start/stop 也各自独立。
+    QWebdavTransport::start();
+    if (!QWebdavTransport::isReady()) {
+        // 不致命：只影响 WebDAV 侧功能，普通 HTTP 仍走 EventPoller。
+        fprintf(stderr, "[warn] QWebdavTransport 未就绪，WebDAV 动词请求将失败\n");
+    }
+
     MainWindow window;
     qSetAppIcon(app_icon);
     window.show();
     qSetAppIcon(app_icon);   // show 后再设一次，触发 WM 重读 _NET_WM_ICON
 
     int rc = app.exec();
+    // stop 顺序与 start 相反：先停自建泵（等在途 WebDAV 请求收尾），
+    // 再停 EventPoller。
+    QWebdavTransport::stop();
     EventPoller::stop();
     return rc;
 }

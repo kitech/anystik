@@ -16,26 +16,47 @@
 #define QByteArrayLiteral(s) QCString((s))
 #endif
 
+// qcstring.h 是 Qt3/Qt4 独有的（QCString = QByteArray 子类），Qt5 起已移除。
+// 无条件包含会让 Qt6 构建 fatal error。Qt3 专用的 qbaToHex/qbaFromHex 等
+// 辅助自带 #if QT_VERSION < 0x040000 守卫，故此处也按版本守卫。
+#if !defined(QT_VERSION) || QT_VERSION < 0x050000
 #include <qcstring.h>
+#endif
 #include <string.h>
 
-#if QT_VERSION < 0x040000
-// ══ QByteArray::toHex() / QByteArray::fromHex()（Qt4 起）════════════════
+// ══ QByteArray::toHex() / QByteArray::fromHex() ════════════════════════════
+// 统一返回 **QByteArray** 而非 QCString：QCString 只存在于 Qt3/Qt4，返回类型
+// 必须跨版本一致，否则调用点在 Qt5+ 下无法编译。
+#if QT_VERSION >= 0x040000
+// Qt4+ 原生就有这两个成员，薄封装使调用点无需版本分支。
+// toHex() 默认大写，与下方 Qt3 实现一致（QWebdav 拿它存 pin 比对）。
+inline QByteArray qbaToHex(const QByteArray& in)
+{
+    return in.toHex();
+}
+
+inline QByteArray qbaFromHex(const QByteArray& in)
+{
+    return QByteArray::fromHex(in);
+}
+
+#else
 // Qt3 的 QByteArray(=QMemArray<char>) 无 hex 成员。QWebdav 用它把 MD5/SHA1
 // 原始字节转成大写 hex 串存 pin 比对，故输出**必须是大写**（Qt4 toHex 默认
 // 大写；Qt3 无对应 API，此处显式大写以对齐）。
-inline QCString qbaToHex(const QByteArray& in)
+inline QByteArray qbaToHex(const QByteArray& in)
 {
     static const char* kHex = "0123456789ABCDEF";
-    QCString out;
-    out.resize(in.size() * 2 + 1);
+    // 构 QByteArray(n) 而非 QCString(n)：后者在 Qt5+ 不存在。
+    // 注意 n 取数据长度而非「含 NUL」——QCString 路径的 NUL 坑见
+    // 移植计划.md 3c-1 踩坑记录第 4 条。
+    QByteArray out((int)in.size() * 2);
     char* d = out.data();
     for (int i = 0; i < (int)in.size(); ++i) {
         const unsigned char b = (unsigned char)in.at(i);
         d[i * 2]     = kHex[b >> 4];
         d[i * 2 + 1] = kHex[b & 0x0F];
     }
-    d[in.size() * 2] = '\0';
     return out;
 }
 

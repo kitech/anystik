@@ -105,14 +105,33 @@ public:
     std::map<int,QVariant>& attributes() { return m_attrs; }
     const std::map<int,QVariant>& attributes() const { return m_attrs; }
     std::string bodyData;          // POST/PUT 载荷（multipart 或原始字节）
-    std::string contentType;       // 显式 Content-Type（multipart 时填边界头）
+    std::string contentType;       // 显式 Content-Type（multipart 时填边界码）
     int timeoutSec() const { return m_timeoutSec; }
+
+    // ★ 强制走 stikcommon 自建的 verb-aware 传输（qwebdavtransport），
+    //   不进 qldox EventPoller。
+    //
+    // 为什么需要这个开关（e2e 实测踩出来的，不是推测）：
+    //   原本只按「非 GET/POST 才走自建泵」分流。但 `grep -c 401
+    //   qldox/eventpoller.cpp` 结果是 **0** —— EventPoller 根本没有
+    //   401 → Basic Auth 重发链。而 GET 是 WebDAV 最常用的操作（下载文件），
+    //   于是「带凭据的 GET」在 EventPoller 侧永远拿 401，且**不会**触发
+    //   authenticationRequired，认证形同虚设。e2e 实测：正确凭据也只发出
+    //   1 次请求、无 Authorization 头、服务端回 401。
+    //   而 MKCOL/MOVE 等走自建泵的路径反而能正常重发。
+    //
+    // 所以 WebDAV 侧（QWebdavLite）必须对**所有**动词（含 GET/POST）显式
+    // 打这个标记，而不是靠 verb 猜。其余普通 HTTP 调用方不设此标记，
+    // 继续走 EventPoller，改动面不外扩。
+    void setForceOwnTransport(bool on) { m_forceOwnTransport = on; }
+    bool forceOwnTransport() const { return m_forceOwnTransport; }
 
 private:
     QUrl m_url;
     std::map<std::string, std::string> m_rawHeaders;
     std::map<int, QVariant> m_attrs;
     int m_timeoutSec = 60000;
+    bool m_forceOwnTransport = false;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -269,6 +288,11 @@ public:
     void ignoreSslErrors() { m_sslIgnore = true; }
     // 本次传输是否因证书问题需要用户裁决
     bool sslErrorsPending() const { return m_sslIgnore || m_sslAbortedByUser; }
+    // stikcommon 自建 verb-aware 传输（qwebdavtransport）用的取消标志。
+    // EventPoller 无句柄可取消，abort() 只能靠软标志（移植计划 §5.4a）；
+    // 自建传输有 easy handle，但为与既有 abort 语义一致，仍用此标志。
+    volatile bool m_liteCancel;
+
     // 探测到的对端证书（TLS 失败时填充，供 accept 后收录）
     const QSslCertificate& probedCertificate() const { return m_sslCert; }
     void setProbedCertificate(const QSslCertificate& c) { m_sslCert = c; }
@@ -381,6 +405,9 @@ public:
     std::map<std::string,std::string> reqExtraHeaders;
     int reqTimeoutSec = 60000;
     bool reqAbort = false;
+    // 来自 QNetworkRequest::forceOwnTransport()：见该字段处注释。WebDAV 全动词
+    // 都靠它绕开没有 401 链的 EventPoller。
+    bool reqForceOwnTransport = false;
     std::vector<QObject*> m_qnamOwned;   // qt3 setParent 模拟：reply 析构时连带删除
 };
 
@@ -409,6 +436,13 @@ public:
     QNetworkReply* sendCustomRequest(const QNetworkRequest& req,
                                      const char* verb,
                                      const QByteArray& data = QByteArray());
+    // 请求体的无损通道。Qt3 的 QByteArray(=QMemArray<char>) 与 QCString 都无法
+    // 无损表达任意二进制：QCString(str, maxlen) 的 maxlen 是**含 NUL 的上限**
+    // （实测 QCString(buf,9).length()==8），QByteArray 则没有 (const char*, int)
+    // 公开构造。故请求体改由 std::string 承载，见 .cpp 中 put(QIODevice*) 注释。
+    QNetworkReply* sendCustomRequest(const QNetworkRequest& req,
+                                     const char* verb,
+                                     const std::string& body);
 
     QNetworkCookieJar* cookieJar() const { return m_cookieJar; }
     void setCookieJar(QNetworkCookieJar* jar);

@@ -161,6 +161,11 @@ SQLITE_LIBS   = $$system(pkg-config --libs sqlite3 2>/dev/null)
 # zlib（批次 3 起 zipu 解压用；先挂上，后续批次不必再动 .pro）
 LIBS += -lz
 
+# OpenSSL：批次 3c-1 的 qsslprobe 走裸 socket + SSL_connect 取真实证书（Qt3 的
+# QSslSocket 缺 QSslConfiguration/自定义 CA 装载能力），qcabundle 也要用
+# X509 解析，故需显式链 libssl/libcrypto。--as-needed 下传递依赖不算数，必须显式。
+LIBS += -lssl -lcrypto
+
 # hjson（qlcomp 的 hjson_wrap.cpp / jsonview 需要；与 qltox 同一份 vcpkg 产物）
 macx {
     INCLUDEPATH += /opt/vcpkg/installed/x64-osx-dynamic/include

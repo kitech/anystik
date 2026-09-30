@@ -17,7 +17,12 @@
 #endif
 
 #include <qstring.h>
+// qcstring.h 是 Qt3/Qt4 独有的（QCString = QByteArray 子类）；Qt5 起已移除，
+// 无条件包含会让 Qt6 构建在 myi18n.o 就 fatal error。Qt3 的 qUtf8Printable
+// 分支需要它，故按版本守卫。
+#if QT_VERSION < 0x050000
 #include <qcstring.h>
+#endif
 #include <string.h>
 
 #if QT_VERSION < 0x050a00
@@ -68,9 +73,26 @@ private:
 #if QT_VERSION < 0x040000
 // QCString 与 QByteArray 在 Qt3 是**不同类**（QByteArray=QMemArray<char>），
 // 无隐式转换；且 QCString(QByteArray) 构造实测不可靠，故按长度 memcpy。
+//
+// ★ 必须用 length() 而**不是** size()。Qt3 的 QCString 是 C 字符串：
+//   size() 是**含终止 NUL** 的缓冲区大小，length() 才是数据长度。
+//   实测（/tmp/opencode/nultest.cpp，QString "davuser:s3cr3t"）：
+//       utf8().size() = 15   utf8().length() = 14
+//   按 size() 拷会多带一个 0x00。后果不是"多了个看不见的字节"这么轻：
+//   Basic Auth 头会变成 `Basic ZGF2dXNlcjpzM2NyM3QA`（末位 A，正确应为 `=`），
+//   服务端判定凭据不匹配 → 401 无限重试。这是 PUT 请求体 NUL 坑的同源复发。
+//
+// ★★ 另一个方向的坑，务必分清：返回的 QByteArray **不保证 NUL 终止**。
+//   QCString 在 Qt3 是 C 字符串（data() 末尾必有 '\0'），而 QByteArray 只是
+//   QMemArray<char>，data() 后可能是任意字节。故：
+//     · 传给 setRawHeader()/qToBase64() 等收 QByteArray（按 size() 读）的接口 → 安全；
+//     · 传给 const char* 形参、或用 .data() 当 C 串用 → **越界读**。
+//   实测（rawdump.py 抓包）：verb 传 QByteArray 给 const char* 后变成
+//   "GETh\xfb\x55"，服务端对未知动词回 501。需要 C 串时用 QCString（Qt3
+//   分支）或 std::string 局部量承载，不要用本函数的产物。
 inline QByteArray qQStringToBA(const QCString& s)
 {
-    const int n = s.size();
+    const int n = s.length();
     if (n <= 0 || s.data() == 0) {
         return QByteArray();
     }
@@ -83,6 +105,16 @@ inline QByteArray qToLatin1BA(const QString& s) { return qQStringToBA(s.latin1()
 inline QByteArray qToLocal8BA(const QString& s)  { return qQStringToBA(s.local8Bit()); }
 inline void qStringChop(QString& s, int n)       { if (n > 0) s = s.left(s.length() - n); }
 inline void qStringClear(QString& s)             { s = QString(); }
+
+// Qt4+ 侧同名薄封装，让调用点无需版本分支。
+// 注意 qQStringToBA(const QCString&) **不**在这里提供 —— QCString 在 Qt5+ 根本
+// 不存在，加了等于在 Qt6 下再炸一次。Qt4+ 侧直接用原生 toUtf8/toLatin1。
+#else
+inline QByteArray qToUtf8BA(const QString& s)   { return s.toUtf8(); }
+inline QByteArray qToLatin1BA(const QString& s) { return s.toLatin1(); }
+inline QByteArray qToLocal8BA(const QString& s)  { return s.toLocal8Bit(); }
+inline void qStringChop(QString& s, int n)       { if (n > 0) s.chop(n); }
+inline void qStringClear(QString& s)             { s.clear(); }
 #endif
 
 #endif // QLSTIK_QSTRING_SHIM_H

@@ -1,4 +1,5 @@
 #include "qnam_shim.h"
+#include "qwebdavtransport.h"
 
 #include <qapplication.h>
 #include <qcstring.h>
@@ -11,6 +12,7 @@
 #include "qsslprobe.h"      // 真实探测对端证书（OpenSSL 裸握手）
 #include "qcabundle.h"      // 已接受证书收录 + CURL_CA_BUNDLE 激活
 #include "qbytearray_shim.h"  // qToBase64（Qt3 Basic 认证）
+#include "qstring_shim.h"     // qToUtf8BA：QCString→QByteArray 按 length() 拷
 
 #include <cstdlib>
 #include <cstring>
@@ -202,6 +204,7 @@ std::string findHeaderCaseInsensitive(
 
 QNetworkReply::QNetworkReply(QObject* parent)
     : QObject(parent)
+    , m_liteCancel(false)
 {
 }
 
@@ -280,13 +283,13 @@ void QNetworkReply::deliverResult(int httpCode, const std::string& curlErr,
                 m_authRetried = true;
                 m_done = false;
                 const QString plain = auth.userName() + ":" + auth.password();
-                // Qt3 的 QByteArray(=QMemArray<char>) 无 (ptr,len) 构造
-                const QCString plainUtf8 = plain.utf8();
-                QByteArray user;
-                user.resize(plainUtf8.size());
-                if (user.data() != 0 && plainUtf8.data() != 0) {
-                    std::memcpy(user.data(), plainUtf8.data(), plainUtf8.size());
-                }
+                // ★ 用 qToUtf8BA()，不要手写 `QCString::size()` 拷贝。
+                // Qt3 的 QCString 是 C 字符串，size() **含终止 NUL**；手写 size()
+                // 拷贝会让 user 变成 "user:pass\0"（多 1 字节），base64 末位
+                // 于是从 '=' 变成 'A'，服务端判定凭据不匹配 → 401 无限重试。
+                // 实测（nultest）：utf8().size()=15 / length()=14。
+                // qToUtf8BA 内部已按 length() 拷，两个版本语义一致。
+                const QByteArray user = qToUtf8BA(plain);
 #ifdef QT3_BUILD
                 const QCString b64 = qToBase64(user);
                 reqExtraHeaders["Authorization"] =
@@ -437,6 +440,24 @@ bool QNetworkReply::acceptSslAndRetry()
         return true;
     }
     return false;
+}
+
+QByteArray QNetworkReply::readAll()
+{
+    // 实测（Qt 3.5 /opt/qt338sh）：QMemArray<char>::size() 就是数据长度，
+    // **不含**尾 NUL —— 此前「size() 含尾 NUL、要用 length()」是错的判断
+    // （QByteArray 根本没有 length()），已按实测纠正。
+    // 仍需逐字节拷：QMemArray 赋值是**浅拷贝共享**底层数组，
+    // 先赋值再清 m_body 会连带把返回值一起清掉。
+    const int n = (int)m_body.size();
+    if (n <= 0) {
+        m_body = QCString();
+        return QByteArray();
+    }
+    QByteArray out(n);
+    memcpy(out.data(), m_body.data(), n);
+    m_body = QCString();
+    return out;
 }
 
 QVariant QNetworkReply::attribute(QNetworkRequest::Attribute code,
@@ -755,14 +776,30 @@ QNetworkReply* QNetworkAccessManager::put(const QNetworkRequest& req,
 QNetworkReply* QNetworkAccessManager::put(const QNetworkRequest& req,
                                           QIODevice* device)
 {
-    QCString data;
+    // 请求体全程用 std::string 承载，**不经过任何 Qt3 字符串容器**。
+    //
+    // 原因（Qt 3.5 /opt/qt338sh/include/qcstring.h 实测 + qcstring.cpp 语义）：
+    //   QCString(const char*, uint maxlen) 的 maxlen 是**含 NUL 的上限**，
+    //   不是数据长度。实测三组：
+    //     QCString(buf)        size=10 length=9   ← 正确
+    //     QCString(buf, 9)     size=9  length=8   ← 少 1 字节
+    //     QCString(buf, 20)    size=10 length=9   ← 正确
+    //   故「QCString(ptr, size) + 取 size()」会多带一个 '\0'，
+    //   「+ size()-1」又会少一字节（e2e 实证过这两种错法）。
+    // 另外 Qt3 的 QByteArray == QMemArray<char>，**没有** (const char*, int)
+    // 公开构造（会落到 protected 的 QMemArray(int,int)），也没 length()。
+    // 唯一无损路径：QByteArray 用 data()+size()（size() 确为数据长度），
+    // QCString 用 length()。
+    std::string data;
     if (device) {
-        bool wasOpen = device->isOpen();
+        const bool wasOpen = device->isOpen();
         if (!wasOpen) {
             device->open(IO_ReadOnly);
         }
         QByteArray d = device->readAll();
-        data = QCString(d.data(), d.size());
+        if (d.size() > 0) {
+            data.assign(d.data(), d.size());
+        }
         if (!wasOpen) {
             device->close();
         }
@@ -778,9 +815,20 @@ QNetworkReply* QNetworkAccessManager::deleteResource(const QNetworkRequest& req)
 QNetworkReply* QNetworkAccessManager::sendCustomRequest(
     const QNetworkRequest& req, const char* verb, const QByteArray& data)
 {
+    // QByteArray 在 Qt3 就是 QMemArray<char>，data()+size() 无损
+    std::string body;
+    if (data.size() > 0) {
+        body.assign(data.data(), data.size());
+    }
+    return sendCustomRequest(req, verb, body);
+}
+
+QNetworkReply* QNetworkAccessManager::sendCustomRequest(
+    const QNetworkRequest& req, const char* verb, const std::string& body)
+{
     QNetworkReply* r = createReply(req, std::string(verb));
-    if (!data.isEmpty()) {
-        r->reqData = std::string(data.data(), data.size());
+    if (!body.empty()) {
+        r->reqData = body;
     }
     if (!req.bodyData.empty()) {
         r->reqData = req.bodyData;
@@ -802,6 +850,7 @@ QNetworkReply* QNetworkAccessManager::createReply(const QNetworkRequest& req,
     r->reqExtraHeaders = req.rawHeaders();
     r->reqTimeoutSec = req.timeoutSec() > 0 ? req.timeoutSec() : m_timeoutSec;
     r->reqContentType = req.contentType;
+    r->reqForceOwnTransport = req.forceOwnTransport();
     r->m_jar        = m_cookieJar;
     r->m_manager    = this;
 
@@ -835,6 +884,28 @@ struct ReplyCtx {
     QNetworkReply* reply;
     QNetworkCookieJar* jar;
 };
+
+// stikcommon 自建 verb-aware 传输（qwebdavtransport）的完成回调：契约与
+// qnamDoneCb 相同，只是响应数据不走 HttpResponse 而是裸参数。投递同一个
+// QNetworkReplyEvent，故 QNetworkReply::event() 无需任何改动。
+void qwebdavDoneCb(void* udata,
+                    int httpCode,
+                    const std::string& curlErr,
+                    const std::string& body,
+                    const std::map<std::string, std::string>& headers,
+                    bool aborted)
+{
+    ReplyCtx* ctx = static_cast<ReplyCtx*>(udata);
+    if (!ctx || !ctx->reply) {
+        delete ctx;
+        return;
+    }
+    QNetworkReply* r = ctx->reply;
+    QNetworkReplyEvent* ev = new QNetworkReplyEvent(
+        r, httpCode, curlErr, body, headers, aborted);
+    QApplication::postEvent(r, ev);
+    delete ctx;
+}
 
 void qnamDoneCb(const HttpResponse& resp, void* udata)
 {
@@ -889,6 +960,42 @@ void QNetworkAccessManager::issue(QNetworkReply* r)
     ReplyCtx* ctx = new ReplyCtx;
     ctx->reply = r;
     ctx->jar = m_cookieJar;
+
+    // ── 分流：自建 verb-aware 传输 vs qldox EventPoller ──
+    //
+    // 两条理由，都来自只读依赖 qldox/eventpoller.cpp 的**实测**缺陷：
+    //   1. 全文没有 CURLOPT_CUSTOMREQUEST，只在 `if (req.method == "POST")`
+    //      分支设 POSTFIELDS。故非 GET/POST 动词（MKCOL/MOVE/DELETE/OPTIONS/
+    //      HEAD/PROPFIND…）经它发出会退回 curl 默认行为 → 一律 GET 且 body 被丢弃。
+    //      改造前 e2e 实测：9 个请求服务端**全部**收到 GET，PUT 的 9 字节 body 变 0。
+    //   2. `grep -c 401 eventpoller.cpp` = **0**。EventPoller 根本没有
+    //      401 → Basic Auth 重发链，所以「带凭据的 GET」永远拿 401，也不会触发
+    //      authenticationRequired。而 GET 是 WebDAV 最常用的操作。
+    //
+    // 因此：QWebdavLite 对**所有**动词打 forceOwnTransport 标记走这里；
+    // 没打标记的非 GET/POST 动词也走这里（兜底，防漏标）；其余仍走 EventPoller。
+    const bool own = r->reqForceOwnTransport ||
+                     (r->method != "GET" && r->method != "POST");
+    if (own) {
+        std::map<std::string, std::string> hdrs;
+        for (std::map<std::string, std::string>::const_iterator it =
+                 r->reqExtraHeaders.begin(); it != r->reqExtraHeaders.end(); ++it) {
+            hdrs[it->first] = it->second;
+        }
+        if (!r->reqContentType.empty() &&
+            hdrs.find("Content-Type") == hdrs.end()) {
+            hdrs["Content-Type"] = r->reqContentType;
+        }
+        QWebdavTransport::send(r->method,
+                               r->requestedUrl.toString().utf8().data(),
+                               hdrs,
+                               r->reqData,
+                               r->reqTimeoutSec,
+                               qwebdavDoneCb,
+                               ctx,
+                               &r->m_liteCancel);
+        return;
+    }
 
     EventPoller::addRequest(hr, qnamDoneCb, ctx);
 }

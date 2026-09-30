@@ -8,7 +8,12 @@
 
 #if QT_VERSION < 0x040000
 #include <qglobal.h>
+// qcstring.h 是 Qt3/Qt4 独有的（QCString = QByteArray 子类），Qt5 起已移除。
+// 无条件包含会让 Qt6 构建 fatal error。Qt3 专用的 qbaToHex/qbaFromHex 等
+// 辅助自带 #if QT_VERSION < 0x040000 守卫，故此处也按版本守卫。
+#if !defined(QT_VERSION) || QT_VERSION < 0x050000
 #include <qcstring.h>
+#endif
 #include <string>
 #include <string.h>
 
@@ -107,5 +112,28 @@ static inline QCString qToBase64(const QByteArray& src)
 }
 
 #endif // QT_VERSION < 0x040000
+
+// ── Qt4+ 同名薄封装 ─────────────────────────────────────────────────────
+// 放在上面的 #endif **之外**：那整段被 `#if QT_VERSION < 0x040000` 包着，
+// 若把 Qt4+ 分支写在里面，Qt6 下外层直接为假，分支永远进不去（死代码）。
+// 返回 QByteArray（值）而非 QByteArray&，与 Qt3 分支签名保持一致。
+#if QT_VERSION >= 0x040000
+inline QByteArray qByteArrayAppend(QByteArray& a, const QByteArray& b)
+{
+    a += b;
+    return a;
+}
+
+inline QByteArray qByteArrayAppend(QByteArray& a, const char* s)
+{
+    a += QByteArray(s ? s : "");
+    return a;
+}
+
+inline QByteArray qNumberToByteArray(qint64 v)
+{
+    return QByteArray::number(v);
+}
+#endif
 
 #endif // QLSTIK_QBYTEARRAY_SHIM_H
