@@ -216,3 +216,81 @@ unifiedPushTopicLength = 14     // 总长度必须 14 字符（含 "up"）
 | connection token / instance | App 端 | **是**，per-device UUIDv4（随机生成） |
 | topic | ntfy 服务端 | **否**，随机生成 |
 | endpoint URL | ntfy 服务端 | **否**，格式为 `{server}/{topic}?up=1` |
+
+## pugixml（DAV 207 解析的 XML 后端）
+
+- **Name**: zeux/pugixml
+- **Version**: 1.15（`PUGIXML_VERSION 1150`，已核对 `pugixml.hpp:17`）
+- **Upstream**: https://pugixml.org/ （release 包 `pugixml-1.15.tar.gz`）
+- **License**: MIT（`pugixml/LICENSE.md`，可商用，仅需保留声明）
+- **Files**:
+  - `pugixml/pugixml.hpp`（1585 行）
+  - `pugixml/pugixml.cpp`（13553 行）
+  - `pugixml/pugiconfig.hpp`（80 行）
+  - `pugixml/LICENSE.md`
+- **引入原因**: Qt 自带 XML API（QDom/QString）在 Qt3 与 Qt5/6 之间语义不一致，
+  实测踩到的坑都是**静默产生错误数据**而非报错：①`QString::utf8()` 与
+  `latin1()` 共用同一静态转换缓冲区，同一表达式内先后调用互相覆盖；
+  ②`QString(const char*)` 在 Qt3 按 Latin-1 解释源文件 UTF-8 字节，"笔记"
+  （6 字节）会变成 6 个 U+00xx 字符；③`QDom::elementsByTagName()` 只按本地名
+  匹配、忽略命名空间，第三方命名空间同名元素会被误判。pugixml 不经 Qt，
+  接口内统一用 `std::string`，Qt3/Qt5/6 行为一致。
+- **实测**: 在本项目 Qt3 编译 flags（`-DQT3_BUILD -fPIC -O1`）下零错误通过，
+  18s，`.o` 375KB；`load_buffer` 的 `encoding_auto` 使 UTF-8/UTF-16 自动识别，
+  中文 href 无损。
+- **C++ 标准**: pugixml **本体**支持 C++98 起（已实测 `-std=c++98 -fsyntax-only` 零错误；
+  上游称在 VC++6.0~2026 / GCC 3.4~16 上测试，覆盖率 >99%）。不依赖异常
+  （可 `PUGIXML_NO_EXCEPTIONS`）、不依赖 RTTI。
+  **但 `stikcommon/dav207pugi.cpp` 用了 lambda，实测需 C++11**（`-std=c++98` 报
+  "uses local type" 错）。因 anystik 走 CMake 且 `CMAKE_CXX_STANDARD 23`，
+  C++11 无压力；真正的收益是**不依赖 Qt API**，与 C++ 标准版本无关。
+- **已知限制**: 1.15 **不提供 `namespace_uri()`**（已 grep 确认，全头无 namespace 成员），
+  故 `stikcommon/dav207pugi.cpp` 改为「剥前缀后比对本地名 + DAV 前缀白名单」判定命名空间。
+- **配套（均在本目录之外，属自研代码，故放 stikcommon 不放 vendor）**:
+  `stikcommon/dav207iface.h` 为统一解析契约（`Resource` 结构 + `parseMultiStatus`），
+  `stikcommon/dav207pugi.cpp` 为唯一 pugixml 后端实现。
+  原先的 `DAV207_USE_NEON` 后端开关宏**已删除**（neon 已否决，见下方条目），不再有第二后端。
+- **自测**: 对 `/tmp/opencode/probe.xml`（11 个 response 的真实 207 样本）`fails=0`，
+  覆盖：%20 解码、`+` 保留字面量、非法 `%ZZ`/截断 `%2` 整条拒绝（对齐
+  `ne_path_unescape` 返回 NULL）、剥 query/fragment/authority、%2F、
+  非 DAV 命名空间 collection 不判目录、嵌套 collection 不判目录、
+  零 propstat 与全非 2xx 段剔除、中文 href 码点无损。
+
+## neon 0.37.1 —— 已评估并放弃（仅保留行为基准，未入库任何代码）
+
+- **Upstream**: http://www.webdav.org/neon/ ；GitHub 镜像 notroj/neon
+- **取用版本**: tag **0.37.1**（commit `170c36704bfc`）。已逐文件 diff 确认
+  `ne_207.c` / `ne_207.h` / `ne_xml.h` / `ne_uri.c` / `ne_string.c` /
+  `ne_alloc.c` / `ne_utils.c` 在 0.37.1 与 master 分支**逐字节一致**。
+- **License**: LGPL v2.1
+- **放弃原因（两条约束与 neon 架构互斥，已实测确认）**:
+  1. **neon 自己没有 XML 解析器。** `ne_xml.c` 只是 SAX 包装层
+     （首行注释即 "Wrapper interface to XML parser"），第 41/56 行分别
+     `#if defined(HAVE_EXPAT)` / `#elif defined(HAVE_LIBXML)`，第 66-67 行是
+     `#else` + **`# error need an XML parser`**。即：**不给 expat 或 libxml2
+     就编译不过**，无兜底实现。
+  2. 因此要满足「neon 不依赖外部 XML 库」，唯一出路是自己实现
+     `ne_xml.h` 的解析层；而该层要正确处理实体引用、CDATA、DOCTYPE、
+     命名空间作用域、良构性检查与增量喂入 —— 这已属于自研 XML 解析器。
+  实测：不定义任何 HAVE_* 时 `ne_xml.c:67: #error need an XML parser`；
+  定义 `-DHAVE_EXPAT` 后可继续，但仍需 autoconf 生成的 `NE_FMT_SIZE_T`
+  等宏（`ne_xml.c:598/607/638`），且构成外部库依赖。
+- **另一处结构性障碍**: `ne_207.c` 并非独立单元。实测其 include 为
+  `ne_xmlreq.h` / `ne_basic.h` / `ne_internal.h`，且第 300 行起是 HTTP 胶水
+  （`ne_accept_207` / `ne_simple_request` / `ne_xml_dispatchif_request` /
+  `ne_fill_server_uri`），依赖 `ne_request` / `ne_session`，与本项目已有的
+  curl 传输层冲突。状态机本体只有 1-298 行。
+  附带：`ne_buffer` 并无独立 .c，实现在 `ne_string.c:121-251`。
+- **结论**: 保留 `dav207iface.h` 顶部契约 A–D 作为**行为基准**（下方已核实事实），
+  实现只用 pugixml 一个后端。
+- **已核实的源码事实**（tag 0.37.1 逐行核对）:
+  - `ne_207.c:192-222` `in_response` 由 **href** 置位，非 propstat
+  - `ne_207.c:255-265` `if (!p->in_response) break;` → 零 propstat 的 response
+    **照样回调** end_response。「零 propstat 不回调」的说法是错的，过滤在 ne_props.c
+  - `ne_uri.c:487` `ne_path_unescape()`: 非法 `%XX` → **整条 free 返回 NULL**
+    （非原样保留）；纯字节 `strtol(buf,16)` 不校验 UTF-8；非 `%` 字符原样复制，
+    故 URI path 中 `+` 是字面量、非空格
+  - `ne_207.c:130-142` cdata 累积上限 2048 字节
+  - `ne_xml.c:351-356` handler 栈语义：从**父元素的 handler** 起沿 `next`
+    向下遍历，返回 `>0` 接受（值即该元素 state）、`0`=DECLINE（剪枝）、
+    `<0` 中止解析；`<100` 为 `NE_XML_STATE_TOP` 保留
