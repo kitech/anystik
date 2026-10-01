@@ -463,7 +463,18 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
             QImageReader reader(&buf);
             reader.setAutoTransform(true);
             // Qt3 下 format() 走 qimagereader_shim，探测已小写，无需 .lower()
-            const QCString fmt = reader.format();
+            // ⚠ Qt3 的 QByteArray 是 QMemArray<char>，它与 const char* 的 ==
+            //    有 5 个候选重载而报 ambiguous（qcstring.h:297 的
+            //    operator==(const char*, const QCString&) 才是明确的）。
+            //    故这里转 QCString 承载，让下面的 fmt=="jpg" 与
+            //    QString::fromLatin1(fmt)（取 const char*，qcstring.h:221）
+            //    与 Qt6 分支语义完全一致。
+            // ⚠ QCString(const char*, uint maxlen) 的 maxlen **含终止符**
+            //    （实测 maxlen=n 得 data()="jpe"，maxlen=n+1 才是完整的 "jpeg"），
+            //    而 QByteArray::data() 本身不带 '\0'，故必须 +1。
+            const QByteArray fmtBa = reader.format();
+            const QCString fmt(fmtBa.isEmpty() ? "" : fmtBa.data(),
+                               (uint)fmtBa.size() + 1);
 #else
             QBuffer buf(const_cast<QByteArray*>(&bytes));
             buf.open(QIODevice::ReadOnly);

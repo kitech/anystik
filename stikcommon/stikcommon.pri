@@ -333,6 +333,76 @@ isEmpty(QT_VERSION) {
 # 侧整块不参与编译，故无需 .cpp。
 STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qtemporaryfile_shim.h
 
+# ── 批次 5：QDirIterator 分版本实现 ──────────────────────────────────────
+# 需求：stickerstore.cpp:3822 用 QDirIterator 递归收集 *.eif / *.EIF
+# （「zip 里再套一层 eif」的兼容展开）。QDirIterator 随 Qt 4.2 引入，Qt3.5 无。
+# Qt3 侧用 stikcommon/qdiriterator_shim.h：构造时一次性用 Qt3 QDir 递归收集。
+#
+# 关键差异与处置：
+#   · Qt3 的 QFileInfoList 是 QPtrList<QFileInfo>（指针列表），迭代形态与 Qt4+
+#     不同；故垫片改用 QDir::entryList() 取名再自建 QFileInfo。
+#   · Qt3 QValueList::at(i) 返回迭代器而非元素，须用 operator[]。
+#   · Qt3 的 QDir 无 NoDotAndDotDot（qdir.h:61），且其空 nameFilter 不匹配任何项，
+#     递归列子目录须传 "*" 并显式跳过 "." / ".."；调用点的 QDir::NoDotAndDotDot
+#     已在 stickerstore.cpp 去掉（对 "*.eif" 名字过滤等价）。
+#
+# 实测（Qt3.5 真机，探针 /tmp/vtest/tdir.cpp vs Qt6 原生 /tmp/vtest/tdir6.cpp）：
+#   同一棵含嵌套/同名目录（dir.eif/）/非匹配后缀的树，两者输出文件列表 **0 差异**
+#   （都找到 5 个，含递归进入不匹配名目录 dir.eif 内的 inside.eif）。
+#
+# .h 无条件登记（依赖扫描），内容整体由 QT_VERSION < 0x040200 门控，故无需 .cpp。
+STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qdiriterator_shim.h
+
+# ── 批次 5：QMimeDatabase / QMimeType 分版本实现 ─────────────────────────
+# 需求：stickerstore.cpp 在 probeImageValidity 失败回退（1860）与成功后精化
+# mime（1913）两处调用 mimeTypeForFile(QFileInfo) + isValid()/name()/comment()。
+# 此二类随 Qt5.0 引入，Qt3.5 无。Qt3 侧用 stikcommon/qmimedatabase_shim.h：
+#   · 优先级实测对齐 Qt6：**已知扩展名 > 内容幻数 > 无效**
+#     （misnamed.gif 内为 PNG 字节→仍 image/gif；real.apng 内为普通 PNG→仍
+#      image/apng；real.zzz 内为 PNG→image/png）。comment 串逐字取自 Qt6 真值。
+#   · comment() 只在 name() 以 "image/" 开头时被读；非图片返回无效 QMimeType
+#     对该调用点与 Qt6 的非 image/* 结果等价（走 else 分支）。
+# 对拍证据（Qt3 shim vs Qt6.7.3 原生，/tmp/vtest/mime/tmime{,6}.cpp）：按调用点
+# 可观测行为归一化（image/ 取 name+comment，否则 OTHER）后 **0 差异**。
+#
+# 另：Qt3 无 QFileInfo::suffix()（Qt4.0 引入），stickerstore 5 处 fi.suffix()
+# 由 stikcommon/qfileinfo_shim.h 的 qFileInfoSuffix() 收口
+# （实测 Qt6 suffix() ≡ Qt3 extension(false)）。
+#
+# .h 无条件登记（依赖扫描），内容由 QT_VERSION 门控（qmimedatabase < 0x050000；
+# qfileinfo 仅内部两分支），故均无需 .cpp。
+STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qmimedatabase_shim.h \
+                      $$STIKCOMMON_DIR/qfileinfo_shim.h
+
+# ── 批次 5：QClipboard / QMimeData / QGuiApplication 分版本实现 ───────────
+# 需求：stickerstore.cpp 桌面端剪贴板读写 6 处（1969/2134/2607-2626/2666/
+# 2722/2873）。Qt3 的 QClipboard 只有 data()/setData(QMimeSource*)（无
+# mimeData()/setMimeData），且 QMimeData、QGuiApplication 均不存在（前者
+# 4.2 引入、后者 5.0 引入），QClipboard 是 QObject 加不了成员。
+# Qt3 侧用 stikcommon/qclipboard_shim.h：
+#   · Qt3 版 QMimeData（public 继承 QMimeSource）承载 MIME→字节表 + QList<QUrl>
+#     + QImage，实现 format()/encodedData() 供 setData；setImageData() 把位图编成
+#     PNG 作为 "image/png" 格式（Qt3 PNG 是内建 codec，实测 save/load 通过）。
+#   · Qt3Clipboard 包装真实 QClipboard 成 mimeData()/setMimeData()/image()/
+#     setImage()；QGuiApplication 垫片 clipboard() 返回它，调用点零改动。
+#   · qUrlToLocalFile/qUrlFromLocalFile：Qt3 QUrl 无 toLocalFile/fromLocalFile，
+#     用 path()（已解码）与 QUrl(QString)（裸路径默认 file 协议）。
+#
+# 实测（Qt3.5 真机 Xvfb，/tmp/vtest/clip/*.cpp）：
+#   · setData(QMimeSource*) 接管所有权：替换/clear 时会 delete 旧源（town3.cpp）。
+#     故 setMimeData 只 new 后交 Qt3，自己不再 delete。
+#   · setData 与 setImage 互斥（后清前）——动画路径把 PNG 回退作为格式写进
+#     QMimeSource，而非另调 setImage。
+#   · 图像剪贴板经 data() 源已自带 image/png（及 bmp/jpeg…），encodedData 返回真
+#     PNG（timg3.cpp）。
+#   · 端到端探针 tclipshim.cpp：formats=[image/gif|image/png|text/uri-list]，
+#     gif 字节往返 len=7、png 回退 hdr=8950、urls 解析本地路径正确、setImage 4x4
+#     读回、图像剪贴板 has image/png。Qt6 侧空操作（tinc6.cpp）通过。
+#
+# Qt4.2..4.x 只需 QGuiApplication 垫片（QClipboard 已有 mimeData），本头已分支；
+# 仓库 stickerstore 不在 Qt4 构建。.h 无条件登记（依赖扫描），整块由 QT_VERSION 门控。
+STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qclipboard_shim.h
+
 # ── 批次 5：QCryptographicHash 分版本实现 ─────────────────────────────────
 # 需求：stickerstore.cpp 用 QCryptographicHash 生成贴纸包/文件/URL 的稳定 ID，
 # 全仓仅 5 处且只用 Md5/Sha1：fileIdFor(697)、packIdFromTitle(1609)、
@@ -365,6 +435,74 @@ STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qcryptographichash_shim.h \
                       $$STIKCOMMON_DIR/sha1.h
 isEmpty(QT_VERSION) {
     STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/sha1.c
+}
+
+# ── 批次 5：QImageReader / QImage 分版本实现 ──────────────────────────────
+# 需求：stickerstore.cpp 的图片管线全线依赖 QImageReader（构造 QIODevice*/QString
+# 两型，setAutoTransform/setFormat/canRead/format/size/read/imageCount/
+# jumpToNextImage/nextImageDelay/supportsOption(Animation)/error/errorString，
+# 加静态 imageFormat/supportedImageFormats），以及 QImage 的
+# Format_RGBA8888/convertToFormat/Format_ARGB32_Premultiplied/scaled(带 aspect 与
+# transform 模式)/constBits/sizeInBytes/constScanLine。
+#
+# Qt3 完全没有 QImageReader（连 qimageio.h 都不存在，只有更早的 QImageIOHandler
+# 体系），QImage 也没有 Format 概念（qimage.h:74 构造参数是 int depth）。
+#
+# Qt3 侧用两个垫片：
+#   · qimage_shim.h（纯 .h）：qImageRgbaBytes() 把任意 QImage 转成 RGBA 字节序
+#     QByteArray，qImageRgba() 转成 32 位带 alpha 图。**关键事实：Qt3 的 32 位
+#     QImage 内存是 BGRA**（实测 fill(qRgba(0x11,0x22,0x33,0xff)) 得 row0=
+#     33 22 11 ff），Qt6 的 Format_RGBA8888 则是 ff 00 00 ff，故 Qt3 无法造出
+#     「内存即 RGBA」的 QImage。给编码器喂字节的地方（buildGifBytes:1122、
+#     buildApngFromFrames:1293）必须改吃 qImageRgbaBytes() 而非 constBits()。
+#   · qimagereader_shim.h/.cpp：完整 QImageReader + 最小 QImageIOHandler
+#     （只需 Animation 枚举）。后端：png/jpeg/bmp/xpm/xbm/ppm/pbm/pgm 走 Qt3
+#     原生 loadFromData；gif 走 vendor/libnsgif；apng 走 vendor/uc_apng_loader
+#     （自带 stb_image 实现）；webp 走系统 libwebp 的 WebPAnimDecoder。
+#
+# 实测坑（均为真机 Xvfb 下先隔离验证再改的）：
+#   · Qt3 的 <QList> 就是 qptrlist.h（QList=QPtrList，append 收 const T*，迭代器
+#     解引用得指针），故 supportedImageFormats() 必须返回 QValueList<QByteArray>，
+#     上层 `for (const QByteArray& f : fmts)` 才成立。
+#   · Qt3 QByteArray 底层 QMemArray<char>，data() **不以 '\0' 结尾**，不能直接当
+#     const char* 用。
+#   · QImage::loadFromData 的 format 参数大小写敏感且各 handler 注册名不统一
+#     （bmp 只认 "BMP"、jpeg 只认 "JPEG"、png 两者都认），故一律传 0 自动嗅探。
+#   · Qt3 QSize 默认值是 (-1,-1) 而 isNull() 判 w==0&&h==0，故 (-1,-1).isNull()
+#     为 false，不能拿 isNull() 当「头部尺寸未解析」标志，垫片另设 m_sizeParsed。
+#   · libnsgif 的 get_rowspan 必须留 NULL（库内用 info.width×4）；填返回 0 的
+#     回调会让所有像素行重叠。像素格式必须 NSGIF_BITMAP_FMT_R8G8B8A8
+#     （FMT_RGBA8888 在小端内存是 A,B,G,R）。loop_max==0 是无限循环，必须按
+#     info->frame_count 截断。
+#   · uc_apng_loader 的 create_memory_loader 收 const char* 且**按值返回**
+#     loader<std::istringstream>；静态 PNG 喂给它会抛异常，故须先用 acTL 块
+#     扫描分流（pngIsApng）。不能定义 UC_APNG_LOADER_NO_EXCEPTION。
+#
+# 对拍结论（探针 /tmp/qim/final.cpp vs final6.cpp，样本 ~/ztprobe/img）：
+#   · t3.gif / t.gif / d2.gif / big.gif(120 帧) / t.webp
+#     逐帧 RGBA 像素 0 差异，逐帧 nextImageDelay() 0 差异，imageCount/size 一致。
+#   · t3.apng：Qt3 垫片 3 帧逐帧与 **PIL** 像素 0 差异、延迟 120/80/200ms 与 PIL
+#     duration 完全一致；首帧与 Qt6 首帧 0 差异。
+#   · ⚠ APNG 平台差异（有意为之）：Qt6 的 PNG 插件把 APNG 拍平，format()="png"、
+#     supportsOption(Animation)=false、imageCount()=1、只吐 1 帧（实测 6.x）。
+#     垫片刻意沿用同样的 format()/Animation 值以保持控制流一致，但 read() +
+#     jumpToNextImage() 能吐全部帧，故 **Qt3 上 APNG 缩放复制是真动画，Qt6 上
+#     会回退静态首帧**。这是用户明确要求的方向，不是 bug。
+#
+# .h 无条件登记（依赖扫描），内容整体由 QT_VERSION < 0x040000 门控；
+# .cpp 与 libnsgif 的 C 源、libwebp 链接仅在 Qt3 侧挂载。
+STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qimage_shim.h \
+                      $$STIKCOMMON_DIR/qimagereader_shim.h
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qimagereader_shim.cpp
+    # libnsgif 需以 C99 单独编译：其源用 // 注释与 stdint，且 gif.c/lzw.c 互调
+    STIKCOMMON_SOURCES += $$ANYSTIK_SRC_DIR/../vendor/libnsgif/gif.c \
+                          $$ANYSTIK_SRC_DIR/../vendor/libnsgif/lzw.c
+    STIKCOMMON_INCLUDES += $$ANYSTIK_SRC_DIR/../vendor/libnsgif \
+                           $$ANYSTIK_SRC_DIR/../vendor/uc_apng_loader
+    # WebP 动画解码需要 demux；mux 留给后续 WebP 重编码（stickerstore.cpp:1154
+    # 旧的 webp→apng 转换路径改造时会用到）
+    LIBS += -lwebp -lwebpdemux -lwebpmux -lm
 }
 
 # myi18n 的 settings_trace.h 在 anystik 侧；davobfus 的 libobfuscate 在 vendor
