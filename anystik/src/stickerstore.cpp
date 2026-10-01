@@ -1,3 +1,17 @@
+// ⚠ include 顺序约束，勿把这段下移：Qt3 把 QList/QVector 定义成**指针容器宏**
+//（qptrlist.h:189 `#define QList QPtrList`、qptrvector.h:113
+// `#define QVector QPtrVector`）。stikcommon 的值容器 shim 要 #undef 宏后补
+// 同名值容器类，所以必须让这两个 Qt 头先被解析，再引 shim。
+// 原因：stickerstore.h:104 就声明了 `QVector<StickerPackBrief> packs(...)`，
+// 若该头在 shim 之前被解析，声明处的 QVector 会展开成 QPtrVector<StickerPackBrief>，
+// 而定义处（shim 之后）却是 shim 的 QVector<StickerBrief> —— 两者是**不同类型**，
+// 编译器报 "no declaration matches"。Qt 头自带 include guard，故本段与文件
+// 后面重复 include 的那批 Qt 头互不冲突，也不会二次定义宏。
+#include <qptrlist.h>
+#include <qptrvector.h>
+#include "qlist_shim.h"
+#include "qvector_shim.h"
+
 #include "stickerstore.h"
 #include "eifreader.h"
 #include "storage.h"
@@ -28,6 +42,7 @@
 #endif
 
 #include <algorithm>
+#include <string.h>   // memset()（zlib z_stream 清零）；不靠 qba_shim.h 等传递引入
 #ifdef QT3_BUILD
 // Qt3 头文件名全小写、无驼峰别名（/opt/qt338sh/include 下 344 个 .h 全是
 // qstring.h / qdir.h 这种形式），且以下类在 Qt3 全不存在，各自走 stikcommon
@@ -66,7 +81,7 @@
 #include "qjson_shim.h"
 #include "qmimedatabase_shim.h"
 #include "qnam_shim.h"
-#include "qfileinfo_shim.h"
+#include "qfile_shim.h"
 #include "qtemporaryfile_shim.h"
 #include "qdatetime_shim.h"
 #include "qdebug_shim.h"
@@ -75,6 +90,7 @@
 #include "qvector_shim.h"
 #include "qbytearray_shim.h"
 #include "qglobaltype_shim.h"
+#include "qzlib_shim.h"
 #include "qba_shim.h"
 #include "qbytearrayview_shim.h"
 #include "qcryptographichash_shim.h"
@@ -108,6 +124,7 @@
 #include "qba_shim.h"
 #include "qglobaltype_shim.h"
 #include "qdir_shim.h"   // qDirTempPath/qDirCleanPath/qDirRemoveRecursively/qDirRelativeFilePath
+#include "qfile_shim.h"  // qFileCopy/qFileRename/qFileInfoSuffix/qFileInfoCompleteBaseName/...
 #include <QMimeDatabase>
 #include <QMimeType>
 #include <QSettings>
@@ -278,8 +295,11 @@ void StickerStore::cleanupMigrationSource(const QString& fromRoot)
         return;
     // 只删旧 base 下的贴纸文件目录（packs/ 包、pastes/ 散图）；
     // 绝不动 fromRoot 根下 cache.db/message.db/cache_fs 等非贴纸数据。
-    const QStringList subDirs = { QStringLiteral("packs"),
-                                  QStringLiteral("pastes") };
+    // 不用 {...} 初始化列表：Qt3 的 QStringList（QValueList<QString> 子类）
+    // 没有 initializer_list 构造，会报 "could not convert from
+    // <brace-enclosed initializer list>"。qStringListBuild 走 magic static。
+    const QStringList subDirs =
+            qStringListBuild(QStringLiteral("packs"), QStringLiteral("pastes"));
     for (const QString& sub : subDirs) {
         const QString p = fromRoot + QLatin1Char('/') + sub;
         QDir d(p);
@@ -318,7 +338,7 @@ static quint64 crc64File(const QString& path)
     quint64 crc = 0xFFFFFFFFFFFFFFFFULL;
     char buf[65536];
     while (!f.atEnd()) {
-        const qint64 n = f.read(buf, sizeof(buf));
+        const qint64 n = qIODeviceRead(f, buf, sizeof(buf));
         if (n <= 0) break;
         for (qint64 i = 0; i < n; ++i)
             crc = s_crc64Table[(crc ^ uchar(buf[i])) & 0xFF] ^ (crc >> 8);
@@ -473,10 +493,10 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
             }
             if (!qMkpath(qAbsPath(QFileInfo(to)))) {
                 r.failDetail = QStringLiteral("无法创建子目录：")
-                               + QFileInfo(to).absolutePath();
+                               + qFileInfoAbsolutePath(QFileInfo(to));
                 failed = true; break;
             }
-            if (!QFile::copy(from, to)) {
+            if (!qFileCopy(from, to)) {
                 r.failDetail = QStringLiteral("复制失败：")
                                + from + QStringLiteral(" → ") + to;
                 failed = true; break;
@@ -687,19 +707,21 @@ int StickerStore::countStickers(const QString& packId)
 // ── 目录导入：每个子目录 = 一个贴纸包，支持图片递归 ──
 static bool isSupportedImage(const QString& suffix)
 {
-    static const QStringList exts = {
-        "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "tgs",
-    };
-    return exts.contains(suffix.toLower());
+    static const QStringList exts = qStringListBuild(
+        QString::fromAscii("png"),  QString::fromAscii("jpg"),
+        QString::fromAscii("jpeg"), QString::fromAscii("gif"),
+        QString::fromAscii("webp"), QString::fromAscii("bmp"),
+        QString::fromAscii("svg"),  QString::fromAscii("tgs"));
+    return exts.contains(qToLower(suffix));
 }
 
 // ── TGS 支持：Telegram 官方动图贴纸是 gzip 压缩的 Lottie JSON ──
 // 本应用不内置 Lottie 渲染，导入时解压读取画布尺寸，用占位图入库。
 static bool gunzipTgs(const QByteArray& in, QByteArray* raw)
 {
-    if (raw) raw->clear();
+    if (raw) qbaClear(*raw);
     z_stream zs;
-    std::memset(&zs, 0, sizeof(zs));
+    memset(&zs, 0, sizeof(zs));
     if (inflateInit2(&zs, 15 + 16) != Z_OK) return false;   // 31: 自动识别 gzip/zlib
     zs.next_in  = reinterpret_cast<Bytef*>(const_cast<char*>(qbaConstData(in)));
     zs.avail_in = uInt(in.size());
@@ -713,7 +735,7 @@ static bool gunzipTgs(const QByteArray& in, QByteArray* raw)
             inflateEnd(&zs);
             return false;
         }
-        if (raw) raw->append(buf, sizeof(buf) - zs.avail_out);
+        if (raw) qbaAppend(*raw, buf, (int)(sizeof(buf) - zs.avail_out));
     } while (ret != Z_STREAM_END);
     inflateEnd(&zs);
     return true;
@@ -721,10 +743,9 @@ static bool gunzipTgs(const QByteArray& in, QByteArray* raw)
 
 static bool parseTgsSize(const QByteArray& raw, int* w, int* h)
 {
-    QJsonParseError pe;
-    const QJsonDocument doc = QJsonDocument::fromJson(raw, &pe);
-    if (pe.error != QJsonParseError::NoError || !doc.isObject()) return false;
-    const QJsonObject o = doc.object();
+    bool parsed = false;
+    const QJsonObject o = qJsonParseObject(raw, &parsed);
+    if (!parsed) return false;
     if (!o.contains("w") || !o.contains("h")) return false;
     const QJsonValue wv = o.value("w"), hv = o.value("h");
     if (!wv.isDouble() || !hv.isDouble()) return false;
@@ -735,24 +756,70 @@ static bool parseTgsSize(const QByteArray& raw, int* w, int* h)
     return true;
 }
 
+// TGS 占位图（文件名缺预览图时显示）。
+//
+// Qt3 分支不用 QPainter：Qt3 的 QImage **不继承 QPaintDevice**（qimage.h:68
+// `class Q_EXPORT QImage` 无基类；Qt4 起才继承），故 QPainter 无法以 QImage
+// 为画布（实测 "no matching function for call to ‘QPainter::QPainter(QImage*)’"）。
+// 中转 QPixmap 也不行：Qt3 只有 QPixmap(const QImage&) 单向构造
+// （qpixmap.h:68），**没有** QPixmap→QImage 的反向转换，画完拿不回 QImage。
+// 故 Qt3 下改为 setPixel 手绘：圆角矩形边框 + 中心一条横杠代替文字。
+// 这是**有意的视觉降级**（无抗锯齿、无文字），仅影响 tgs 缺预览时的占位
+// 缩略图，不影响任何数据路径；Qt6 分支仍是 QPainter 画完整带文字版本。
+#if QT_VERSION >= 0x040000
 static QImage makeTgsPlaceholder(const QString& name, int w, int h)
 {
-    QImage img(w, h, QImage::Format_ARGB32_Premultiplied);
+    QImage img = qImageNew32(w, h);
     img.fill(Qt::transparent);
     QPainter p(&img);
-    p.setRenderHint(QPainter::Antialiasing);
-    p.setBrush(QColor(90, 140, 220, 90));
+    qPainterSetAntialiasing(p);
+    p.setBrush(qColorRgba(90, 140, 220, 90));
     p.setPen(Qt::NoPen);
-    p.drawRoundedRect(QRectF(0, 0, w, h), w * 0.04, h * 0.04);
+    qPainterDrawRoundedRect(p, QRect(0, 0, w, h), w * 0.04, h * 0.04);
     QFont f = p.font();
     f.setPixelSize(qMax(12, qMin(w, h) / 8));
     p.setFont(f);
-    p.setPen(QColor(255, 255, 255, 230));
+    p.setPen(qColorRgba(255, 255, 255, 230));
     p.drawText(QRect(0, 0, w, h), Qt::AlignCenter,
                name.isEmpty() ? QStringLiteral("TGS 动图") : name);
     p.end();
     return img;
 }
+#else
+static QImage makeTgsPlaceholder(const QString& name, int w, int h)
+{
+    Q_UNUSED(name);
+    QImage img = qImageNew32(w, h);
+    qImageFillTransparent(img);
+    // 圆角边框：半径取 w*0.04，与 Qt6 分支 qPainterDrawRoundedRect 的
+    // rx = w*0.04 保持一致的观感；边框粗细取 max(1, w/64)。
+    const int r = qMax(1, int(w * 0.04));
+    const int bw = qMax(1, w / 64);
+    const QRgb edge = qRgba(90, 140, 220, 90);
+    const QRgb dash = qRgba(255, 255, 255, 230);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            // 圆角判定：四角切掉 r×r 的方块（切角内不画）
+            int cx = 0, cy = 0;
+            if (x < r)            cx = r - x;
+            else if (x >= w - r)  cx = x - (w - r - 1);
+            if (y < r)            cy = r - y;
+            else if (y >= h - r)  cy = y - (h - r - 1);
+            if (cx > 0 && cy > 0 && cx * cx + cy * cy > r * r) continue;
+            const bool onEdge = (x < bw || x >= w - bw || y < bw || y >= h - bw);
+            if (onEdge) {
+                img.setPixel(x, y, edge);
+            } else {
+                // 中心横杠代替文字（TGS 字样）
+                const int my = h / 2;
+                if (y >= my - bw && y < my + bw && x >= w / 4 && x < w - w / 4)
+                    img.setPixel(x, y, dash);
+            }
+        }
+    }
+    return img;
+}
+#endif
 
 static bool scanRecursive(QDir dir, QVector<QString>& files)
 {
@@ -763,17 +830,18 @@ static bool scanRecursive(QDir dir, QVector<QString>& files)
     // [0]="." [1]=".." [2]=真实子目录）。这会让下面的 fi.isDir() 分支顺着
     // ".." 无限向上递归。故此处按名字显式排除，等价于 Qt4+ 的
     // NoDotAndDotDot。
-    const auto infoList = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::Readable);
+    const QList<QFileInfo> infoList =
+        qDirEntryInfoList(dir, QDir::Files | QDir::Dirs | QDir::Readable);
     for (const auto& fi : infoList) {
         const QString entryName = fi.fileName();
         if (entryName == QLatin1String(".") || entryName == QLatin1String(".."))
             continue;
         if (fi.isDir()) {
-            if (!scanRecursive(QDir(fi.absoluteFilePath()), files)) {
+            if (!scanRecursive(QDir(qFileInfoAbsoluteFilePath(fi)), files)) {
                 ok = false;
             }
-        } else if (isSupportedImage(fi.suffix())) {
-            files.append(fi.absoluteFilePath());
+        } else if (isSupportedImage(qFileInfoSuffix(fi))) {
+            files.append(qFileInfoAbsoluteFilePath(fi));
         }
     }
     return ok;
@@ -813,7 +881,7 @@ static PngChunkInfo probePngChunks(const QByteArray& bytes)
                           |  quint32(uchar(bytes.at(off+3)));
         const quint64 dataStart = off + 8;
         if (dataStart + quint64(len) + 4 > total) { info.truncated = true; break; }  // +CRC
-        const QByteArray type = bytes.mid(off + 4, 4);
+        const QByteArray type = qbaMid(bytes, off + 4, 4);
         // acTL 依 APNG 规范必须在首个 IDAT 之前；其后出现视为无效
         if (!sawIDAT && type == "acTL") {
             info.hasAcTL = true;
@@ -864,7 +932,7 @@ static int webpFrameCount(const QByteArray& bytes)
     const quint32 total = quint32(bytes.size());
     int anmf = 0, scanned = 0;
     while (off + 8 <= total) {
-        const QByteArray four = bytes.mid(off, 4);
+        const QByteArray four = qbaMid(bytes, off, 4);
         const quint32 len =   (quint32(uchar(bytes.at(off + 4)))       )
                             | (quint32(uchar(bytes.at(off + 5))) << 8)
                             | (quint32(uchar(bytes.at(off + 6))) << 16)
@@ -888,13 +956,13 @@ static QSet<QByteArray> runtimeSupportedImageFormats()
         QSet<QByteArray> s;
         const auto fmts = QImageReader::supportedImageFormats();
         for (const QByteArray& f : fmts) {
-            const QByteArray lo = f.trimmed().toLower();
+            const QByteArray lo = qbaToLower(qbaTrimmed(f));
             if (lo.isEmpty()) continue;
             s.insert(lo);
-            if (lo == "png")  s.insert("apng");   // APNG 由 png 插件读取
-            if (lo == "svg")  s.insert("svgz");   // gzip svg 同名插件
-            if (lo == "jpeg") s.insert("jpg");
-            if (lo == "tif")  s.insert("tiff");
+            if (lo == "png")  s.insert(qbaLit("apng"));   // APNG 由 png 插件读取
+            if (lo == "svg")  s.insert(qbaLit("svgz"));   // gzip svg 同名插件
+            if (lo == "jpeg") s.insert(qbaLit("jpg"));
+            if (lo == "tif")  s.insert(qbaLit("tiff"));
         }
         return s;
     }();
@@ -911,10 +979,10 @@ static QImage robustDecodeFirstFrame(const QByteArray& bytes,
                                      QImageReader::ImageReaderError* outErr = nullptr,
                                      QString* outErrStr = nullptr)
 {
-    QByteArray readerFmt = fmt.trimmed().toLower();
-    if (readerFmt == "apng") readerFmt = "png";  // APNG 由 png 插件读取
-    if (readerFmt == "svgz") readerFmt = "svg";
-    if (readerFmt == "jpg")  readerFmt = "jpeg";
+    QByteArray readerFmt = qbaToLower(qbaTrimmed(fmt));
+    if (readerFmt == "apng") readerFmt = qbaLit("png");  // APNG 由 png 插件读取
+    if (readerFmt == "svgz") readerFmt = qbaLit("svg");
+    if (readerFmt == "jpg")  readerFmt = qbaLit("jpeg");
 
     const auto attempt = [&](bool autoTransform, const QByteArray& forcedFmt) {
         QBuffer buf;
@@ -965,16 +1033,16 @@ static bool probeImageValidity(const QByteArray& bytes,
         return false;
     }
 
-    QByteArray fmt = reader.format().trimmed().toLower();
+    QByteArray fmt = qbaToLower(qbaTrimmed(reader.format()));
     if (fmt.isEmpty()) {
-        fmt = QImageReader::imageFormat(&probe).trimmed().toLower();
+        fmt = qbaToLower(qbaTrimmed(QImageReader::imageFormat(&probe)));
     }
 
     int frames = 0;
     if (fmt == "png") {                    // APNG 归一：Qt 只会报 png
         const PngChunkInfo png = probePngChunks(bytes);
         if (isApng(png)) {
-            fmt = "apng";
+            fmt = qbaLit("apng");
             frames = png.acTlFrames > 0 ? int(png.acTlFrames) : png.fdAtCount;
             if (png.truncated)
                 qWarning("[StickerPaste][probe] apng truncated acTL=%u fdAT=%d fcTL=%d",
@@ -982,11 +1050,14 @@ static bool probeImageValidity(const QByteArray& bytes,
         }
     }
 
-    static const QSet<QByteArray> kAllowed = {
+    // Qt3 的 QSet 无 initializer_list 构造（见 qByteArraySetBuildAscii 注记）。
+    static const char* const kFmtItems[] = {
         "png","apng",                      // apng 手动加入
         "jpg","jpeg","gif","webp","bmp","tif","tiff","tga",
         "xpm","xbm","ppm","pbm","pgm","wbmp","svg","svgz","avif"
     };
+    static const QSet<QByteArray> kAllowed =
+            qByteArraySetBuildAscii(kFmtItems, (int)(sizeof(kFmtItems)/sizeof(kFmtItems[0])));
     if (!kAllowed.contains(fmt)) {
         qWarning("[StickerPaste][probe] format not in whitelist fmt=%s",
                  qbaConstData(fmt));
@@ -1020,14 +1091,14 @@ static bool probeImageValidity(const QByteArray& bytes,
                  size.width(), size.height());
         // 大图/内存限制兜底：Qt 因 allocation limit 拒绝（RawImageFormatError/InvalidDataError
         // 且错误串含 allocation）。贴纸导入超大图本不合理，明确拒绝并给出可读提示路径。
-        if (decodeErrStr.contains("allocation", Qt::CaseInsensitive)
-            || decodeErrStr.contains("memory", Qt::CaseInsensitive)) {
+        if (qStringContainsNoCase(decodeErrStr, QStringLiteral("allocation"))
+            || qStringContainsNoCase(decodeErrStr, QStringLiteral("memory"))) {
             qWarning("[StickerPaste][probe] image exceeds QImageReader allocation limit "
                      "(QT_IMAGEIO_MAXALLOC default 256MB) size=%dx%d bytes=%lld",
                      size.width(), size.height(), (qint64)bytes.size());
         }
         // 细诊断：区分 真APNG / 截断损坏 / Qt 重编码残片（IDAT 根因定位）
-        if (fmt.contains("png")) {
+        if (qbaIndexOf(fmt, qbaLit("png")) >= 0) {
             const PngChunkInfo png = probePngChunks(bytes);
             if (png.validSignature)
                 qWarning("[StickerPaste][probe] png sig=ok chunks=[%s] acTL=%s(%u) fcTL=%d fdAT=%d trunc=%d",
@@ -1131,8 +1202,8 @@ static bool loadLocalImageCandidate(const QString& path,
     // 直读失败：留诊断（前 32 字节 hex + 长度），再试去混淆
     {
         QByteArray hex;
-        for (int i = 0; i < qMin(fb.size(), 32); ++i)
-            hex += QString("%1").arg(uchar(fb.at(i)), 2, 16, QLatin1Char('0')).toLatin1();
+        for (int i = 0; i < qMin((int)fb.size(), 32); ++i)
+            hex += qToLatin1BA(QString("%1").arg(uchar(fb.at(i)), 2, 16, QLatin1Char('0')));
         qWarning("[StickerPaste] uri probe fail path=%s len=%lld head0=%s deobf-try",
                  qPrintable(path), (qint64)fb.size(), qbaConstData(hex));
     }
@@ -1238,15 +1309,15 @@ static bool verifyScaledResult(const QByteArray& srcRaw,
 
     // 缩放结果落盘常驻（setAutoRemove(false)），日志给路径供外部播放器复核；
     // 后缀随输出格式（gif→.gif；apng/png→.png；webp→.webp）。
-    const QByteArray scaleSuffix = (scaleFmt == "gif") ? QByteArray(".gif")
-            : (scaleFmt == "webp") ? QByteArray(".webp") : QByteArray(".png");
+    const QByteArray scaleSuffix = (scaleFmt == "gif") ? qbaLit(".gif")
+            : (scaleFmt == "webp") ? qbaLit(".webp") : qbaLit(".png");
     QTemporaryFile tmp(qDirTempPath()
                        + QStringLiteral("/anystik_scale_verify_XXXXXX")
                        + QLatin1String(qbaConstData(scaleSuffix)));
     tmp.setAutoRemove(false);
     QString tmpPath;
     if (tmp.open()) {
-        tmp.write(scaledBytes);
+        qIODeviceWrite(tmp, qbaConstData(scaledBytes), scaledBytes.size());
         tmp.flush();
         tmpPath = tmp.fileName();
     }
@@ -1308,7 +1379,7 @@ static QByteArray pngChunk(const QByteArray& type, const QByteArray& data)
 {
     if (type.size() != 4) return QByteArray();
     QByteArray out;
-    out.reserve(12 + data.size());
+    qbaReserve(out, 12 + data.size());
     const quint32 len = quint32(data.size());
     out += char(len >> 24);
     out += char(len >> 16);
@@ -1351,12 +1422,12 @@ static QByteArray buildApngFromFrames(const QList<QImage>& frames,
     const int w = frames.first().width();
     const int h = frames.first().height();
     const auto be32 = [](quint32 v) {
-        QByteArray b(4, '\0');
+        QByteArray b = qbaUninit(4);   // 4 字节全覆写，用未初始化缓冲即可（Qt3 无 (n,ch) 构造）
         b[0] = char(v >> 24); b[1] = char(v >> 16); b[2] = char(v >> 8); b[3] = char(v);
         return b;
     };
     const auto be16 = [](quint16 v) {
-        QByteArray b(2, '\0');
+        QByteArray b = qbaUninit(2);
         b[0] = char(v >> 8); b[1] = char(v);
         return b;
     };
@@ -1364,7 +1435,7 @@ static QByteArray buildApngFromFrames(const QList<QImage>& frames,
     const auto scanlinesZ = [](const QImage& im) {
         QByteArray raw;
         const int bpl = im.width() * 4;
-        raw.reserve(im.height() * (bpl + 1));
+        qbaReserve(raw, im.height() * (bpl + 1));
         for (int y = 0; y < im.height(); ++y) {
             raw += char(0);
             raw += qImageScanlineRgba(im, y);
@@ -1375,7 +1446,7 @@ static QByteArray buildApngFromFrames(const QList<QImage>& frames,
     QByteArray png;
     {
         const char sig[8] = {char(0x89), 'P', 'N', 'G', '\r', '\n', char(0x1a), '\n'};
-        png.append(sig, 8);
+        qbaAppend(png, sig, 8);
     }
     QByteArray ihdr;
     ihdr += be32(quint32(w));
@@ -1398,7 +1469,11 @@ static QByteArray buildApngFromFrames(const QList<QImage>& frames,
         const QImage& fr = frames.at(i);
         quint16 dnum = 1, dden = 10;           // 默认 100ms
         if (hasDelay) {
-            int ms = delayMs.at(i);
+            // 用 operator[] 而非 at()：Qt3 的 QValueList::at() 返回 NodePtr
+            // （链表节点指针，qvaluelist.h:245），不是 int&，赋给 int 会报
+            // "invalid conversion from ‘int*’ to ‘int’"。Qt4+ 的 at() 返回 int&，
+            // 但 [] 两版本都返回引用，语义一致。
+            int ms = delayMs[i];
             if (ms < 1) ms = 10;               // 0/非法延迟回落
             if (ms > 6553) ms = 6553;          // 帧延迟上限（cs 域能表达的倒数）
             dnum = quint16(qBound(1, (ms * 10 + 9) / 10, 6553)); // 四舍五入到百分秒
@@ -1755,7 +1830,7 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
         if (errorOut) *errorOut = QStringLiteral("无法创建包目录");
         return false;
     }
-    const QString rootAbs = root.absolutePath();
+    const QString rootAbs = qDirAbsolutePath(root);
 
     // 按相对根目录的路径做自然排序（数字感知、稳定保序），
     // 使 eif 组内序号、多分组 1/2/10、zip 层级与手动目录导入顺序全部确定化
@@ -1784,7 +1859,7 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
 
         // TGS 分支：Telegram 动图贴纸（gzip Lottie JSON）。
         // 解压取画布尺寸，原始 .tgs 字节保留，同目录生成占位 PNG 入库。
-        if (QFileInfo(file).suffix().toLower() == QLatin1String("tgs")) {
+        if (qToLower(qFileInfoSuffix(QFileInfo(file))) == QLatin1String("tgs")) {
             QFile f(file);
             if (!qOpenReadOnly(f)) continue;
             const QByteArray bytes = f.readAll();
@@ -1801,11 +1876,11 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
             // 原始 .tgs 字节保留（供未来真渲染），仍按相对层级复制
             if (!QFile::exists(dst)) {
                 if (!qMkpath(qAbsPath(QFileInfo(dst)))) continue;
-                if (!QFile::copy(file, dst)) continue;
+                if (!qFileCopy(file, dst)) continue;
             }
             // 占位 PNG：同目录 <stem>.tgs_preview.png
             // （带 .tgs_preview 后缀避免与并存同 stem 真图冲突）
-            const QString stem = QFileInfo(file).completeBaseName();
+            const QString stem = qFileInfoCompleteBaseName(QFileInfo(file));
             const QString pngRel = stem + QStringLiteral(".tgs_preview.png");
             const QString pngDst = QFileInfo(dst).dir().filePath(pngRel);
             const QImage ph = makeTgsPlaceholder(stem, tw, th);
@@ -1829,21 +1904,21 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
 
         // 解码预检：svg 例外（canRead 依赖平台 qsvg 插件，保持旧行为）；
         // 其它格式解析不出尺寸（损坏/截断/不支持）→ 跳过，不复制不入库。
-        const bool svgOk = QFileInfo(file).suffix().toLower()
+        const bool svgOk = qToLower(qFileInfoSuffix(QFileInfo(file)))
                            == QLatin1String("svg");
         QImageReader probe(file);
         probe.setAutoTransform(true);
         if (!svgOk && !probe.size().isValid()) {
             continue;
         }
-        const QSizeF imgSize = probe.size();   // 预检通过的尺寸，直接入库
+        const QSize imgSize = probe.size();   // 预检通过的尺寸，直接入库
 
         if (!QFile::exists(dst)) {
             if (!qMkpath(qAbsPath(QFileInfo(dst)))) {
                 if (errorOut) *errorOut = QStringLiteral("无法创建包子目录");
                 continue;
             }
-            if (!QFile::copy(file, dst)) {
+            if (!qFileCopy(file, dst)) {
                 if (errorOut) *errorOut = QStringLiteral("文件复制失败：")
                                           + file;
                 continue;
@@ -1949,10 +2024,10 @@ StickerMeta StickerStore::stickerMeta(const QString& filePath) const
             meta.typeLabel = st.comment() + QStringLiteral(" (") + st.name() + QLatin1Char(')');
         } else {
             // 按扩展名兜底
-            const QString ext = fi.suffix().toLower();
+            const QString ext = qToLower(qFileInfoSuffix(fi));
             if (!ext.isEmpty()) {
                 meta.mime = QStringLiteral("image/%1").arg(ext);
-                meta.typeLabel = ext.toUpper() + QStringLiteral(" (") + meta.mime + QLatin1Char(')');
+                meta.typeLabel = qToUpper(ext) + QStringLiteral(" (") + meta.mime + QLatin1Char(')');
             } else {
                 meta.typeLabel = QStringLiteral("未知 (unknown)");
             }
@@ -1972,10 +2047,11 @@ StickerMeta StickerStore::stickerMeta(const QString& filePath) const
                 meta.frames = cnt;
             meta.animated = cnt > 1;
             // 用 reader 精化格式名（比 suffix 更准确）
-            QByteArray rFmt = reader.format().trimmed().toLower();
+            QByteArray rFmt = qbaToLower(qbaTrimmed(reader.format()));
             if (!rFmt.isEmpty() && meta.mime.isEmpty()) {
                 meta.mime = QStringLiteral("image/%1").arg(QString::fromLatin1(rFmt));
-                meta.typeLabel = rFmt.toUpper() + QStringLiteral(" (") + meta.mime + QLatin1Char(')');
+                meta.typeLabel = QString::fromLatin1(qbaToUpper(rFmt))
+                                 + QStringLiteral(" (") + meta.mime + QLatin1Char(')');
             }
         }
         return meta;
@@ -1984,9 +2060,9 @@ StickerMeta StickerStore::stickerMeta(const QString& filePath) const
     // probe 成功：正常流程
     if (frames < 2)
         frames = imageAnimationFrames(raw, fmt);
-    const QString lower = QString::fromLatin1(fmt).toLower();
+    const QString lower = qToLower(QString::fromLatin1(fmt));
 
-    QString human = lower.toUpper();
+    QString human = qToUpper(lower);
     if (lower == QLatin1String("jpg") || lower == QLatin1String("jpeg"))
         human = QStringLiteral("JPEG");
     else if (lower == QLatin1String("apng"))
@@ -2054,7 +2130,7 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
     const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
     if (mime)
         qInfo("[StickerPaste] mime formats: %s",
-              qUtf8Printable(mime->formats().join('|')));
+              qUtf8Printable(mime->formats().join(QStringLiteral("|"))));
 #if defined(Q_OS_MACOS)
     // 只读诊断：核对源端原始文件引用（public.file-url⇔file:// 可回退 / public.url⇔https 源端限制）
     if (mime) {
@@ -2140,8 +2216,8 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
         const QList<QUrl> urls = md ? md->urls() : QList<QUrl>();
         for (const QUrl& url : urls) {
             if (!url.isLocalFile()) continue;              // 只取本地文件
-            const QString p = url.toLocalFile();
-            if (p.isEmpty() || !QFileInfo::exists(p)) continue;
+            const QString p = qUrlToLocalFile(url);
+            if (p.isEmpty() || !qFileInfoExists(p)) continue;
             if (!QFileInfo(p).isFile()) continue;
             QByteArray fb;
             QByteArray fmt2;
@@ -2169,8 +2245,8 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
         const QList<QUrl> urls = mime ? mime->urls() : QList<QUrl>();
         for (const QUrl& url : urls) {
             if (!url.isLocalFile()) continue;          // 只取本地文件
-            const QString p = url.toLocalFile();
-            if (p.isEmpty() || !QFileInfo::exists(p)) continue;
+            const QString p = qUrlToLocalFile(url);
+            if (p.isEmpty() || !qFileInfoExists(p)) continue;
             if (!QFileInfo(p).isFile()) continue;
             QByteArray fb;
             QByteArray fmt2;
@@ -2221,23 +2297,29 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
             if (errorOut) *errorOut = QStringLiteral("剪贴板中没有图片");
             return false;
         }
-        qInfo("[StickerPaste] bitmap source qimage-format=%d", int(img.format()));
+        qInfo("[StickerPaste] bitmap source qimage-format=%d", qImageFormatTag(img));
 
         // 自检修复：RGB555 等格式 encode 出的 PNG 可能无有效 IDAT（此前复现
         // chunks=[IHDR|pHYs] + libpng IDAT failure），先归一 ARGB32 再编码并 probe 自验；
         // 逐级降级格式，最后 BMP 兜底（Qt BMP 编码不含 zlib，必成）。
-        const QImage::Format kFormats[] = {
-            QImage::Format_ARGB32,
-            QImage::Format_RGB32,
-            QImage::Format_RGBA8888,
+        // qImageFormat/qImageConvertToFormat 是 qimage_shim.h 的跨版本入口
+        // （Qt3 无 QImage::Format 枚举也无 convertToFormat，见该头注释）。
+        const qImageFormat kFormats[] = {
+            qFmtArgb32,
+            qFmtRgb32,
+            qFmtRgba8888,
         };
         bool done = false;
-        for (QImage::Format fmt : kFormats) {
-            const QImage c = img.convertToFormat(fmt);
+        for (qImageFormat fmt : kFormats) {
+            const QImage c = qImageConvertToFormat(img, fmt);
             QByteArray trial;
-            QBuffer b(&trial);
-            if (!b.open(QIODevice::WriteOnly)) continue;
+            QBuffer b = qBufferMake(trial);
+            if (!qOpenWriteOnly(b)) continue;
             if (!c.save(&b, "PNG")) continue;
+            b.close();
+            // ⚠ Qt3 的 QBuffer 按值持有独立缓冲（无隐式共享），写进去的内容
+            //   不会自动回写 trial，必须显式取回 —— Qt6 侧这是 no-op 语义。
+            trial = qBufferTake(b);
             QByteArray tf;
             QSize ts;
             if (probeImageValidity(trial, &tf, &ts)) {
@@ -2251,13 +2333,15 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
             qWarning("[StickerPaste] bitmap png self-check fail qformat=%d", int(fmt));
         }
         if (!done) {
-            const QImage c = img.convertToFormat(QImage::Format_ARGB32);
+            const QImage c = qImageConvertToFormat(img, qFmtArgb32);
             srcType = QStringLiteral("bitmap");
-            QBuffer b(&bytes);
+            QBuffer b = qBufferMake(bytes);
             if (!qOpenWriteOnly(b) || !c.save(&b, "BMP")) {
                 if (errorOut) *errorOut = QStringLiteral("图片编码失败");
                 return false;
             }
+            b.close();
+            bytes = qBufferTake(b);   // Qt3 必须显式取回，理由同上
             QByteArray tf;
             QSize ts;
             if (!probeImageValidity(bytes, &tf, &ts)) {
@@ -2279,7 +2363,7 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
         QSize vs;
         const bool vok = probeImageValidity(bytes, &vf, &vs);
         const QByteArray srcUtf = srcType.isEmpty() ? QByteArrayLiteral("?")
-                                                    : srcType.toUtf8();
+                                                    : qToUtf8BA(srcType);
         qInfo("[StickerPaste] verify src=%s final-fmt=%s size=%dx%d bytes=%lld frames=%d probe-ok=%d",
               qbaConstData(srcUtf),
               vok ? qbaConstData(vf) : "?",
@@ -2338,7 +2422,7 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut,
     const QString base = stickerBaseDir();
 
     QDir pasteDir(base + QStringLiteral("/pastes"));
-    if (!pasteDir.exists() && !qMkpath(pasteDir.absolutePath())) {
+    if (!pasteDir.exists() && !qMkpath(qDirAbsolutePath(pasteDir))) {
         if (errorOut) *errorOut = QStringLiteral("无法创建 pastes 目录");
         return false;
     }
@@ -2346,7 +2430,8 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut,
     const QString filePath = pasteDir.filePath(idHex + ext);
     if (!QFile::exists(filePath)) {
         QFile file(filePath);
-        if (!qOpenWriteOnly(file) || file.write(bytes) != bytes.size()) {
+        if (!qOpenWriteOnly(file)
+            || qIODeviceWrite(file, qbaConstData(bytes), bytes.size()) != bytes.size()) {
             if (errorOut) *errorOut = QStringLiteral("图片保存失败");
             return false;
         }
@@ -2403,7 +2488,9 @@ QString StickerStore::sanitizeDirName(const QString& name)
     const QString illegal = QStringLiteral("/\\:*?\"<>|");
     QString out;
     out.reserve(name.length());
-    for (QChar c : name) {
+    // 索引循环而非 for (QChar c : name)：Qt3 的 QString 无 begin()/end()。
+    for (int ci = 0; ci < name.length(); ++ci) {
+        const QChar c = name.at(ci);
         if (!c.isPrint())
             continue;
         if (illegal.contains(c))
@@ -2472,7 +2559,7 @@ bool StickerStore::importStickerFile(const QString& packId,
         ? QStringLiteral("packs/") + QString::fromUtf8(pack->title.c_str())
         : targetRel;
     const QString targetDir = stickerBaseDir() + QLatin1Char('/')
-        + QFileInfo(rel).path();
+        + qFileInfoPath(QFileInfo(rel));
     if (!qMkpath(targetDir)) {
         if (errorOut) *errorOut = QStringLiteral("无法创建包目录");
         return false;
@@ -2493,7 +2580,7 @@ bool StickerStore::importStickerFile(const QString& packId,
     }
 
     // 解码预检（保持 importDirectory 的 svg 例外：QVariant 依赖平台 qsvg 插件）
-    const bool svgOk = QFileInfo(srcAbs).suffix().toLower()
+    const bool svgOk = qToLower(qFileInfoSuffix(QFileInfo(srcAbs)))
                        == QLatin1String("svg");
     QImageReader probe(srcAbs);
     probe.setAutoTransform(true);
@@ -2503,11 +2590,19 @@ bool StickerStore::importStickerFile(const QString& packId,
     }
     const QSize imgSize = probe.size();
 
-    // 移动落地（src 为云端 get 的临时文件）；目标已存在则覆盖（rename 的 POSIX 覆盖语义）
+    // 移动落地（src 为云端 get 的临时文件）。
+    // ⚠ 原注释写"目标已存在则覆盖（rename 的 POSIX 覆盖语义）"是**错的**，已
+    //   按实测更正：Qt 6.7.3 的 QFile::rename 在目标已存在时返回 false 且
+    //   **不覆盖**（探针实测：目标内容保持 OLD，源文件仍在），与 POSIX
+    //   rename(2) 的覆盖语义不同 —— Qt 显式先做了存在性检查。qFileRename
+    //   已按此对齐（目标存在直接返回 false）。
+    // 实际不会走到"目标已存在"：上方幂等检查（同包同相对路径已入库即返回）
+    // 已提前返回，此处 dst 必为新路径。
     if (dst != srcAbs) {
-        if (!QFile::rename(srcAbs, dst)) {
-            // 跨设备 rename 失败 → 拷贝 + 清理源
-            if (!QFile::copy(srcAbs, dst)) {
+        if (!qFileRename(srcAbs, dst)) {
+            // rename 失败（如跨设备）→ 退回拷贝 + 清理源。
+            // 注意 qFileCopy 同样拒绝已存在的目标，故此处目标必不存在。
+            if (!qFileCopy(srcAbs, dst)) {
                 if (errorOut) *errorOut = QStringLiteral("文件落地失败");
                 return false;
             }
@@ -2562,7 +2657,7 @@ bool StickerStore::renameStickerFile(const QString& packId,
                 return false;
             }
         }
-        if (!QFile::rename(oldAbs, newAbs)) {
+        if (!qFileRename(oldAbs, newAbs)) {
             return false;
         }
     }
@@ -2575,9 +2670,9 @@ bool StickerStore::renameStickerFile(const QString& packId,
     if (!stmt.isPrepared()) {
         return false;
     }
-    const QByteArray newRelU = newRel.toUtf8();
-    const QByteArray packU = packId.toUtf8();
-    const QByteArray oldRelU = oldRel.toUtf8();
+    const QByteArray newRelU = qToUtf8BA(newRel);
+    const QByteArray packU = qToUtf8BA(packId);
+    const QByteArray oldRelU = qToUtf8BA(oldRel);
     if (!stmt.bind(1, qbaConstData(newRelU))) return false;
     if (!stmt.bind(2, qbaConstData(packU))) return false;
     if (!stmt.bind(3, qbaConstData(oldRelU))) return false;
@@ -2597,8 +2692,8 @@ bool StickerStore::renamePack(const QString& packId, const QString& newTitle)
     if (!stmt.isPrepared()) {
         return false;
     }
-    QByteArray titleUtf8 = newTitle.trimmed().toUtf8();
-    QByteArray packUtf8 = packId.toUtf8();
+    QByteArray titleUtf8 = qToUtf8BA(newTitle.trimmed());
+    QByteArray packUtf8 = qToUtf8BA(packId);
     if (!stmt.bind(1, qbaConstData(titleUtf8))) return false;
     if (!stmt.bind(2, qbaConstData(packUtf8))) return false;
     const bool ok = stmt.step();
@@ -2655,7 +2750,7 @@ void StickerStore::touchSticker(const QString& stickerId)
         return;
     }
     stickerDb().touch_sticker(qUtf8Printable(stickerId),
-        QDateTime::currentSecsSinceEpoch());
+        qDateTimeEpochSecs());
 }
 
 bool StickerStore::shareStickerFile(const QString& filePath)
@@ -2688,7 +2783,7 @@ static bool stashAnimationClipboard(const QByteArray& fmt,
                                     const QImage& pngFallback)
 {
     const QByteArray mimeType = (fmt == "gif")
-            ? QByteArray("image/gif") : QByteArray("image/apng");
+            ? qbaLit("image/gif") : qbaLit("image/apng");
     QMimeData* mime = new QMimeData;
     mime->setData(mimeType, bytes);           // Qt 自回读：动画字节
 #if defined(Q_OS_MACOS)
@@ -2724,7 +2819,7 @@ static bool copyScaledFramesToClipboard(const QList<QImage>& frames,
                                         const QByteArray& srcRaw)
 {
     QList<QImage> scaled;
-    scaled.reserve(frames.size());
+    qListReserve(scaled, frames.size());
     for (const QImage& fr : frames) {
         QImage s = qImageScaledKeepAspectSmooth(fr, targetSize);
         if (s.isNull()) return false;
@@ -2735,13 +2830,13 @@ static bool copyScaledFramesToClipboard(const QList<QImage>& frames,
         const QByteArray gifBytes = buildGifBytes(scaled, delayMs);
         if (!gifBytes.isEmpty()
                 && verifyScaledResult(srcRaw, gifBytes, "desktop-gif")) {
-            return stashAnimationClipboard("gif", gifBytes, srcPath, scaled.first());
+            return stashAnimationClipboard(qbaLit("gif"), gifBytes, srcPath, scaled.first());
         }
     } else {
         const QByteArray apng = buildApngFromFrames(scaled, delayMs);
         if (!apng.isEmpty()
                 && verifyScaledResult(srcRaw, apng, "desktop-apng")) {
-            return stashAnimationClipboard("apng", apng, srcPath, scaled.first());
+            return stashAnimationClipboard(qbaLit("apng"), apng, srcPath, scaled.first());
         }
     }
 
@@ -2867,7 +2962,7 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
 
     const QSize target = cappedScaledSize(frames.first().size(), scale);
     QList<QImage> scaled;
-    scaled.reserve(frames.size());
+    qListReserve(scaled, frames.size());
     for (const QImage& fr : frames) {
         QImage s = qImageScaledKeepAspectSmooth(fr, target);
         if (s.isNull()) return false;
@@ -2908,7 +3003,7 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
         QStandardPaths::AppLocalDataLocation) + QStringLiteral("/scaled") + ext;
     QFile out(tmpPath);
     if (!qOpenWriteOnly(out)) return false;   // Qt3 IO_WriteOnly 本身即截断（已实测）
-    out.write(bytes);
+    qIODeviceWrite(out, qbaConstData(bytes), bytes.size());
     out.close();
 
     showAndroidToast(QStringLiteral("已复制到剪贴板"));
@@ -2968,7 +3063,10 @@ static QString sanitizeToken(const QString& in)
     // 保证安装后分组名与源显示名一致可读。
     QString out = in;
     const QString dangerous = QStringLiteral("\\/:*?\"<>|");
-    for (QChar& c : out) {
+    // 索引循环 + qStringRefAt：Qt3 的 QString 无 begin()/end()，且
+    // operator[] 按值返回 QChar（真正可写的只有 QString::ref()）。
+    for (int ci = 0; ci < out.length(); ++ci) {
+        QChar& c = qStringRefAt(out, ci);
         if (c == QLatin1Char('\n') || c == QLatin1Char('\r')
             || dangerous.contains(c)) {
             c = QLatin1Char('_');
@@ -2996,10 +3094,9 @@ static RemoteKind matchRemoteRepo(const QString& url,
                                   QString* owner, QString* repo, QString* branch)
 {
     QString inner = url;
-    static const QStringList kGhProxyPrefixes = {
+    static const QStringList kGhProxyPrefixes = qStringListBuild(
         QStringLiteral("https://gh-proxy.com/https://"),
-        QStringLiteral("https://gh-proxy.org/https://"),
-    };
+        QStringLiteral("https://gh-proxy.org/https://"));
     for (const auto& prefix : kGhProxyPrefixes) {
         if (inner.startsWith(prefix)) {
             inner = inner.mid(prefix.length());
@@ -3014,28 +3111,28 @@ static RemoteKind matchRemoteRepo(const QString& url,
         return RemoteKind::None;
     }
 
-    const QStringList parts = inner.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    const QStringList parts = qStringSplitSkipEmpty(inner, QLatin1Char('/'));
     // <owner>/<repo>/archive/<40位sha>.zip
-    if (parts.size() == 4 && parts.at(2) == QLatin1String("archive")) {
-        QString rev = parts.at(3);
+    if (parts.size() == 4 && qStringListAt(parts, 2) == QLatin1String("archive")) {
+        QString rev = qStringListAt(parts, 3);
         if (rev.endsWith(QLatin1String(".zip"))) {
             rev = rev.left(rev.length() - 4);
         }
-        const QByteArray dec = QByteArray::fromHex(rev.toLatin1());
+        const QByteArray dec = qbaFromHex(qToLatin1BA(rev));
         if (dec.size() == 20 && rev.length() == 40) {
-            if (owner) *owner = parts.at(0);
-            if (repo) *repo = parts.at(1);
+            if (owner) *owner = qStringListAt(parts, 0);
+            if (repo) *repo = qStringListAt(parts, 1);
             if (branch) *branch = rev;
             return RemoteKind::ArchiveZip;
         }
     }
     // <owner>/<repo>/<40位sha>/<path...>
     if (parts.size() >= 4) {
-        const QString rev = parts.at(2);
-        const QByteArray dec = QByteArray::fromHex(rev.toLatin1());
+        const QString rev = qStringListAt(parts, 2);
+        const QByteArray dec = qbaFromHex(qToLatin1BA(rev));
         if (dec.size() == 20 && rev.length() == 40) {
-            if (owner) *owner = parts.at(0);
-            if (repo) *repo = parts.at(1);
+            if (owner) *owner = qStringListAt(parts, 0);
+            if (repo) *repo = qStringListAt(parts, 1);
             if (branch) *branch = rev;
             return RemoteKind::RawFile;
         }
@@ -3052,12 +3149,12 @@ static QString urlDisplayName(const QString& url)
     QUrl u(url);
     QString base = u.fileName();
     if (base.isEmpty()) {
-        const QStringList parts = u.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+        const QStringList parts = qStringSplitSkipEmpty(u.path(), QLatin1Char('/'));
         if (!parts.isEmpty()) base = parts.last();
     }
-    if (base.isEmpty() || base.compare("main", Qt::CaseInsensitive) == 0
-        || base.compare("master", Qt::CaseInsensitive) == 0
-        || base.compare("head", Qt::CaseInsensitive) == 0) {
+    if (base.isEmpty() || qStringEqualsNoCase(base, QStringLiteral("main"))
+        || qStringEqualsNoCase(base, QStringLiteral("master"))
+        || qStringEqualsNoCase(base, QStringLiteral("head"))) {
         base = QStringLiteral("pack");
     }
     return base;
@@ -3408,7 +3505,7 @@ static QByteArray fileMd5(const QString& path)
     QByteArray buf;
     buf.resize(64 * 1024);
     qint64 got = 0;
-    while ((got = f.read(buf.data(), buf.size())) > 0) {
+    while ((got = qIODeviceRead(f, qbaData(buf), buf.size())) > 0) {
         hash.addData(QByteArrayView(buf.data(), int(got)));
     }
     return hash.result();
@@ -3465,7 +3562,7 @@ void StickerStore::probeRemote(const QString& url)
         QString raw, ver;
         if (ok) {
             if (reply->hasRawHeader("Content-Length")) {
-                size = reply->rawHeader("Content-Length").toLongLong();
+                size = qbaToLongLong(reply->rawHeader("Content-Length"));
             }
             if (branch.length() == 40) {
                 raw = branch;                   // raw/文件源：已知 commit sha 作版本
@@ -3591,7 +3688,7 @@ void StickerStore::startDownload(const QString& url, bool noRange)
 
     QNetworkRequest req = makeRequest(QUrl(url));
     if (offset > 0) {
-        req.setRawHeader("Range", "bytes=" + QByteArray::number(offset) + "-");
+        req.setRawHeader("Range", "bytes=" + qNumberToByteArray(offset) + "-");
     }
     task->reply = m_nam->get(req);
     m_tasks.insert(url, task);
@@ -3604,7 +3701,8 @@ void StickerStore::startDownload(const QString& url, bool noRange)
         if (chunk.isEmpty()) {
             return;
         }
-        if (task->out->write(chunk) != chunk.size()) {
+        if (qIODeviceWrite(*task->out, qbaConstData(chunk), chunk.size())
+            != chunk.size()) {
             task->reply->abort();
         }
     });
@@ -3617,7 +3715,7 @@ void StickerStore::startDownload(const QString& url, bool noRange)
             if (task->reply) {
                 const QString cr = QString::fromLatin1(
                     task->reply->rawHeader("Content-Range"));
-                const int slash = cr.lastIndexOf(QLatin1Char('/'));
+                const int slash = qLastIndexOf(cr, QLatin1Char('/'));
                 if (slash >= 0) {
                     overallTotal = cr.mid(slash + 1).toLongLong();
                 }
@@ -3682,8 +3780,8 @@ void StickerStore::handleDownloadFinished(DownloadTask* task)
         // A4：校验服务端实际续传的起始偏移；不从请求的 offset 开始则丢弃重下
         qint64 startByte = -1;
         const QString cr = QString::fromLatin1(reply->rawHeader("Content-Range"));
-        const int sp = cr.indexOf(QLatin1Char(' '));
-        int dash = cr.indexOf(QLatin1Char('-'), sp >= 0 ? sp : 0);
+        const int sp = qIndexOf(cr, QLatin1Char(' '));
+        int dash = qIndexOf(cr, QLatin1Char('-'), sp >= 0 ? sp : 0);
         if (sp >= 0 && dash > sp) {
             startByte = cr.mid(sp + 1, dash - sp - 1).toLongLong();
         }
@@ -3717,7 +3815,7 @@ void StickerStore::handleDownloadFinished(DownloadTask* task)
             return;
         }
         if (reply->hasRawHeader("Content-Length")) {
-            task->total = reply->rawHeader("Content-Length").toLongLong();
+            task->total = qbaToLongLong(reply->rawHeader("Content-Length"));
         }
         reply->deleteLater();
         task->reply = nullptr;
@@ -3801,7 +3899,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
         return r;
     };
 
-    if (!QFile::rename(partPath, zipPath)) {
+    if (!qFileRename(partPath, zipPath)) {
         return failNow(QStringLiteral("下载文件无法落盘"), false);
     }
 
@@ -3813,7 +3911,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     QFile headF(zipPath);
     QByteArray head8;
     if (qOpenReadOnly(headF)) {
-        head8 = headF.read(8);
+        head8 = qIODeviceReadN(headF, 8);   // zip 魔数，只需前 8 字节
         headF.close();
     }
     if (eifreader::isEifFile(head8)) {
@@ -3844,7 +3942,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
         const QString p = fi.filePath;
         if (p.isEmpty()) continue;
         bool unsafe = p.startsWith(QLatin1Char('/'));
-        const QStringList comps = p.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+        const QStringList comps = qStringSplitSkipEmpty(p, QLatin1Char('/'));
         for (const QString& c : comps) {
             if (c == QLatin1String("..") || c.contains(QLatin1Char(':'))) {
                 unsafe = true;
@@ -3863,7 +3961,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     QStringList tops;
     for (const auto& fi : infoList) {
         if (!fi.isValid()) continue;
-        const int slash = fi.filePath.indexOf(QLatin1Char('/'));
+        const int slash = qIndexOf(fi.filePath, QLatin1Char('/'));
         const QString first = slash < 0
             ? fi.filePath : fi.filePath.left(slash);
         if (!tops.contains(first)) tops.append(first);
@@ -3872,7 +3970,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     if (title.isEmpty()) {
         title = (tops.size() == 1) ? tops.first() : QString();
         if (title.endsWith(QLatin1Char('/'))) {
-            title.chop(1);
+            qStringChop(title, 1);
         }
     }
     if (title.isEmpty()) {
@@ -3919,7 +4017,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
             return list;
         }();
         for (const QString& e : eifs) {
-            const QString stem = sanitizeToken(QFileInfo(e).completeBaseName());
+            const QString stem = sanitizeToken(qFileInfoCompleteBaseName(QFileInfo(e)));
             const QString out = targetDir + QLatin1Char('/') + stem;
             QString e2;
             if (eifreader::extractEif(e, out, &e2)) {
@@ -3954,7 +4052,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     r.packId = packId;
     r.dir = targetDir;
     r.total = QFileInfo(zipPath).size();
-    r.md5Hex = QString::fromLatin1(md5.toHex());
+    r.md5Hex = QString::fromLatin1(qbaToHex(md5));
 
     // A2 内容变化检测：同源同包且 md5 变化 → 附加提示
     const QVariantMap oldMeta = QSettings().value(
@@ -4027,7 +4125,7 @@ StickerStore::InstallResult StickerStore::runInstallEif(
     r.packId = packId;
     r.dir = targetDir;
     r.total = QFileInfo(eifPath).size();
-    r.md5Hex = QString::fromLatin1(md5.toHex());
+    r.md5Hex = QString::fromLatin1(qbaToHex(md5));
 
     const QVariantMap oldMeta = QSettings().value(
         QStringLiteral("downloadedPackMeta/") + packId).toMap();
@@ -4068,7 +4166,7 @@ StickerStore::InstallResult StickerStore::runInstallTgs(
     // 单文件 tgs 落盘，随后的 importDirectory 会命中 tgs 分支生成占位
     const QString tgsDst = targetDir + QStringLiteral("/") + title
                            + QStringLiteral(".tgs");
-    if (!QFile::copy(tgsPath, tgsDst)) {
+    if (!qFileCopy(tgsPath, tgsDst)) {
         return {false, QStringLiteral("导入失败：tgs 文件无法落盘"), {}, {},
                 {}, {}, {}};
     }
@@ -4098,7 +4196,7 @@ StickerStore::InstallResult StickerStore::runInstallTgs(
     r.packId = packId;
     r.dir = targetDir;
     r.total = QFileInfo(tgsPath).size();
-    r.md5Hex = QString::fromLatin1(md5.toHex());
+    r.md5Hex = QString::fromLatin1(qbaToHex(md5));
 
     const QVariantMap oldMeta = QSettings().value(
         QStringLiteral("downloadedPackMeta/") + packId).toMap();
@@ -4127,7 +4225,7 @@ void StickerStore::finalizeInstall(DownloadTask* task, const InstallResult& r)
         meta.insert("versionRaw", hint.value("versionRaw"));
         meta.insert("md5", r.md5Hex);
         meta.insert("dir", r.dir);
-        meta.insert("dl_time", qint64(QDateTime::currentSecsSinceEpoch()));
+        meta.insert("dl_time", qDateTimeEpochSecs());
         settings.setValue(QStringLiteral("downloadedPackMeta/") + r.packId, meta);
 
         QStringList list = settings.value(
@@ -4182,7 +4280,7 @@ bool StickerStore::uninstallPack(const QString& packId, bool removeFiles)
         QStringList list = settings.value(
             QStringLiteral("downloadedPacks")).toStringList();
         // 卸载（保留文件）也从已下载列表移除；元数据仅彻底删除时清除
-        list.removeAll(packId);
+        qStringListRemoveAll(list, packId);
         settings.setValue(QStringLiteral("downloadedPacks"), list);
         if (removeFiles) {
             settings.remove(QStringLiteral("downloadedPackMeta/") + packId);
@@ -4206,7 +4304,8 @@ void StickerStore::cleanupAbandonedDownloads(const QStringList& knownUrls)
     // 删除指纹不属于已知源的 *.part
     QDir dlDir(dataDir + QStringLiteral("/packs/.download"));
     if (dlDir.exists()) {
-        const auto parts = dlDir.entryList(QStringList() << "*.part", QDir::Files);
+        const QStringList parts =
+            qDirEntryList(dlDir, QStringLiteral("*.part"), QDir::Files);
         for (const QString& name : parts) {
             const QString key = name.left(name.length() - 5); // 去掉 .part
             if (!keep.contains(key)) {
@@ -4251,10 +4350,9 @@ namespace {
 // 归一化内置源 URL：剥任意 gh-proxy 代理前缀（com/org），防改代理导致匹配失效
 QString normalizeSourceUrl(const QString& url)
 {
-    static const QStringList kGhProxyPrefixes = {
+    static const QStringList kGhProxyPrefixes = qStringListBuild(
         QStringLiteral("https://gh-proxy.com/"),
-        QStringLiteral("https://gh-proxy.org/"),
-    };
+        QStringLiteral("https://gh-proxy.org/"));
     for (const auto& prefix : kGhProxyPrefixes) {
         if (url.startsWith(prefix))
             return url.mid(prefix.length());

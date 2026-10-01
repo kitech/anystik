@@ -262,4 +262,27 @@ private:
     cJSON* m_node;
 };
 
+// ── qJsonParseObject()：解析并取顶层 object ──────────────────────────────
+// QJsonDocument/QJsonParseError 都是 Qt4.5 才引入的类型，Qt3 侧本 shim 的
+// fromJson 只有单参版本（本文件 Qt3 段），没有 QJsonParseError 出参。
+// 两侧的「失败」表现一致：解析出错 → 返回空文档 → isObject() 为假。
+// 但 Qt4.5+ 侧仍**保留** pe.error 检查，不靠 isObject() 一票否决 ——
+// 保持与原生语义逐条对应，不为了少写一行而放宽判定。
+// 失败时返回空 QJsonObject（Qt 的 QJsonObject::isEmpty() 为真）。
+inline QJsonObject qJsonParseObject(const QByteArray& raw, bool* ok = 0)
+{
+#if QT_VERSION < 0x040500
+    const QJsonDocument d = QJsonDocument::fromJson(raw);
+    const bool good = d.isObject();
+    if (ok) *ok = good;
+    return good ? d.object() : QJsonObject();
+#else
+    QJsonParseError pe;
+    const QJsonDocument d = QJsonDocument::fromJson(raw, &pe);
+    const bool good = (pe.error == QJsonParseError::NoError) && d.isObject();
+    if (ok) *ok = good;
+    return good ? d.object() : QJsonObject();
+#endif
+}
+
 #endif // QLSTIK_QJSON_SHIM_H

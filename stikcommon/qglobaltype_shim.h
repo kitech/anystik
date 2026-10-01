@@ -234,4 +234,23 @@ inline bool qBufferSetData(QBuffer& buf, const QByteArray& data)
 #endif
 }
 
+// ── qBufferMake()：让 QBuffer 绑定到一块外部 QByteArray ───────────────────
+// ⚠ 构造签名不同：Qt3 是 QBuffer(QByteArray) **按值**（qbuffer.h:54），
+//   Qt4+ 是 QBuffer(QByteArray*) 指针（隐式共享，就地读写）。
+//   故 Qt6 惯用的 `QBuffer b(&bytes);` 在 Qt3 下会报
+//   "invalid conversion from QByteArray* to int"（它去匹配别的重载了）。
+//
+// ⚠ 语义差异（重要，决定写路径怎么写）：Qt3 按值传参 + Qt3 的 QByteArray 是
+//   QMemArray<char>，无隐式共享，故 QBuffer 持有的是**独立缓冲**，往里写
+//   **不会**回写到外部变量；Qt4+ 则写的就是那块共享内存。
+//   → 故「编码后要拿结果」的用法（stickerstore 的 PNG/BMP 自检分支）不能只
+//     依赖构造，必须显式 `bytes = b.buffer();` 把内容取回来。见 qBufferTake。
+#if QT_VERSION < 0x040000
+inline QBuffer qBufferMake(QByteArray& ba) { return QBuffer(ba); }
+inline QByteArray qBufferTake(const QBuffer& buf) { return buf.buffer(); }
+#else
+inline QBuffer qBufferMake(QByteArray& ba) { return QBuffer(&ba); }
+inline const QByteArray& qBufferTake(const QBuffer& buf) { return buf.data(); }
+#endif
+
 #endif // QLSTIK_QGLOBALTYPE_SHIM_H

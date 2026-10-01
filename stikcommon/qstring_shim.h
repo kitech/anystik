@@ -219,17 +219,29 @@ inline void qStringListRemoveDuplicates(QStringList& list)
 #endif
 
 
-// ── QString::toLower()/indexOf()/lastIndexOf()（Qt3 命名不同）───────────────
+// ── QString::toLower()/toUpper()/indexOf()/lastIndexOf()（Qt3 命名不同）──────
 // Qt3 的 QString 里（/opt/qt338sh/include/qstring.h 实测）：
 //   toLower()   无；有 QString lower() const          → :522，返回**新串**
 //   indexOf()   无；有 int find(QChar, int, bool)     → :469
 //   lastIndexOf() 无；有 int findRev(QChar, int, bool) → :478
-// 三者语义与 Qt4+ 对应成员一致，故 Qt3 分支直接转调 Qt3 原语，Qt4+ 转调原生。
+//   toUpper()   无；有 QString upper() const          → :523，返回**新串**
+// 四者语义与 Qt4+ 对应成员一致，故 Qt3 分支直接转调 Qt3 原语，Qt4+ 转调原生。
+//
+// ⚠ lower()/upper() 的等价性**仅限 ASCII**。实测（码点探针，同一输入
+//   "Ünïcødé-X"）：
+//     Qt6 toLower → 00FC 006E 00EF 0063 00F8 0064 00E9   （9 字符，按码点映射）
+//     Qt3 lower() → 00E3 009C 006E 00E3 00AF ...          （13 字符，按 UTF-8
+//                  **字节**逐个映射：ü 的 0xC3 0xBC 两字节各自被当作独立字符）
+//   纯 ASCII 输入（"MiXeD.TgS"/"ABC"/""）两版输出逐字节相同。
+//   故调用点若对含非 ASCII 的串做大小写折叠，两版本行为不同，不能用本函数。
+//   本仓当前全部调用点输入均为 ASCII 后缀/格式名（png/jpg/tgs/svg/apng…），
+//   非 ASCII 不可达，此前提成立。
 //
 // 放在「Qt3 大块」之外：本组是跨版本统一入口，Qt4+ 也走本函数，这样调用点
 // 不用写版本分支。块内只有 Qt3 才编译，Qt6 侧会缺这几个名字。
 #if QT_VERSION < 0x040000
 inline QString qToLower(const QString& s) { return s.lower(); }
+inline QString qToUpper(const QString& s) { return s.upper(); }
 inline int     qIndexOf(const QString& s, QChar c, int from = 0)
 {
     return s.find(c, from);
@@ -248,6 +260,7 @@ inline int     qLastIndexOf(const QString& s, const QString& sub)
 }
 #else
 inline QString qToLower(const QString& s) { return s.toLower(); }
+inline QString qToUpper(const QString& s) { return s.toUpper(); }
 inline int     qIndexOf(const QString& s, QChar c, int from = 0)
 {
     return s.indexOf(c, from);
@@ -344,5 +357,182 @@ inline QString qFromStdString(const std::string& s)
 inline std::string qToStdString(const QString& s) { return s.toStdString(); }
 inline QString qFromStdString(const std::string& s) { return QString::fromStdString(s); }
 #endif
+
+// ── 字符串切分 / 大小写无关比较 ────────────────────────────────────────
+// ⚠ Qt3 的 split 有**好几个**可用实现，选错就出隐性语义差，故逐一核过：
+//   1. QStringList::split(...) 静态成员（qstringlist.h:76-79，QString/QChar/
+//      QRegExp 三个重载，最后一个参数 bool allowEmptyEntries）。本垫片用这个。
+//   2. QString::section(QChar sep, int start, int end, int flags)（qstring.h:505）
+//      配 SectionSkipEmpty（:500）。Qt3 无 SectionAll 常量，"取到末尾"只能写
+//      0xffffffff 默认值，要靠循环试探越界才能判定终止，比方案 1 脆得多。
+//   3. Qt3 无 QDir::splitPath（qdir.h 内 grep 无此符号），此路不通。
+// 关键差异：Qt3 **没有** QString::split 成员函数；Qt4+ 的
+// QString::split(QChar, Qt::SplitFlags) 在 Qt3 无对应物，Qt 4.0 才引入。
+// allowEmptyEntries=FALSE 即"丢弃空段"，对齐 Qt4+ 的 Qt::SkipEmptyParts ——
+// 已实测对拍（Qt3 QStringList::split vs Qt6 split(..., SkipEmptyParts)，
+// 4 组输入结果逐项相同）：
+//   "/a//b/" → [a, b]     "a" → [a]
+//   "//"    → []          "/a/b/" → [a, b]
+#if QT_VERSION < 0x040000
+inline QStringList qStringSplitSkipEmpty(const QString& s, QChar sep)
+{
+    return QStringList::split(sep, s, false);
+}
+#else
+inline QStringList qStringSplitSkipEmpty(const QString& s, QChar sep)
+{
+    return s.split(sep, Qt::SkipEmptyParts);
+}
+#endif
+
+// Qt3 的 QString 各查找/比较方法用 bool cs 参数，Qt4.0 起才改成
+// Qt::CaseSensitivity 枚举 —— Qt3 里连 Qt::CaseInsensitive 这个符号都不存在
+// （实测 /opt/qt338sh/include 全目录 grep 无该符号，只有无关的
+//  SectionCaseInsensitiveSeps）。
+#if QT_VERSION < 0x040000
+inline bool qStringContainsNoCase(const QString& hay, const QString& needle)
+{
+    return hay.contains(needle, false) != 0;
+}
+#else
+inline bool qStringContainsNoCase(const QString& hay, const QString& needle)
+{
+    return hay.contains(needle, Qt::CaseInsensitive);
+}
+#endif
+
+// Qt3 的 compare() 只有大小写敏感一个重载（qstring.h:681），没有 cs 参数，
+// 只能折叠后比。⚠ 折叠等价性仅限 ASCII —— 见本文件 qToLower() 上方注记，
+// 调用点的比较字面量必须全是 ASCII，否则 Qt3 会按 UTF-8 字节错误折叠。
+#if QT_VERSION < 0x040000
+inline bool qStringEqualsNoCase(const QString& a, const QString& b)
+{
+    return a.lower() == b.lower();
+}
+#else
+inline bool qStringEqualsNoCase(const QString& a, const QString& b)
+{
+    return a.compare(b, Qt::CaseInsensitive) == 0;
+}
+#endif
+
+// ── qStringListAt()：按索引取值 ────────────────────────────────────────
+// ⚠ Qt3 的 QStringList 派生自 QValueList<QString>，而 QValueList::at(size_type)
+// 返回的是**迭代器**（qvaluelist.h:555-556），不是元素引用 —— QStringList
+// 自己没覆盖它。故 Qt3 侧写 parts.at(i) 会拿到 const_iterator，赋给 QString
+// 即报 "no match for operator= (QString and QValueListConstIterator<QString>)"。
+// 同一类的 operator[] 才返回 const T&（qvaluelist.h:554）。Qt4+ 的
+// QList::at() 返回 const T&，与 Qt3 的 operator[] 语义一致，故直接转调。
+#if QT_VERSION < 0x040000
+inline QString qStringListAt(const QStringList& l, int i)
+{
+    return l[i];
+}
+#else
+inline QString qStringListAt(const QStringList& l, int i)
+{
+    return l.at(i);
+}
+#endif
+
+// ── qStringListRemoveAll() ───────────────────────────────────────────
+// Qt3 的 QStringList 派生自 QValueList<QString>，没有 Qt4.1 才加的
+// removeAll(const QString&)。但 QValueList 已有 remove(const T&)（qvaluelist.h:244），
+// 语义恰好就是「删掉所有等于 x 的元素、返回删除个数」，与 Qt6 removeAll 一致 ——
+// 已实测对拍（Qt3）"a b a c".remove("a") → removed=2, size=2, [b,c]；
+// 删不存在的值 → removed=0 且 size 不变。
+// ⚠ 别改用 QValueList 的另一个 remove(Iterator)（qvaluelist.h:239）：那个按下标，
+//   而 Qt3 **没有** remove(int) 重载，传 int 会去匹配 Iterator 指针重载。
+#if QT_VERSION < 0x040000
+inline void qStringListRemoveAll(QStringList& list, const QString& v)
+{
+    list.remove(v);
+}
+#else
+inline void qStringListRemoveAll(QStringList& list, const QString& v)
+{
+    list.removeAll(v);
+}
+#endif
+
+// ── qStringRefAt()：按索引取**可写**的 QChar 引用 ───────────────────────
+// ⚠ Qt3 的 QString::operator[] 与 at() 都按**值**返回 QChar（qstring.h:646-648：
+//   `QChar at(uint) const` / `QChar operator[](int) const`），拿不到可写引用，
+//   `out[i] = '_'` 会被丢弃。真正可写的只有 `QChar& ref(uint)`（qstring.h:654）。
+//   Qt4+ 的 QString::operator[] 返回 QCharRef，可直接读写。
+// 用于「原地逐字符替换」这类按位改写。
+#if QT_VERSION < 0x040000
+inline QChar& qStringRefAt(QString& s, int i) { return s.ref((uint)i); }
+#else
+inline QChar& qStringRefAt(QString& s, int i) { return s[i]; }
+#endif
+
+// ── qStringListBuild(...)：Qt3 下的「初始化列表」替代 ───────────────────
+// Qt3 的 QStringList（QValueList<QString> 子类）没有 initializer_list 构造，
+// 写 `const QStringList l = {"a", "b"};` 会报：
+//   could not convert ‘{QString::fromUtf8("packs"), ...}’ from
+//   ‘<brace-enclosed initializer list>’ to ‘const QStringList’
+// 用法：static const QStringList kX = qStringListBuild(a, b, c);
+// 局部 static 由函数返回值初始化 → C++11 magic static，线程安全地只建一次；
+// 不用 initializer_list，Qt3 侧照样能编。
+inline QStringList qStringListBuild0() { return QStringList(); }
+
+template <class A1>
+QStringList qStringListBuild(const A1& a1)
+{
+    QStringList l; l << a1; return l;
+}
+
+template <class A1, class A2>
+QStringList qStringListBuild(const A1& a1, const A2& a2)
+{
+    QStringList l; l << a1 << a2; return l;
+}
+
+template <class A1, class A2, class A3>
+QStringList qStringListBuild(const A1& a1, const A2& a2, const A3& a3)
+{
+    QStringList l; l << a1 << a2 << a3; return l;
+}
+
+template <class A1, class A2, class A3, class A4>
+QStringList qStringListBuild(const A1& a1, const A2& a2, const A3& a3, const A4& a4)
+{
+    QStringList l; l << a1 << a2 << a3 << a4; return l;
+}
+
+template <class A1, class A2, class A3, class A4, class A5>
+QStringList qStringListBuild(const A1& a1, const A2& a2, const A3& a3, const A4& a4, const A5& a5)
+{
+    QStringList l; l << a1 << a2 << a3 << a4 << a5; return l;
+}
+
+template <class A1, class A2, class A3, class A4, class A5, class A6>
+QStringList qStringListBuild(const A1& a1, const A2& a2, const A3& a3, const A4& a4, const A5& a5, const A6& a6)
+{
+    QStringList l; l << a1 << a2 << a3 << a4 << a5 << a6; return l;
+}
+
+template <class A1, class A2, class A3, class A4, class A5, class A6, class A7>
+QStringList qStringListBuild(const A1& a1, const A2& a2, const A3& a3, const A4& a4, const A5& a5, const A6& a6, const A7& a7)
+{
+    QStringList l; l << a1 << a2 << a3 << a4 << a5 << a6 << a7; return l;
+}
+
+template <class A1, class A2, class A3, class A4, class A5, class A6, class A7, class A8>
+QStringList qStringListBuild(const A1& a1, const A2& a2, const A3& a3, const A4& a4, const A5& a5, const A6& a6, const A7& a7, const A8& a8)
+{
+    QStringList l; l << a1 << a2 << a3 << a4 << a5 << a6 << a7 << a8; return l;
+}
+
+// 长列表（贴纸格式白名单有 18 项）走「字符指针数组 + 个数」，避免堆 18 个重载。
+// 元素按 const char* 原样进 QString —— ⚠ 走的是 fromAscii/Latin1 语义，
+// 故只可用于纯 ASCII 字面量（含格式名、URL 这类），不能放非 ASCII 文本。
+inline QStringList qStringListBuildAscii(const char* const* items, int count)
+{
+    QStringList l;
+    for (int i = 0; i < count; ++i) l << QString::fromAscii(items[i]);
+    return l;
+}
 
 #endif // QLSTIK_QSTRING_SHIM_H

@@ -92,4 +92,21 @@ inline QDateTime qDateTimeFromMsecs(qint64 msecs)
 }
 #endif // QT_VERSION < 0x040000
 
+// epoch 秒：Qt5.8 才引入 QDateTime::currentSecsSinceEpoch()，Qt3 完全无此符号
+// （Qt3 QDateTime 侧最近的是 toTime_t()，见 qdatetime.h:200 —— 正好就是
+// Unix 纪元秒，语义一致，直接转调，无需自己做时区/闰秒换算）。
+// 返回 qint64 而非 time_t：Qt6 的 currentSecsSinceEpoch() 返回 qint64，
+// 32 位平台下 time_t 只有 31 位有效位，装不下 2038 年后的纪元秒。
+#if QT_VERSION < 0x040000
+inline qint64 qDateTimeEpochSecs()
+{
+    return qint64(QDateTime::currentDateTime().toTime_t());
+}
+#else
+inline qint64 qDateTimeEpochSecs()
+{
+    return QDateTime::currentSecsSinceEpoch();
+}
+#endif
+
 #endif // QLSTIK_QDATETIME_SHIM_H

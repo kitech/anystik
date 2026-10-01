@@ -154,6 +154,46 @@ inline QByteArray qImageScanlineRgba(const QImage& im, int y)
     return row;
 }
 
+// ── Format 枚举 + convertToFormat() ───────────────────────────────────────
+//
+// 用法（stickerstore.cpp 剪贴板位图的自检降级编码路径）：
+//     const qImageFormat kFormats[] = { qFmtArgb32, qFmtRgb32, qFmtRgba8888 };
+//     for (qImageFormat f : kFormats) { const QImage c = qImageConvertToFormat(img, f); ... }
+// 原写法是 QImage::Format + img.convertToFormat(fmt)，Qt3 两者皆无。
+//
+// Qt3 侧的映射（全部实测自 /opt/qt338sh 真机，4×4 源图 fill(qRgba(10,20,30,40))）：
+//     qFmtArgb32    → copy() 保留 alpha 布局：depth=32 alpha=1 px=000A141E
+//     qFmtRgb32     → copy() + setAlphaBuffer(false)：depth=32 alpha=0 px=000A141E
+//     qFmtRgba8888  → 同 qFmtArgb32（Qt3 无「内存即 RGBA」的概念，见文件头；
+//                     本仓凡需 RGBA 字节序一律走 qImageRgbaBytes()）
+// 即三者在 Qt3 只差「带不带 alpha 通道」，像素值均不变 —— 这与 Qt6 三者都是
+// 32 位带 alpha、仅内存字节序/预乘不同相比是**降级近似**。
+//
+// ⚠ 该近似的可接受性依赖调用点语义：那里的用途是「逐个候选格式编码 PNG，
+//   再 probe 解回来验证 IDAT 有效」，判据是**编码能否成功**，不是格式精确性；
+//   Qt3 把候选压成 2 种（带/不带 alpha）仍能覆盖「RGB555 等异常格式」这一
+//   真实故障场景（Qt3 也不支持 24bpp，见另注）。若将来调用点改为依赖具体
+//   字节布局，必须改用 qImageRgbaBytes() 而非本枚举。
+enum qImageFormat { qFmtArgb32 = 0, qFmtRgb32 = 1, qFmtRgba8888 = 2 };
+
+inline QImage qImageConvertToFormat(const QImage& im, qImageFormat fmt)
+{
+    if (im.isNull()) return im;
+    QImage out = im.copy();
+    if (fmt == qFmtRgb32) out.setAlphaBuffer(false);
+    else out.setAlphaBuffer(true);
+    return out;
+}
+
+// 供日志用的格式标识（替代 QImage::format()，Qt3 无此成员）。
+// Qt3 无 Format 概念，只能报 depth 与是否有 alpha 通道；返回值仅进 qInfo 的
+// %d，**不可用于逻辑判断**（Qt3 与 Qt6 的数值含义本就不同）。
+inline int qImageFormatTag(const QImage& im)
+{
+    if (im.isNull()) return -1;
+    return (im.depth() << 1) | (im.hasAlphaBuffer() ? 1 : 0);
+}
+
 // Qt6 侧：全部转调原生 API，Qt6 行为与原调用点一字不差。
 #else
 
@@ -195,11 +235,22 @@ inline bool qImageSameRgba(const QImage& a, const QImage& b)
                     std::size_t(a.sizeInBytes())) == 0;
 }
 
-inline QByteArray qImageScanlineRgba(const QImage& im, int y)
+enum qImageFormat { qFmtArgb32 = 0, qFmtRgb32 = 1, qFmtRgba8888 = 2 };
+
+inline QImage qImageConvertToFormat(const QImage& im, qImageFormat fmt)
 {
-    if (im.isNull() || y < 0 || y >= im.height()) return QByteArray();
-    return QByteArray(reinterpret_cast<const char*>(im.constScanLine(y)),
-                      im.width() * 4);
+    if (im.isNull()) return im;
+    switch (fmt) {
+    case qFmtRgb32:      return im.convertToFormat(QImage::Format_RGB32);
+    case qFmtRgba8888:   return im.convertToFormat(QImage::Format_RGBA8888);
+    case qFmtArgb32:
+    default:             return im.convertToFormat(QImage::Format_ARGB32);
+    }
+}
+
+inline int qImageFormatTag(const QImage& im)
+{
+    return im.isNull() ? -1 : int(im.format());
 }
 
 #endif // QT_VERSION < 0x040000

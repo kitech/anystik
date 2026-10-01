@@ -211,6 +211,17 @@ inline bool qDirRemoveRecursively(QDir dir)
 #endif
 }
 
+// ── qDirAbsolutePath()：QDir::absolutePath()（Qt4.0 才有）──────────────────// Qt3 只有 absPath()（实测 qdir.h:104），语义一致：返回绝对路径，不含冗余
+// "." / ".." / 多余分隔符，但**可能含符号链接**（canonicalPath 才会解析）。
+inline QString qDirAbsolutePath(const QDir& dir)
+{
+#ifdef QT3_BUILD
+    return dir.absPath();
+#else
+    return dir.absolutePath();
+#endif
+}
+
 // ── qDirRelativeFilePath()：求 file 相对 dir 的路径（Qt 4.2 才有）─────────
 // Qt3 无。语义对齐 Qt6 的 QDir::relativeFilePath()。
 //
@@ -226,6 +237,56 @@ inline bool qDirRemoveRecursively(QDir dir)
 // cleanPath 后取最长公共前缀 i，回退层数 = dir 在 i 之后的非空段数，
 // 结果 = "../" × 层数 + file.mid(i+1)（跳过 file[i]，它在 dir 继续时必为 '/'，
 // 在双方不等时必为首个分歧字符），结果为空串时用 "."。
+// ── qDirEntryInfoList()：统一 entryInfoList 的返回类型 ─────────────────
+// ⚠ 两侧返回类型不同，且 Qt3 侧是**调用方拥有的堆指针**：
+//   Qt3  const QFileInfoList* entryInfoList(...)   —— QFileInfoList 就是
+//        typedef QPtrList<QFileInfo>（qdir.h:52），存的是指针，且 QDir 内部
+//        new 出来交给调用方 delete；
+//   Qt6  QFileInfoList entryInfoList(...)           —— QList<QFileInfo>，值列表。
+// 直接 `const auto infoList = dir.entryInfoList(...)` 在 Qt3 下会把**指针**
+// 存进 auto，于是 `for (const auto& fi : infoList)` 迭代的是指针 →
+// "begin/end was not declared in this scope"，且那份 QFileInfoList 还会泄漏。
+// 故本垫片把两种形态都归一成值列表（QFileInfo 本身可值拷贝，按值持有，
+// 与 Qt6 的 QList<QFileInfo> 语义一致），并在 Qt3 分支负责 delete。
+// ⚠ Qt3 没有 NoDotAndDotDot（qdir.h FilterSpec 无此项），Qt3 还会把 "." / ".."
+//   列进来 —— 已在文件头记备查，调用点需按名字自行排除，本垫片不代劳。
+#if QT_VERSION < 0x040000
+inline QList<QFileInfo> qDirEntryInfoList(const QDir& dir, int filterSpec)
+{
+    QList<QFileInfo> out;
+    const QFileInfoList* p = dir.entryInfoList(filterSpec);
+    if (!p) return out;
+    for (QFileInfoList::ConstIterator it = p->begin(); it != p->end(); ++it) {
+        if (*it) out << **it;      // QPtrList 取元素得到 QFileInfo*，解两次到值
+    }
+    delete p;                      // Qt3 由调用方负责释放
+    return out;
+}
+#else
+inline QList<QFileInfo> qDirEntryInfoList(const QDir& dir, int filterSpec)
+{
+    return dir.entryInfoList(filterSpec);
+}
+#endif
+
+// ── qDirEntryList()：统一 entryList 的过滤器参数形态 ─────────────────────
+// Qt3 的 QDir 只有 entryList(const QString& nameFilter, ...) —— 单个 QString
+// 过滤器（qdir.h:138），没有 Qt4.1 才引入的 QStringList 重载，也没有
+// nameFilters 那套「多个通配符」概念。
+// ⚠ 已实测（Qt3.5 /opt/qt338sh，目录含 120 个 .cpp）：Qt3 的单 QString 过滤器
+//   **不支持逗号分隔的多通配** —— entryList("*.cpp") 命中 120 项，而
+//   entryList("*.cpp,*.h") 命中 **0** 项（Qt5+ 的 QStringList 重载才会拆开）。
+//   即 Qt3 下「"a,b"」被当成一个字面通配串整体去 match。故本垫片只接受
+//   **单个**模式，且刻意不给 QStringList 重载，避免调用点以为多模式在
+//   Qt3 下也成立（那会静默返回空列表而非报错，最难查）。多模式需求请改为
+//   分别调用本函数后自行合并去重。
+inline QStringList qDirEntryList(const QDir& dir, const QString& nameFilter, int filterSpec)
+{
+    return dir.entryList(nameFilter, filterSpec);
+}
+
+// ── qDirEntryInfoList 的参数在 Qt3/Qt6 上枚举类型不同（Qt3 int，Qt6 Filters），
+// 调用点直接写 QDir::Files|Dirs|Readable 两边都能过，无需本垫片。
 inline QString qDirRelativeFilePath(const QDir& dir, const QString& file)
 {
 #ifdef QT3_BUILD

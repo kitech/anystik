@@ -124,4 +124,19 @@ T qListTakeFirst(QList<T>& list)
     return list.takeFirst();
 }
 
+// reserve：Qt3 的 QValueList/QPtrList 都无 capacity 概念，也没有 Qt4 QList 的
+// reserve(n)（"size 不变、容量变大"）。与 qbaReserve 同理，只能 no-op ——
+// 绝不能用 resize(n) 顶替，那会把 size 真的变成 n，后续 append 从 n 起追加，
+// 结果全错（贴纸缩略图列表会带一串前导空元素）。代价只是失去一次预分配，
+// size 不变这一可观察行为必须严格保持。
+template <class T>
+void qListReserve(QList<T>& list, int n)
+{
+#if QT_VERSION < 0x040000
+    (void)list; (void)n;     // Qt3：no-op，保持 size 不变
+#else
+    list.reserve(n);
+#endif
+}
+
 #endif // QLSTIK_QLIST_SHIM_H
