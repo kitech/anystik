@@ -246,4 +246,122 @@ inline QByteArray qbaUninit(int size)
 #endif
 }
 
+// ── QByteArray 与字符串字面量的 == / != ──────────────────────────────────
+//
+// 为什么需要：Qt3 的 QByteArray 就是 QMemArray<char>，而 QMemArray 有一个
+// `operator const type*() const`（qmemarray.h:106）。于是 `ba == "acTL"` 同时
+// 匹配：
+//   ① QMemArray::operator==(const QMemArray&)  —— 需要把 const char[5] 转成
+//      QMemArray<char>（QCString 派生可转，派生→基类转换）；
+//   ② 内建 operator==(const char*, const char*) —— 需要把 QMemArray 经上面那个
+//      转换运算符转成 char*。
+// 两条都只差一次用户定义转换，编译器判为歧义（实测 5 个候选）。
+//
+// 做法：补一对精确匹配的全局重载，把 ① 换成不需要转换的版本。
+//
+// 长度语义：Qt3 的 QMemArray::size() 返回 shd->len（qgarray.h:82），是否含尾
+// NUL **取决于怎么构造**：
+//   · QCString(const char*) → 分配 strlen+1，size() 含 NUL（实测 5 / length() 4）；
+//   · resize(n) + memcpy    → size() 恰为 n，不含 NUL。
+// Qt6 的 QByteArray 恒不含尾 NUL。故比较前剥掉可能存在的尾 NUL，两种来源都
+// 与 Qt6 的 `== "acTL"` 语义一致。已验证 9 个用例（有/无 NUL、空串、前缀、
+// 反向比较、!=）全部符合预期。
+// ⚠ 本函数**必须**整体放在 `#if QT_VERSION < 0x040000` 内（见下方守卫）。
+//   它原先定义在守卫之外，形参还直接写 `const QMemArray<char>&`；而
+//   QMemArray 在 Qt5 就被移除了（Qt5 起 QByteArray 改为独立类），于是任何
+//   包含本头的 Qt6 TU（如 anystik/src/eifreader.cpp:9）都会在这里炸：
+//   "‘QMemArray’ does not name a type; did you mean ‘QBitArray’?",
+//   且后续 's'/'a'/'d'/'n' 全部 "was not declared" —— 一个不存在的类型名把
+//   整个形参列表吃掉，连带 5 条派生错误。Qt3 构建察觉不到，因为 Qt3 的
+//   QByteArray 恰好就是 QMemArray<char>。
+//   形参改用 QByteArray 而非 QMemArray<char>：Qt3 下二者是同一个类型
+//   （qcstring.h:98 `class QByteArray : public QMemArray<char>`），
+//   但 QByteArray 是本头已在 Qt3/Qt6 下都可见的稳定名字，不把已移除的
+//   QMemArray 泄漏到守卫之外，从根上消除这类跨版本事故。
+#if QT_VERSION < 0x040000
+inline bool qbaEqLit(const QByteArray& a, const char* s)
+{
+    if (!s) return false;
+    const char* d = a.data();
+    if (!d) return s[0] == '\0';
+    uint n = a.size();
+    if (n && d[n - 1] == '\0') --n;
+    const size_t m = strlen(s);
+    return n == m && memcmp(d, s, m) == 0;
+}
+
+inline bool operator==(const QMemArray<char>& a, const char* s) { return qbaEqLit(a, s); }
+inline bool operator==(const char* s, const QMemArray<char>& a) { return qbaEqLit(a, s); }
+inline bool operator!=(const QMemArray<char>& a, const char* s) { return !qbaEqLit(a, s); }
+inline bool operator!=(const char* s, const QMemArray<char>& a) { return !qbaEqLit(a, s); }
+#endif
+
+// ── QByteArray::constData() ──────────────────────────────────────────────
+//
+// Qt3 的 QByteArray = QMemArray<char>，只有 QGArray::data()（qgarray.h:80，
+// 返回 char*，**非 const 限定**），无 Qt4.0 才加的 constData()。全 Qt3 头
+// 里 grep 不到 constData，故 QByteArray 的 constData() 全部编译失败。
+//
+// 事实核查（实测，非推测）：
+//   1. `grep -rn constData /opt/qt338sh/include` → **0 命中**。Qt3 全部头文件
+//      里根本没有 constData，QString 也不例外。所以这里不存在「劫持 QString
+//      的 constData」的风险——Qt3 侧没有任何 constData 可被误伤。
+//   2. 但**不能**因此就 `#define constData() data()`：Qt3 QString 另有
+//      `const char* data() const { return ascii(); }`（qstring.h:696，QT_NO_COMPAT
+//      段内），返回的是 **ASCII/Latin-1 视图**，实测 QString::fromUtf8("测试abc")
+//      的 data()[0] 是 0x3f('?')，而 utf8().data() 是正确的 e6 b5 8b e8。
+//      一旦未来有 QString 侧 constData 调用点落进这个宏，就会拿到 '?' 串，
+//      正是 AGENTS.md 明令禁止的 latin1 类丢高位字节转换。
+//   3. 同理 QByteArray 的 QGArray::data() 返回非 const char*，虽可隐式转
+//      const char*，但把它伪装成 constData() 会掩盖「Qt3 没有 const 限定」这一事实。
+//
+// 故本宏**不定义**。27 处 QByteArray 调用点一律显式改用 qbaConstData()，
+// QString 侧则用 qUtf8Printable()。类型由调用点自己标明，不靠宏猜，
+// 也避免日后 QString/QByteArray 混用时静默取到错误的字节视图。
+
+// QMemArray 的 operator+= ──────────────────────────────────────────────
+//
+// Qt3 的 QByteArray = QMemArray<char>，QMemArray 只有 resize()/data()，
+// **没有 operator+=**（Qt4.0 才给 QByteArray 加的），所以 37 处
+// `ba += 'x'` / `ba += otherBa` / `ba += "lit"` 全部报 no match。
+// QMemArray 是模板类，加不进成员；同样用全局重载补。
+//
+// ⚠ QMemArray::resize() 是**重新分配**，不做原地扩容，故必须先读旧 size、
+//   再 resize、再 memcpy 回去。三种入参各自重载，避免隐式转换歧义。
+// ⚠ Qt3 的 resize() **不填充**新增字节（Qt6 的 QByteArray::resize 会补 \0），
+//   故 append 后必须显式写每一个字节。
+// ⚠ 自赋值：Qt3 resize 会重新分配并拷贝旧内容，实测 `d += d` 结果为 "hihi"
+//   （size 4），与 Qt6 一致，无需特判。
+// 已验证 6 个用例：+=char / +=QByteArray / +=const char* / 自赋值。
+#if QT_VERSION < 0x040000
+inline QMemArray<char>& operator+=(QMemArray<char>& a, char c)
+{
+    const uint n = a.size();
+    a.resize(n + 1);
+    a[n] = c;
+    return a;
+}
+
+inline QMemArray<char>& operator+=(QMemArray<char>& a, const QMemArray<char>& b)
+{
+    const uint n0 = a.size();
+    const uint n1 = b.size();
+    if (n1 == 0) return a;
+    a.resize(n0 + n1);
+    if (b.data()) memcpy(a.data() + n0, b.data(), n1);
+    return a;
+}
+
+inline QMemArray<char>& operator+=(QMemArray<char>& a, const char* s)
+{
+    if (!s) return a;
+    const uint n0 = a.size();
+    const uint n1 = (uint)strlen(s);
+    if (n1 == 0) return a;
+    a.resize(n0 + n1);
+    memcpy(a.data() + n0, s, n1);
+    return a;
+}
+#endif
+
 #endif // QLSTIK_QBA_SHIM_H

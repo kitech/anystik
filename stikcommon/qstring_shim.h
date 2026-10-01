@@ -32,6 +32,7 @@
 #include <QStringList>
 #endif
 #include <string.h>
+#include <string>   // qToStdString/qFromStdString（Qt3 无 QString::toStdString）
 
 #if QT_VERSION < 0x050a00
 #if QT_VERSION >= 0x040000
@@ -40,6 +41,18 @@
 // Qt3 的 QString::utf8() 返回 QCString（QByteArray 子类），无 constData()
 #define qUtf8Printable(string) ((const char*)(string).utf8().data())
 #endif
+#endif
+
+// qPrintable（Qt4.7 引入）—— 供 qWarning/qDebug 的 printf 风格 %s 实参用。
+// Qt6 的定义是 `QtPrivate::asString(s).toLocal8Bit().constData()`（qstring.h:1683）。
+// Qt3 侧改用 utf8() 而非 local8Bit()：Qt3 的 local8Bit() 走本地 8 位编码，
+// 在 C/POSIX locale 下会把非 ASCII 字符替换成 '?'，日志里路径/中文名全丢。
+// utf8() 是保真的那一个，且与本仓 qUtf8Printable 及 AGENTS.md「Qt3 侧非 ASCII
+// 一律走 utf8()」一致。实测 C locale 下 QString::fromUtf8("路径/文件-测试.webp")
+// 的 utf8() 与 local8Bit() 同为 25 字节原样输出，用 utf8() 不会更差。
+// 返回的是临时 QCString 的 data()，其生命周期覆盖整个完整表达式，与 Qt6 同理。
+#if QT_VERSION < 0x040700
+#define qPrintable(string) ((const char*)(string).utf8().data())
 #endif
 
 // QStringLiteral 是 Qt 5.0 才引入（Qt3/Qt4 都没有，不是 4.1）。
@@ -146,6 +159,25 @@ inline QString qFromUtf8BA(const QByteArray& ba)
 // 注意 qQStringToBA(const QCString&) **不**在这里提供 —— QCString 在 Qt5+ 根本
 // 不存在，加了等于在 Qt6 下再炸一次。Qt4+ 侧直接用原生 toUtf8/toLatin1。
 //
+// ── QString ↔ std::string 互转（Qt4 才有 toStdString/fromStdString）──────
+// Qt3 的 QString 没有 toStdString/fromStdString（Qt 4.0 引入，随
+// <string> 支持一起加的），stickerstore.cpp 有 14 处与 std::string 互转
+// （StickerRow/StickerPackRow 的 std::string 字段 ↔ QString）。
+//
+// 编解码：Qt6 的 QString::toStdString() 等价于
+//   QString::toUtf8().toStdString()
+// 即 **UTF-8** 字节流（qstring.h:1670 注释亦明言 UTF-8）。Qt3 侧必须走
+// utf8() 而非 latin1()/local8Bit()：贴纸包 id/路径/中文名会丢高位字节，
+// 正是 AGENTS.md 明令禁止的那类转换。故两端统一 UTF-8。
+//
+// ⚠ 这两个函数必须定义在 Qt3/Qt4+ **两个版本块之外**（实现见整文件结尾），
+//   不能落在某一个 `#if QT_VERSION < 0x040000` 内部：
+//   stickerstore.cpp 的函数体是 Qt3/Qt6 共用的一份，不按版本分叉，所以
+//   Qt6 也需要这两个名字。此前它们被放进 Qt3 块内部，导致 Qt3 侧全绿、
+//   Qt6 侧却报 "'qFromStdString' was not declared in this scope; did you
+//   mean 'qFromStdU16String'?" —— Qt3 语法门禁看不到这个洞，只有 Qt6 正式
+//   构建能暴露。教训：跨版本共用代码所依赖的垫片，定义必须落在版本守卫之外。
+
 // ── QString::trimmed()（Qt4 才有，Qt3 只有 stripWhiteSpace()）────────────
 // sitelistclient.cpp 解析 <img src=" ..."> 时要 .trimmed()。Qt3 的
 // stripWhiteSpace() 与 Qt4+ 的 trimmed() 都只去首尾空白，内部空白不动，语义一致。
@@ -291,6 +323,26 @@ inline QStringList qSplit(const QString& s, QChar sep)
     // （Qt4 默认就是 KeepEmptyParts，只有 Qt::SkipEmptyParts 才丢空段）。
     return s.split(sep);
 }
+#endif
+
+// ── QString ↔ std::string 互转：定义在**所有版本守卫之外** ────────────────
+// 见上方 162 行起的说明：stickerstore.cpp 的函数体 Qt3/Qt6 共用，故本组
+// 函数必须在两个版本块之外定义，否则 Qt3 侧编译通过而 Qt6 侧未声明。
+// Qt4+ 直接转调原生 toStdString/fromStdString（Qt6 实测走 UTF-8）。
+#if QT_VERSION < 0x040000
+inline std::string qToStdString(const QString& s)
+{
+    const QCString u = s.utf8();
+    return std::string(u.data(), (size_t)u.length());
+}
+
+inline QString qFromStdString(const std::string& s)
+{
+    return QString::fromUtf8(s.data(), (int)s.size());
+}
+#else
+inline std::string qToStdString(const QString& s) { return s.toStdString(); }
+inline QString qFromStdString(const std::string& s) { return QString::fromStdString(s); }
 #endif
 
 #endif // QLSTIK_QSTRING_SHIM_H

@@ -18,15 +18,74 @@
 #include "macgifconverter.h"
 #include "macpasteboard.h"
 #endif
+#ifdef QT3_BUILD
+// Qt3 无 QtCore/ 这类模块目录，vendor qnaturalsort.h 的 `#include <QtCore>`
+// 直接 fatal error；且 Qt3 无 Qt::CaseSensitivity / QChar::isLower()。
+// 用 stikcommon 垫片（算法逐行照搬 vendor，见该头内差异清单）。
+#include "qnaturalsort_shim.h"
+#else
 #include "qnaturalsort.h"
+#endif
 
+#include <algorithm>
+#ifdef QT3_BUILD
+// Qt3 头文件名全小写、无驼峰别名（/opt/qt338sh/include 下 344 个 .h 全是
+// qstring.h / qdir.h 这种形式），且以下类在 Qt3 全不存在，各自走 stikcommon
+// 垫片。逐项对应关系（依据见各垫片头内注释）：
+//   QStandardPaths        → Qt 5.0 引入    → qstandardpaths_shim.h
+//   QDirIterator          → Qt 4.2 引入    → qdir_shim.h
+//   QDir 静态/成员缺口    → tempPath(4.2) / cleanPath(4.2) /
+//                          relativeFilePath(4.2) / removeRecursively(5.0) → qdir_shim.h
+//   QImageReader          → Qt 4.0 引入    → qimagereader_shim.h
+//   QClipboard/QMimeData/QGuiApplication → Qt3 只有 QApplication +
+//                          QClipboard + QMimeSource              → qclipboard_shim.h
+//   QJsonDocument/Object  → Qt 5.0 引入    → qjson_shim.h（底层 cJSON）
+//   QMimeDatabase/QMimeType → Qt 5.0 引入  → qmimedatabase_shim.h
+//   QNetworkAccessManager/Reply/Request → Qt 4.6 引入（Qt3 只有 QHttp） → qnam_shim.h
+//   QByteArrayView        → Qt 5.10 引入   → qbytearrayview_shim.h
+//   QList/QVector/QSet     → Qt3 是 QPtrList/QPtrVector/QMap 派生  → 对应 *_shim.h
+//   QIODevice 枚举 IO_*    → Qt3 用宏而非枚举成员               → qglobaltype_shim.h
+//   QDebug 运算符重载      → Qt3 只有 qDebug()                 → qdebug_shim.h
+//   QDateTime::toString 带格式名                            → qdatetime_shim.h
+//   QStringLiteral/QString::split 语义差异等                 → qstring_shim.h
+// 保留 Qt3 原生小写头的：QDir / QFile / QBuffer / QFileInfo / QDateTime /
+// QMutex / QSettings / QUrl / QPainter。
+#include <qdir.h>
+#include <qfile.h>
+#include <qbuffer.h>
+#include <qfileinfo.h>
+#include <qdatetime.h>
+#include <qmutex.h>
+#include <qsettings.h>
+#include <qurl.h>
+#include <qpainter.h>
+#include "qstandardpaths_shim.h"
+#include "qdir_shim.h"
+#include "qimagereader_shim.h"
+#include "qclipboard_shim.h"
+#include "qjson_shim.h"
+#include "qmimedatabase_shim.h"
+#include "qnam_shim.h"
+#include "qfileinfo_shim.h"
+#include "qtemporaryfile_shim.h"
+#include "qdatetime_shim.h"
+#include "qdebug_shim.h"
+#include "qset_shim.h"
+#include "qlist_shim.h"
+#include "qvector_shim.h"
+#include "qbytearray_shim.h"
+#include "qglobaltype_shim.h"
+#include "qba_shim.h"
+#include "qbytearrayview_shim.h"
+#include "qcryptographichash_shim.h"
+#include "qzipreader_shim.h"
+#else
 #include <QStandardPaths>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
 #include <QBuffer>
 #include <QFileInfo>
-#include <algorithm>
 #include <QImageReader>
 #include <QClipboard>
 #include <QMimeData>
@@ -36,6 +95,19 @@
 #include <QDateTime>
 #include <QMutex>
 #include <QDebug>
+// 跨版本自由函数垫片（qbaConstData / qOpenReadOnly / qOpenWriteOnly /
+// qBufferSetData / qAbsPath / qMkpath / qToStdString / qFromStdString 等）。
+// 这些头内部逐项带 QT_VERSION 守卫，Qt6 分支只取原生实现，故 Qt6 侧也安全
+// 可包含 —— 必须包含，因为下面的函数体是 Qt3/Qt6 **共用**的一份代码，
+// 不按版本分叉（分叉会掩盖行为漂移）。
+//
+// 教训：qToStdString/qFromStdString 最初被我放进 qstring_shim.h 的
+// `#if QT_VERSION < 0x040000` 块**内部**，Qt6 下因而未定义；同名调用
+// 在 Qt3 侧编译通过、Qt6 侧 "was not declared in this scope"，
+// 而 Qt6 正式构建里这块 TU 编译较晚，Qt3 语法门禁完全看不到这个洞。
+#include "qba_shim.h"
+#include "qglobaltype_shim.h"
+#include "qdir_shim.h"   // qDirTempPath/qDirCleanPath/qDirRemoveRecursively/qDirRelativeFilePath
 #include <QMimeDatabase>
 #include <QMimeType>
 #include <QSettings>
@@ -44,33 +116,29 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QSet>
 #include <QtConcurrent/QtConcurrent>
+#include <QCryptographicHash>
+#include <QByteArrayView>
+#include <QTemporaryFile>
+// QPainter/QFont：makeTgsPlaceholder() 用 QPainter 画占位图并读 p.font()。
+// 重构 include 块时误删了 Qt6 分支的这行（Qt3 分支已由 <qpainter.h> 覆盖），
+// 导致 Qt6 报 "QPainter has initializer but incomplete type"。QGuiApplication
+// 只前向声明 QPainter/QFont，不拉入完整定义，故必须显式包含。
+#include <QPainter>
+#include <QFont>
+#include <QtCore/private/qzipreader_p.h>
+#endif
 // qToUtf8BA()：跨版本 QString→UTF-8 QByteArray（Qt3 走 QCString 中转，Qt4+
 // 即 toUtf8）。QCryptographicHash 的 5 处入参用它替代 Qt6 专有的 .toUtf8()。
 // 本垫片在两个分支都定义 qToUtf8BA，Qt6 侧不定义任何宏，故可无条件包含。
 #include "qstring_shim.h"
-#ifdef QT3_BUILD
-// Qt3 无 QCryptographicHash（Qt4.1 引入）、无 QByteArrayView（Qt5.10 引入）：
-// 用 stikcommon 的对应垫片（见 stikcommon.pri「批次 5：QCryptographicHash」段）。
-#include "qcryptographichash_shim.h"
-#include "qbytearrayview_shim.h"
-#else
-#include <QCryptographicHash>
-#include <QByteArrayView>
-#endif
-#ifdef QT3_BUILD
-// Qt3 无 qzipreader 私有类：用 stikcommon/qzipreader_shim（按 Qt 6.7 的
-// corelib/io/qzip.cpp 移植，与 Qt6 原生逐项行为对拍通过，见
-// stikcommon/stikcommon.pri「批次 5：QZipReader 分版本实现」段）。
-#include "qzipreader_shim.h"
-#else
-#include <QtCore/private/qzipreader_p.h>
-#endif
-#include <QTemporaryFile>
+// Qt3 无 QImage 的 Format 概念（构造参数是 int depth）、无 scaled()、
+// 无 Format_RGBA8888/Format_ARGB32_Premultiplied、Qt3 32 位图内存是 BGRA
+// 而非 RGBA。qimage_shim.h 把这些差异收进自由函数，Qt6 分支转调原生 API，
+// 故下面所有调用点写法两端一致、Qt6 行为不变。
+#include "qimage_shim.h"
 #include "../vendor/tangora_gif.h"
 #include <zlib.h>
-#include <QPainter>
 #include <string>
 
 #ifdef Q_OS_ANDROID
@@ -110,7 +178,7 @@ bool StickerStore::ensureInit()
     }
 
     qDebug() << "[StickerStore] init Storage at:" << dataDir;
-    if (!Storage::instance().init(dataDir.toUtf8().constData())) {
+    if (!Storage::instance().init(qUtf8Printable(dataDir))) {
         qWarning() << "[StickerStore] Storage::init failed";
         return false;
     }
@@ -149,7 +217,7 @@ QString StickerStore::stickerBaseDir() const
                 QStandardPaths::AppLocalDataLocation);
         }
         if (m_stickerBaseDir.isEmpty())
-            m_stickerBaseDir = QDir::tempPath();
+            m_stickerBaseDir = qDirTempPath();
     }
     return m_stickerBaseDir;
 }
@@ -160,7 +228,7 @@ QString StickerStore::storageRootPath(StorageRoot r) const
     case StorageRoot::AppPrivate: {
         QString p = QStandardPaths::writableLocation(
             QStandardPaths::AppLocalDataLocation);
-        return p.isEmpty() ? QDir::tempPath() : p;
+        return p.isEmpty() ? qDirTempPath() : p;
     }
     case StorageRoot::Pictures: {
 #ifdef Q_OS_ANDROID
@@ -179,8 +247,8 @@ QString StickerStore::storageRootPath(StorageRoot r) const
 
 bool StickerStore::isCurrentStoragePictures() const
 {
-    const QString cur = QDir::cleanPath(stickerBaseDir());
-    const QString pics = QDir::cleanPath(storageRootPath(StorageRoot::Pictures));
+    const QString cur = qDirCleanPath(stickerBaseDir());
+    const QString pics = qDirCleanPath(storageRootPath(StorageRoot::Pictures));
     return !pics.isEmpty() && cur == pics;
 }
 
@@ -199,7 +267,7 @@ QString StickerStore::relativeToBase(const QString& abs)
 {
     const QString base = stickerBaseDir();
     if (abs == base || abs.startsWith(base + QLatin1Char('/')))
-        return abs.mid(base.size() + 1);
+        return abs.mid(base.length() + 1);
     // 不在 base 下 → 原样（如外部绝对路径）
     return abs;
 }
@@ -217,7 +285,7 @@ void StickerStore::cleanupMigrationSource(const QString& fromRoot)
         QDir d(p);
         if (d.exists()) {
             // best-effort：失败仅残留旧副本，不影响迁移成功的正确性
-            if (!QDir(d.path()).removeRecursively())
+            if (!qDirRemoveRecursively(QDir(d.path())))
                 qWarning("[StickerStore] 清理旧目录失败: %s",
                          qPrintable(p));
         }
@@ -244,7 +312,7 @@ static void ensureCrc64Table()
 static quint64 crc64File(const QString& path)
 {
     QFile f(path);
-    if (!f.open(QIODevice::ReadOnly))
+    if (!qOpenReadOnly(f))
         return 0;
     ensureCrc64Table();
     quint64 crc = 0xFFFFFFFFFFFFFFFFULL;
@@ -288,8 +356,8 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
         return false;
     }
 
-    const QString fromRoot = QDir::cleanPath(stickerBaseDir());
-    const QString toRoot = QDir::cleanPath(storageRootPath(target));
+    const QString fromRoot = qDirCleanPath(stickerBaseDir());
+    const QString toRoot = qDirCleanPath(storageRootPath(target));
     if (toRoot.isEmpty()) {
         if (errorOut) *errorOut = QStringLiteral("无法确定目标目录");
         return false;
@@ -299,7 +367,7 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
         QSettings().setValue(QStringLiteral("storageRoot"), toRoot);
         return true;
     }
-    if (!QDir().mkpath(toRoot)) {
+    if (!qMkpath(toRoot)) {
         if (errorOut) *errorOut = QStringLiteral("无法创建目标目录：")
                                   + toRoot;
         return false;
@@ -338,7 +406,7 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
             if (stored.startsWith(QLatin1Char('/'))) {
                 // 绝对路径
                 if (stored.startsWith(fromRoot + QLatin1Char('/'))) {
-                    const QString rel = stored.mid(fromRoot.size() + 1);
+                    const QString rel = stored.mid(fromRoot.length() + 1);
                     const QString to = toRoot + QLatin1Char('/') + rel;
                     if (!seenTo.contains(to)) {
                         seenTo.insert(to);
@@ -346,7 +414,7 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
                     }
                     r.relMoved.append(rel);
                 } else if (stored.startsWith(toRoot + QLatin1Char('/'))) {
-                    const QString rel = stored.mid(toRoot.size() + 1);
+                    const QString rel = stored.mid(toRoot.length() + 1);
                     if (!seenTo.contains(stored)) {
                         seenTo.insert(stored);
                         plan.append({QString(), stored, rel, 0});
@@ -403,7 +471,7 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
                 // 不一致 → 删除旧文件，重新拷贝
                 QFile::remove(to);
             }
-            if (!QDir().mkpath(QFileInfo(to).absolutePath())) {
+            if (!qMkpath(qAbsPath(QFileInfo(to)))) {
                 r.failDetail = QStringLiteral("无法创建子目录：")
                                + QFileInfo(to).absolutePath();
                 failed = true; break;
@@ -451,7 +519,7 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
                 QString upd;
                 if (stored.startsWith(toRoot + QLatin1Char('/'))) {
                     // 绝对且位于新 base 下 → 相对化
-                    upd = stored.mid(toRoot.size() + 1);
+                    upd = stored.mid(toRoot.length() + 1);
                 } else if (stored.startsWith(QLatin1Char('/'))) {
                     // 其他绝对（外部/旧）→ 保留不动
                     continue;
@@ -461,7 +529,7 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
                 }
                 SqliteStatement up = db.prepare(
                     "UPDATE stickers SET file_path=?1 WHERE rowid=?2");
-                if (!up.isPrepared() || !up.bind(1, upd.toUtf8().constData())
+                if (!up.isPrepared() || !up.bind(1, qUtf8Printable(upd))
                         || !up.bind(2, static_cast<int64_t>(rowid)) || !up.step()) {
                     dbOk = false; break;
                 }
@@ -524,10 +592,10 @@ QVector<StickerPackBrief> StickerStore::packs(int installed, const char* orderby
     auto rows = stickerDb().list_packs(installed, orderby, limit, offset);
     for (const auto& row : rows) {
         StickerPackBrief b;
-        b.id = QString::fromStdString(row.id);
+        b.id = qFromStdString(row.id);
         b.title = QString::fromUtf8(row.title.c_str());
         b.author = QString::fromUtf8(row.author.c_str());
-        b.coverPath = resolveStickerPath(QString::fromStdString(row.cover_path));
+        b.coverPath = resolveStickerPath(qFromStdString(row.cover_path));
         b.position = row.position;
         result.append(b);
     }
@@ -543,13 +611,13 @@ QVector<StickerBrief> StickerStore::stickers(const QString& packId,
     if (!ensureInit()) {
         return result;
     }
-    auto rows = stickerDb().list_stickers(packId.toUtf8().constData(),
+    auto rows = stickerDb().list_stickers(qUtf8Printable(packId),
                                           orderby, limit, offset, deleted, emoji);
     for (const auto& row : rows) {
         StickerBrief b;
-        b.id = QString::fromStdString(row.id);
-        b.packId = QString::fromStdString(row.pack_id);
-        b.filePath = resolveStickerPath(QString::fromStdString(row.file_path));
+        b.id = qFromStdString(row.id);
+        b.packId = qFromStdString(row.pack_id);
+        b.filePath = resolveStickerPath(qFromStdString(row.file_path));
         b.emoji = QString::fromUtf8(row.emoji.c_str());
         b.width = row.width;
         b.height = row.height;
@@ -570,9 +638,9 @@ QVector<StickerBrief> StickerStore::recent(int limit)
     auto rows = stickerDb().list_recent_stickers(limit);
     for (const auto& row : rows) {
         StickerBrief b;
-        b.id = QString::fromStdString(row.id);
-        b.packId = QString::fromStdString(row.pack_id);
-        b.filePath = resolveStickerPath(QString::fromStdString(row.file_path));
+        b.id = qFromStdString(row.id);
+        b.packId = qFromStdString(row.pack_id);
+        b.filePath = resolveStickerPath(qFromStdString(row.file_path));
         b.emoji = QString::fromUtf8(row.emoji.c_str());
         b.width = row.width;
         b.height = row.height;
@@ -590,12 +658,12 @@ QVector<StickerBrief> StickerStore::search(const QString& query)
     if (!ensureInit() || query.isEmpty()) {
         return result;
     }
-    auto rows = stickerDb().search_stickers(query.toUtf8().constData());
+    auto rows = stickerDb().search_stickers(qUtf8Printable(query));
     for (const auto& row : rows) {
         StickerBrief b;
-        b.id = QString::fromStdString(row.id);
-        b.packId = QString::fromStdString(row.pack_id);
-        b.filePath = resolveStickerPath(QString::fromStdString(row.file_path));
+        b.id = qFromStdString(row.id);
+        b.packId = qFromStdString(row.pack_id);
+        b.filePath = resolveStickerPath(qFromStdString(row.file_path));
         b.emoji = QString::fromUtf8(row.emoji.c_str());
         b.width = row.width;
         b.height = row.height;
@@ -613,7 +681,7 @@ int StickerStore::countStickers(const QString& packId)
         return 0;
     }
     return stickerDb().count_stickers(
-        packId.isEmpty() ? nullptr : packId.toUtf8().constData());
+        packId.isEmpty() ? nullptr : qUtf8Printable(packId));
 }
 
 // ── 目录导入：每个子目录 = 一个贴纸包，支持图片递归 ──
@@ -633,7 +701,7 @@ static bool gunzipTgs(const QByteArray& in, QByteArray* raw)
     z_stream zs;
     std::memset(&zs, 0, sizeof(zs));
     if (inflateInit2(&zs, 15 + 16) != Z_OK) return false;   // 31: 自动识别 gzip/zlib
-    zs.next_in  = reinterpret_cast<Bytef*>(const_cast<char*>(in.constData()));
+    zs.next_in  = reinterpret_cast<Bytef*>(const_cast<char*>(qbaConstData(in)));
     zs.avail_in = uInt(in.size());
     char buf[65536];
     int ret = Z_OK;
@@ -689,9 +757,17 @@ static QImage makeTgsPlaceholder(const QString& name, int w, int h)
 static bool scanRecursive(QDir dir, QVector<QString>& files)
 {
     bool ok = true;
-    const auto infoList = dir.entryInfoList(
-        QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Readable);
+    // Qt3 的 QDir 无 NoDotAndDotDot（qdir.h:61 FilterSpec 无此项，Qt4.2 才加），
+    // 且**去掉该位并不等价**：实测 Qt3 entryInfoList(Files|Dirs|Readable) 会把
+    // "." 与 ".." 一并返回，且二者 isDir() 皆为真（探针实测 count=3，
+    // [0]="." [1]=".." [2]=真实子目录）。这会让下面的 fi.isDir() 分支顺着
+    // ".." 无限向上递归。故此处按名字显式排除，等价于 Qt4+ 的
+    // NoDotAndDotDot。
+    const auto infoList = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::Readable);
     for (const auto& fi : infoList) {
+        const QString entryName = fi.fileName();
+        if (entryName == QLatin1String(".") || entryName == QLatin1String(".."))
+            continue;
         if (fi.isDir()) {
             if (!scanRecursive(QDir(fi.absoluteFilePath()), files)) {
                 ok = false;
@@ -725,7 +801,7 @@ static PngChunkInfo probePngChunks(const QByteArray& bytes)
 {
     PngChunkInfo info;
     static const uchar kSig[8] = {0x89,'P','N','G','\r','\n',0x1a,'\n'};
-    if (bytes.size() < 8 || memcmp(bytes.constData(), kSig, 8) != 0) return info;
+    if (bytes.size() < 8 || memcmp(qbaConstData(bytes), kSig, 8) != 0) return info;
     info.validSignature = true;
     quint64 off = 8, total = quint64(bytes.size());   // quint64 偏移，杜绝 4GiB 溢出
     bool sawIDAT = false;
@@ -842,8 +918,8 @@ static QImage robustDecodeFirstFrame(const QByteArray& bytes,
 
     const auto attempt = [&](bool autoTransform, const QByteArray& forcedFmt) {
         QBuffer buf;
-        buf.setData(bytes);
-        if (!buf.open(QIODevice::ReadOnly)) return QImage();
+        qBufferSetData(buf, bytes);
+        if (!qOpenReadOnly(buf)) return QImage();
         QImageReader r(&buf);
         r.setAutoTransform(autoTransform);
         if (!forcedFmt.isEmpty()) r.setFormat(forcedFmt);
@@ -879,8 +955,8 @@ static bool probeImageValidity(const QByteArray& bytes,
     }
 
     QBuffer probe;
-    probe.setData(bytes);
-    probe.open(QIODevice::ReadOnly);
+    qBufferSetData(probe, bytes);
+    qOpenReadOnly(probe);
     QImageReader reader(&probe);
     reader.setAutoTransform(true);
 
@@ -913,7 +989,7 @@ static bool probeImageValidity(const QByteArray& bytes,
     };
     if (!kAllowed.contains(fmt)) {
         qWarning("[StickerPaste][probe] format not in whitelist fmt=%s",
-                 fmt.constData());
+                 qbaConstData(fmt));
         return false;
     }
     // 运行时插件兜底：白名单写死 ≠ 当前运行时插件真实支持。
@@ -921,13 +997,13 @@ static bool probeImageValidity(const QByteArray& bytes,
     if (!runtimeSupportedImageFormats().contains(fmt)) {
         qWarning("[StickerPaste][probe] format not supported by runtime plugins fmt=%s "
                  "(whitelisted but missing imageformats plugin)",
-                 fmt.constData());
+                 qbaConstData(fmt));
         return false;
     }
 
     const QSize size = reader.size();
     if (!size.isValid()) {
-        qWarning("[StickerPaste][probe] size invalid fmt=%s", fmt.constData());
+        qWarning("[StickerPaste][probe] size invalid fmt=%s", qbaConstData(fmt));
         return false;
     }
 
@@ -940,7 +1016,7 @@ static bool probeImageValidity(const QByteArray& bytes,
     QImage first = robustDecodeFirstFrame(bytes, fmt, &decodeErr, &decodeErrStr);
     if (first.isNull() || !first.size().isValid()) {
         qWarning("[StickerPaste][probe] decode read failed fmt=%s err=%d errstr=%s size=%dx%d",
-                 fmt.constData(), int(decodeErr), qPrintable(decodeErrStr),
+                 qbaConstData(fmt), int(decodeErr), qPrintable(decodeErrStr),
                  size.width(), size.height());
         // 大图/内存限制兜底：Qt 因 allocation limit 拒绝（RawImageFormatError/InvalidDataError
         // 且错误串含 allocation）。贴纸导入超大图本不合理，明确拒绝并给出可读提示路径。
@@ -955,7 +1031,7 @@ static bool probeImageValidity(const QByteArray& bytes,
             const PngChunkInfo png = probePngChunks(bytes);
             if (png.validSignature)
                 qWarning("[StickerPaste][probe] png sig=ok chunks=[%s] acTL=%s(%u) fcTL=%d fdAT=%d trunc=%d",
-                         png.summary.constData(), png.hasAcTL ? "yes" : "no",
+                         qbaConstData(png.summary), png.hasAcTL ? "yes" : "no",
                          png.acTlFrames, png.fcTlCount, png.fdAtCount, int(png.truncated));
             else
                 qWarning("[StickerPaste][probe] png sig=bad bytes=0x%02x 0x%02x len=%d",
@@ -975,8 +1051,8 @@ static int gifFrameCount(const QByteArray& bytes)
 {
     if (bytes.isEmpty()) return 0;
     QBuffer probe;
-    probe.setData(bytes);
-    probe.open(QIODevice::ReadOnly);
+    qBufferSetData(probe, bytes);
+    qOpenReadOnly(probe);
     QImageReader reader(&probe);
     if (!reader.canRead()) return 0;
     return reader.imageCount();
@@ -988,8 +1064,8 @@ static int tiffFrameCount(const QByteArray& bytes)
 {
     if (bytes.isEmpty()) return 0;
     QBuffer probe;
-    probe.setData(bytes);
-    probe.open(QIODevice::ReadOnly);
+    qBufferSetData(probe, bytes);
+    qOpenReadOnly(probe);
     QImageReader reader(&probe);
     if (!reader.canRead()) return 0;
     int n = 0;
@@ -1040,7 +1116,7 @@ static bool loadLocalImageCandidate(const QString& path,
                                     int* outFrames)
 {
     QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) {
+    if (!qOpenReadOnly(f)) {
         qWarning("[StickerPaste] uri read fail path=%s", qPrintable(path));
         return false;
     }
@@ -1058,7 +1134,7 @@ static bool loadLocalImageCandidate(const QString& path,
         for (int i = 0; i < qMin(fb.size(), 32); ++i)
             hex += QString("%1").arg(uchar(fb.at(i)), 2, 16, QLatin1Char('0')).toLatin1();
         qWarning("[StickerPaste] uri probe fail path=%s len=%lld head0=%s deobf-try",
-                 qPrintable(path), (qint64)fb.size(), hex.constData());
+                 qPrintable(path), (qint64)fb.size(), qbaConstData(hex));
     }
     const auto variants = deobfuscateQQ(fb);
     for (int vi = 0; vi < variants.size(); ++vi) {
@@ -1071,7 +1147,7 @@ static bool loadLocalImageCandidate(const QString& path,
                 && vfr > 1) {
             *outBytes = v; *outFmt = vf; *outSize = vs; *outFrames = vfr;
             qInfo("[StickerPaste] source=uri-deobf variant=%d path=%s fmt=%s size=%dx%d bytes=%lld frames=%d",
-                  vi + 1, qPrintable(path), vf.constData(), vs.width(), vs.height(),
+                  vi + 1, qPrintable(path), qbaConstData(vf), vs.width(), vs.height(),
                   (qint64)v.size(), vfr);
             return true;
         }
@@ -1103,8 +1179,8 @@ static void fullDecodeScaledFrames(const QByteArray& bytes,
     if (bytes.isEmpty()) return;
 
     QBuffer probe;
-    probe.setData(bytes);
-    probe.open(QIODevice::ReadOnly);
+    qBufferSetData(probe, bytes);
+    qOpenReadOnly(probe);
     QImageReader reader(&probe);
     reader.setAutoTransform(true);
     if (!reader.canRead()) return;
@@ -1118,9 +1194,10 @@ static void fullDecodeScaledFrames(const QByteArray& bytes,
         if (ref.isNull()) {
             ref = frame.copy();
             *outDistinctFrames = 1;
-        } else if (frame.size() == ref.size()
-                   && memcmp(frame.constBits(), ref.constBits(),
-                             (size_t)frame.sizeInBytes()) != 0) {
+        } else if (!qImageSameRgba(frame, ref)) {
+            // 原为 memcmp(constBits()) 判重。Qt3 侧 constBits 是 BGRA、
+            // sizeInBytes 是 stride×h（含对齐填充），跨图 memcmp 语义不可靠，
+            // 故改走按 RGBA 字节序比较的自由函数，两端语义一致。
             ++(*outDistinctFrames);
         }
         ++n;
@@ -1163,9 +1240,9 @@ static bool verifyScaledResult(const QByteArray& srcRaw,
     // 后缀随输出格式（gif→.gif；apng/png→.png；webp→.webp）。
     const QByteArray scaleSuffix = (scaleFmt == "gif") ? QByteArray(".gif")
             : (scaleFmt == "webp") ? QByteArray(".webp") : QByteArray(".png");
-    QTemporaryFile tmp(QDir::tempPath()
+    QTemporaryFile tmp(qDirTempPath()
                        + QStringLiteral("/anystik_scale_verify_XXXXXX")
-                       + QLatin1String(scaleSuffix.constData()));
+                       + QLatin1String(qbaConstData(scaleSuffix)));
     tmp.setAutoRemove(false);
     QString tmpPath;
     if (tmp.open()) {
@@ -1182,15 +1259,15 @@ static bool verifyScaledResult(const QByteArray& srcRaw,
     if (!fmtOk || !framesOk || !decodeOk) {
         qWarning("[StickerScale][%s] MISMATCH orig=fmt:%s frames:%d %dx%d "
                  "vs scaled=fmt:%s frames:%d %dx%d decode(ok=%d/distinct=%d) tmp=%s",
-                 tag, srcFmt.constData(), srcFrames, srcSize.width(), srcSize.height(),
-                 scaleFmt.constData(), scaleFrames, scaleSize.width(), scaleSize.height(),
+                 tag, qbaConstData(srcFmt), srcFrames, srcSize.width(), srcSize.height(),
+                 qbaConstData(scaleFmt), scaleFrames, scaleSize.width(), scaleSize.height(),
                  okFrames, distinctFrames,
                  qPrintable(tmpPath));
         return false;
     }
     qInfo("[StickerScale][%s] verify ok fmt=%s frames=%d %dx%d->%dx%d "
           "decode(ok=%d/distinct=%d) tmp=%s",
-          tag, scaleFmt.constData(), scaleFrames,
+          tag, qbaConstData(scaleFmt), scaleFrames,
           srcSize.width(), srcSize.height(),
           scaleSize.width(), scaleSize.height(),
           okFrames, distinctFrames, qPrintable(tmpPath));
@@ -1290,8 +1367,7 @@ static QByteArray buildApngFromFrames(const QList<QImage>& frames,
         raw.reserve(im.height() * (bpl + 1));
         for (int y = 0; y < im.height(); ++y) {
             raw += char(0);
-            raw += QByteArray::fromRawData(
-                reinterpret_cast<const char*>(im.constScanLine(y)), bpl);
+            raw += qImageScanlineRgba(im, y);
         }
         return qCompress(raw, 6);
     };
@@ -1362,8 +1438,8 @@ static QByteArray buildApngFromFrames(const QList<QImage>& frames,
 static QByteArray multipageTiffToApng(const QByteArray& tiffBytes)
 {
     QBuffer probe;
-    probe.setData(tiffBytes);
-    probe.open(QIODevice::ReadOnly);
+    qBufferSetData(probe, tiffBytes);
+    qOpenReadOnly(probe);
     QImageReader reader(&probe);
     reader.setAutoTransform(true);
     if (!reader.canRead()) return QByteArray();
@@ -1372,7 +1448,7 @@ static QByteArray multipageTiffToApng(const QByteArray& tiffBytes)
     while (frames.size() < 1024) {
         const QImage frame = reader.read();
         if (frame.isNull() || !frame.size().isValid()) break;
-        frames << frame.convertToFormat(QImage::Format_RGBA8888);
+        frames << qImageRgba(frame);
         if (!reader.jumpToNextImage()) break;
     }
     if (frames.size() < 2) return QByteArray();       // 单页 TIFF 不做重编码
@@ -1387,8 +1463,8 @@ static bool decodeAllFrames(const QByteArray& bytes,
 {
     if (bytes.isEmpty()) return false;
     QBuffer probe;
-    probe.setData(bytes);
-    probe.open(QIODevice::ReadOnly);
+    qBufferSetData(probe, bytes);
+    qOpenReadOnly(probe);
     QImageReader reader(&probe);
     reader.setAutoTransform(true);
     if (!reader.canRead()) return false;
@@ -1403,7 +1479,7 @@ static bool decodeAllFrames(const QByteArray& bytes,
     while (frames.size() < kMaxFrames) {
         const QImage frame = reader.read();
         if (frame.isNull() || !frame.size().isValid()) break;
-        frames << frame.convertToFormat(QImage::Format_RGBA8888);
+        frames << qImageRgba(frame);
         delays << qMax(1, reader.nextImageDelay());
         if (!animated && !reader.jumpToNextImage()) break;
     }
@@ -1437,7 +1513,7 @@ static QByteArray buildGifBytes(const QList<QImage>& frames,
 {
     if (frames.size() < 2) return QByteArray();
 
-    QTemporaryFile tmp(QDir::tempPath() + QStringLiteral("/anystik_scaled_XXXXXX.gif"));
+    QTemporaryFile tmp(qDirTempPath() + QStringLiteral("/anystik_scaled_XXXXXX.gif"));
     if (!tmp.open()) return QByteArray();
     const QString path = tmp.fileName();
     tmp.close();                       // GifBegin 需要独占创建文件
@@ -1456,7 +1532,7 @@ static QByteArray buildGifBytes(const QList<QImage>& frames,
     const int w = frames.first().width();
     const int h = frames.first().height();
     GifWriter writer;
-    if (!GifBegin(&writer, path.toUtf8().constData(), uint32_t(w), uint32_t(h),
+    if (!GifBegin(&writer, qUtf8Printable(path), uint32_t(w), uint32_t(h),
                   uint32_t(delay), 8, true)) {
         return QByteArray();
     }
@@ -1468,7 +1544,16 @@ static QByteArray buildGifBytes(const QList<QImage>& frames,
         if (delayMs.size() == frames.size()) {
             delayCs = int(toGifDelay(delayMs.at(i)));
         }
-        ok = GifWriteFrame(&writer, fr.constBits(), uint32_t(w), uint32_t(h),
+        // gif-h 要求 RGBA8888 字节序。Qt3 的 QImage 内存是 BGRA，必须先换通道；
+        // Qt6 侧 frames 本就是 Format_RGBA8888，该步等价于拷贝。
+        const QByteArray rgba = qImageRgbaBytes(fr);
+        // tangora_gif.h:827 首参是 const uint8_t*，而 qbaConstData() 返回
+        // const char* —— char*→uint8_t* 不是标准隐式转换，Qt6 侧会报
+        // "invalid conversion ... [-fpermissive]"（原代码同样有此问题）。
+        // 字节值逐位透传，故用 reinterpret_cast 显式表达同一意图；
+        // 不新建 QByteArray/QCString，避免一次多余拷贝。
+        ok = GifWriteFrame(&writer, reinterpret_cast<const uint8_t*>(qbaConstData(rgba)),
+                           uint32_t(w), uint32_t(h),
                            uint32_t(delayCs), 8, true);
         if (!ok) break;
     }
@@ -1476,7 +1561,7 @@ static QByteArray buildGifBytes(const QList<QImage>& frames,
     if (!ok) return QByteArray();
 
     QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) return QByteArray();
+    if (!qOpenReadOnly(f)) return QByteArray();
     const QByteArray bytes = f.readAll();
     f.close();
 
@@ -1521,7 +1606,7 @@ static void macCollectPasteboard(QByteArray& bytes, QString* srcType = nullptr)
         }
         const int frames = imageAnimationFrames(c.data, f);
         qInfo("[StickerPaste] pb-cand type=%s fmt=%s size=%dx%d bytes=%lld frames=%d",
-              qPrintable(c.type), f.constData(), s.width(), s.height(),
+              qPrintable(c.type), qbaConstData(f), s.width(), s.height(),
               (qint64)c.data.size(), frames);
         if (frames > 1) {
             if (f == "tif" || f == "tiff") {
@@ -1542,7 +1627,7 @@ static void macCollectPasteboard(QByteArray& bytes, QString* srcType = nullptr)
         QSize s;
         probeImageValidity(bytes, &f, &s);
         qInfo("[StickerPaste] source=pb-collect-anim type=%s fmt=%s size=%dx%d bytes=%lld frames=%d backend=NSPasteboard",
-              qPrintable(c.type), f.constData(), s.width(), s.height(),
+              qPrintable(c.type), qbaConstData(f), s.width(), s.height(),
               (qint64)bytes.size(), imageAnimationFrames(bytes, f));
         if (srcType) *srcType = c.type;
         return;
@@ -1572,7 +1657,7 @@ static void macCollectPasteboard(QByteArray& bytes, QString* srcType = nullptr)
         if (fr > 1 && (f == "gif" || f == "apng" || f == "webp")) {
             bytes = fb;
             qInfo("[StickerPaste] source=pb-file path=%s fmt=%s size=%dx%d bytes=%lld frames=%d backend=NSPasteboard",
-                  qPrintable(p), f.constData(), s.width(), s.height(), (qint64)fb.size(), fr);
+                  qPrintable(p), qbaConstData(f), s.width(), s.height(), (qint64)fb.size(), fr);
             if (srcType) *srcType = QStringLiteral("file:") + p;
             return;
         }
@@ -1587,7 +1672,7 @@ static void macCollectPasteboard(QByteArray& bytes, QString* srcType = nullptr)
         QSize s;
         probeImageValidity(bytes, &f, &s);
         qInfo("[StickerPaste] source=pb-collect-static type=%s fmt=%s size=%dx%d bytes=%lld backend=NSPasteboard",
-              qPrintable(c.type), f.constData(), s.width(), s.height(), (qint64)bytes.size());
+              qPrintable(c.type), qbaConstData(f), s.width(), s.height(), (qint64)bytes.size());
         if (srcType) *srcType = c.type;
     } else if (!fileStatic.isEmpty()) {
         bytes = fileStatic;
@@ -1595,7 +1680,7 @@ static void macCollectPasteboard(QByteArray& bytes, QString* srcType = nullptr)
         QSize s;
         probeImageValidity(bytes, &f, &s);
         qInfo("[StickerPaste] source=pb-file-static path=%s fmt=%s size=%dx%d bytes=%lld backend=NSPasteboard",
-              qPrintable(fileUrls.first()), f.constData(), s.width(), s.height(),
+              qPrintable(fileUrls.first()), qbaConstData(f), s.width(), s.height(),
               (qint64)bytes.size());
         if (srcType) *srcType = QStringLiteral("file:") + fileUrls.first();
     }
@@ -1612,7 +1697,7 @@ static QString findOrCreatePack(StickerDbSyncInterface& db,
     const auto existingPacks = db.list_packs(1);
     for (const auto& p : existingPacks) {
         if (QString::fromUtf8(p.title.c_str()) == packTitle) {
-            return QString::fromStdString(p.id);
+            return qFromStdString(p.id);
         }
     }
 
@@ -1620,8 +1705,8 @@ static QString findOrCreatePack(StickerDbSyncInterface& db,
         QCryptographicHash::hash(qToUtf8BA(packTitle),
             QCryptographicHash::Sha1).toHex().left(12)));
     StickerPackRow pack;
-    pack.id = packId.toStdString();
-    pack.title = packTitle.toUtf8().constData();
+    pack.id = qToStdString(packId);
+    pack.title = qUtf8Printable(packTitle);
     pack.author = "";
     pack.position = packCount;
     if (!db.add_pack(pack)) {
@@ -1666,7 +1751,7 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
     // （如 Android 解压安装后调用），复制到自身会因目标已存在而跳过，幂等。
     const QString base = stickerBaseDir();
     const QString targetDir = base + QStringLiteral("/packs/") + packTitle;
-    if (!QDir().mkpath(targetDir)) {
+    if (!qMkpath(targetDir)) {
         if (errorOut) *errorOut = QStringLiteral("无法创建包目录");
         return false;
     }
@@ -1677,8 +1762,8 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
     std::stable_sort(files.begin(), files.end(),
                      [&rootAbs](const QString& a, const QString& b) {
         return QNaturalSort::naturalCompare(
-                   QDir(rootAbs).relativeFilePath(a),
-                   QDir(rootAbs).relativeFilePath(b)) < 0;
+                   qDirRelativeFilePath(QDir(rootAbs), a),
+                   qDirRelativeFilePath(QDir(rootAbs), b)) < 0;
     });
 
     db.begin_write_transaction();
@@ -1694,14 +1779,14 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
     bool importedAny = false;
     for (const auto& file : files) {
         // 相对源根的相对子路径，保持目录层级复制到目标
-        const QString rel = QDir(rootAbs).relativeFilePath(file);
+        const QString rel = qDirRelativeFilePath(QDir(rootAbs), file);
         const QString dst = targetDir + QLatin1Char('/') + rel;
 
         // TGS 分支：Telegram 动图贴纸（gzip Lottie JSON）。
         // 解压取画布尺寸，原始 .tgs 字节保留，同目录生成占位 PNG 入库。
         if (QFileInfo(file).suffix().toLower() == QLatin1String("tgs")) {
             QFile f(file);
-            if (!f.open(QIODevice::ReadOnly)) continue;
+            if (!qOpenReadOnly(f)) continue;
             const QByteArray bytes = f.readAll();
             f.close();
             int tw = 512, th = 512;
@@ -1715,7 +1800,7 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
 
             // 原始 .tgs 字节保留（供未来真渲染），仍按相对层级复制
             if (!QFile::exists(dst)) {
-                if (!QDir().mkpath(QFileInfo(dst).absolutePath())) continue;
+                if (!qMkpath(qAbsPath(QFileInfo(dst)))) continue;
                 if (!QFile::copy(file, dst)) continue;
             }
             // 占位 PNG：同目录 <stem>.tgs_preview.png
@@ -1729,9 +1814,9 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
             if (!QFileInfo(pngDst).exists()) continue;
 
             StickerRow row;
-            row.id = fileIdFor(pngDst).toStdString();
-            row.pack_id = packId.toUtf8().constData();
-            row.file_path = relativeToBase(pngDst).toStdString();
+            row.id = qToStdString(fileIdFor(pngDst));
+            row.pack_id = qUtf8Printable(packId);
+            row.file_path = qToStdString(relativeToBase(pngDst));
             row.emoji = "";
             row.width = tw;
             row.height = th;
@@ -1754,7 +1839,7 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
         const QSizeF imgSize = probe.size();   // 预检通过的尺寸，直接入库
 
         if (!QFile::exists(dst)) {
-            if (!QDir().mkpath(QFileInfo(dst).absolutePath())) {
+            if (!qMkpath(qAbsPath(QFileInfo(dst)))) {
                 if (errorOut) *errorOut = QStringLiteral("无法创建包子目录");
                 continue;
             }
@@ -1769,9 +1854,9 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
         const qint64 fileBytes = fi.size();
 
         StickerRow row;
-        row.id = fileIdFor(file).toStdString();
-        row.pack_id = packId.toUtf8().constData();
-        row.file_path = relativeToBase(dst).toStdString();
+        row.id = qToStdString(fileIdFor(file));
+        row.pack_id = qUtf8Printable(packId);
+        row.file_path = qToStdString(relativeToBase(dst));
         row.emoji = "";
         row.width = int(imgSize.width());
         row.height = int(imgSize.height());
@@ -1844,7 +1929,7 @@ StickerMeta StickerStore::stickerMeta(const QString& filePath) const
     meta.modified = fi.lastModified();
 
     QFile f(filePath);
-    if (!f.open(QIODevice::ReadOnly))
+    if (!qOpenReadOnly(f))
         return meta;
     const QByteArray raw = f.readAll();
     f.close();
@@ -1969,17 +2054,17 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
     const QMimeData* mime = QGuiApplication::clipboard()->mimeData();
     if (mime)
         qInfo("[StickerPaste] mime formats: %s",
-              mime->formats().join('|').toUtf8().constData());
+              qUtf8Printable(mime->formats().join('|')));
 #if defined(Q_OS_MACOS)
     // 只读诊断：核对源端原始文件引用（public.file-url⇔file:// 可回退 / public.url⇔https 源端限制）
     if (mime) {
         const QByteArray uriRaw = mime->data("text/uri-list");
         qInfo("[StickerPaste] text/uri-list=%s",
-              uriRaw.trimmed().isEmpty() ? "<none>" : uriRaw.trimmed().constData());
+              uriRaw.trimmed().isEmpty() ? "<none>" : qbaConstData(uriRaw.trimmed()));
         for (const QUrl& u : mime->urls())
             qInfo("[StickerPaste] uri[%s]%s",
                   u.isLocalFile() ? "file" : "remote",
-                  u.toString().toUtf8().constData());
+                  qUtf8Printable(u.toString()));
     }
 #endif
     // 顺序：多帧动画优先（apng/webp/gif），静态兜底置后。
@@ -2020,13 +2105,13 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
             if (gifBranch || f == "apng" || f == "webp")
                 // frames= 供核对剪贴板动画是否已被源端重编码成单帧
                 qInfo("[StickerPaste] source=mime type=%s fmt=%s size=%dx%d bytes=%d frames=%d backend=%s",
-                      fmt, f.constData(), s.width(), s.height(), raw.size(),
+                      fmt, qbaConstData(f), s.width(), s.height(), raw.size(),
                       imageAnimationFrames(raw, f),
                       useMmPasteboard() ? "NSPasteboard native (.mm)" : "QUtiMimeConverter (Qt)");
             else
 #endif
                 qInfo("[StickerPaste] source=mime type=%s fmt=%s size=%dx%d bytes=%d",
-                      fmt, f.constData(), s.width(), s.height(), raw.size());
+                      fmt, qbaConstData(f), s.width(), s.height(), raw.size());
             break;
         }
 #if defined(Q_OS_MACOS)
@@ -2070,7 +2155,7 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
                 raw = fb;
                 srcType = QStringLiteral("uri-gif-fallback:") + p;
                 qInfo("[StickerPaste] source=uri-gif-fallback path=%s clip=%s->file=%s size=%dx%d bytes=%lld frames=%d",
-                      qPrintable(p), fmtG.constData(), fmt2.constData(),
+                      qPrintable(p), qbaConstData(fmtG), qbaConstData(fmt2),
                       s2.width(), s2.height(),
                       (qint64)fb.size(), frames2);
                 break;
@@ -2095,7 +2180,7 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
                 bytes = fb;
                 srcType = QStringLiteral("uri:") + p;
                 qInfo("[StickerPaste] source=uri path=%s fmt=%s size=%dx%d bytes=%lld frames=%d",
-                      qPrintable(p), fmt2.constData(), s2.width(), s2.height(),
+                      qPrintable(p), qbaConstData(fmt2), s2.width(), s2.height(),
                       (qint64)fb.size(), frames2);
                 break;
             }
@@ -2118,7 +2203,7 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
                     bytes = raw;
                     srcType = QLatin1String(t);
                     qInfo("[StickerPaste] source=macpb type=%s fmt=%s size=%dx%d bytes=%d frames=%d backend=NSPasteboard native (.mm)",
-                          t, f.constData(), s.width(), s.height(), raw.size(),
+                          t, qbaConstData(f), s.width(), s.height(), raw.size(),
                           gifFrameCount(raw));
                     break;
                 }
@@ -2169,7 +2254,7 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
             const QImage c = img.convertToFormat(QImage::Format_ARGB32);
             srcType = QStringLiteral("bitmap");
             QBuffer b(&bytes);
-            if (!b.open(QIODevice::WriteOnly) || !c.save(&b, "BMP")) {
+            if (!qOpenWriteOnly(b) || !c.save(&b, "BMP")) {
                 if (errorOut) *errorOut = QStringLiteral("图片编码失败");
                 return false;
             }
@@ -2196,8 +2281,8 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
         const QByteArray srcUtf = srcType.isEmpty() ? QByteArrayLiteral("?")
                                                     : srcType.toUtf8();
         qInfo("[StickerPaste] verify src=%s final-fmt=%s size=%dx%d bytes=%lld frames=%d probe-ok=%d",
-              srcUtf.constData(),
-              vok ? vf.constData() : "?",
+              qbaConstData(srcUtf),
+              vok ? qbaConstData(vf) : "?",
               vok ? vs.width() : 0, vok ? vs.height() : 0,
               (qint64)bytes.size(),
               vok ? imageAnimationFrames(bytes, vf) : 0, int(vok));
@@ -2226,7 +2311,7 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut,
         return false;
     }
     qInfo("[StickerPaste] import ok fmt=%s size=%dx%d bytes=%lld",
-          fmt.constData(), imgSize.width(), imgSize.height(),
+          qbaConstData(fmt), imgSize.width(), imgSize.height(),
           (qint64)bytes.size());
     qInfo("[StickerPaste] import frames=%d", imageAnimationFrames(bytes, fmt));
 
@@ -2253,7 +2338,7 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut,
     const QString base = stickerBaseDir();
 
     QDir pasteDir(base + QStringLiteral("/pastes"));
-    if (!pasteDir.exists() && !pasteDir.mkpath(".")) {
+    if (!pasteDir.exists() && !qMkpath(pasteDir.absolutePath())) {
         if (errorOut) *errorOut = QStringLiteral("无法创建 pastes 目录");
         return false;
     }
@@ -2261,14 +2346,14 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut,
     const QString filePath = pasteDir.filePath(idHex + ext);
     if (!QFile::exists(filePath)) {
         QFile file(filePath);
-        if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size()) {
+        if (!qOpenWriteOnly(file) || file.write(bytes) != bytes.size()) {
             if (errorOut) *errorOut = QStringLiteral("图片保存失败");
             return false;
         }
     } else {
         // 同内容已在：不重写文件、不 REPLACE、不挪位、不隐式复活，直接视为成功。
         // 行态三态：-1=无行(孤儿文件)  0=存活  1=软删（可询问还原）。
-        const int st = stickerDb().sticker_deleted_state(idHex.toUtf8().constData());
+        const int st = stickerDb().sticker_deleted_state(qUtf8Printable(idHex));
         if (resurrectId && st == 1) {
             *resurrectId = idHex;
         }
@@ -2290,15 +2375,15 @@ bool StickerStore::importImageBytes(const QByteArray& bytes, QString* errorOut,
     }
 
     StickerRow row;
-    row.id = idHex.toStdString();
-    row.pack_id = packId.toUtf8().constData();
-    row.file_path = (QStringLiteral("pastes/") + idHex + ext).toStdString();
+    row.id = qToStdString(idHex);
+    row.pack_id = qUtf8Printable(packId);
+    row.file_path = qToStdString(QStringLiteral("pastes/") + idHex + ext);
     row.emoji = "";
     row.width = imgSize.width();
     row.height = imgSize.height();
     row.size = int(bytes.size());
     row.last_used = 0;
-    row.position = int(db.count_stickers(packId.toUtf8().constData()));
+    row.position = int(db.count_stickers(qUtf8Printable(packId)));
 
     const bool ok = db.add_sticker(row);
     db.commit_transaction();
@@ -2317,7 +2402,7 @@ QString StickerStore::sanitizeDirName(const QString& name)
 {
     const QString illegal = QStringLiteral("/\\:*?\"<>|");
     QString out;
-    out.reserve(name.size());
+    out.reserve(name.length());
     for (QChar c : name) {
         if (!c.isPrint())
             continue;
@@ -2375,7 +2460,7 @@ bool StickerStore::importStickerFile(const QString& packId,
     }
 
     auto& db = stickerDb();
-    auto pack = db.get_pack(packId.toUtf8().constData());
+    auto pack = db.get_pack(qUtf8Printable(packId));
     if (!pack) {
         if (errorOut) *errorOut = QStringLiteral("pack not found");
         return false;
@@ -2388,7 +2473,7 @@ bool StickerStore::importStickerFile(const QString& packId,
         : targetRel;
     const QString targetDir = stickerBaseDir() + QLatin1Char('/')
         + QFileInfo(rel).path();
-    if (!QDir().mkpath(targetDir)) {
+    if (!qMkpath(targetDir)) {
         if (errorOut) *errorOut = QStringLiteral("无法创建包目录");
         return false;
     }
@@ -2400,9 +2485,9 @@ bool StickerStore::importStickerFile(const QString& packId,
     const QString dst = targetDir + QLatin1Char('/') + fileName;
 
     // 幂等：同包同相对路径已有行 → 已导入（双向按 size 判 same，不会重入）
-    const auto existing = db.list_stickers(packId.toUtf8().constData());
+    const auto existing = db.list_stickers(qUtf8Printable(packId));
     for (const auto& e : existing) {
-        if (QString::fromStdString(e.file_path) == rel) {
+        if (qFromStdString(e.file_path) == rel) {
             return true;
         }
     }
@@ -2432,15 +2517,15 @@ bool StickerStore::importStickerFile(const QString& packId,
 
     QFileInfo fi(dst);
     StickerRow row;
-    row.id = fileIdFor(dst).toStdString();
+    row.id = qToStdString(fileIdFor(dst));
     row.pack_id = pack->id;
-    row.file_path = rel.toStdString();
+    row.file_path = qToStdString(rel);
     row.emoji = "";
     row.width = int(imgSize.width());
     row.height = int(imgSize.height());
     row.size = int(fi.size());
     row.last_used = 0;
-    row.position = int(db.count_stickers(packId.toUtf8().constData()));
+    row.position = int(db.count_stickers(qUtf8Printable(packId)));
 
     const bool ok = db.add_sticker(row);
     if (ok) {
@@ -2460,7 +2545,7 @@ bool StickerStore::renameStickerFile(const QString& packId,
         return false;
     }
     auto& db = stickerDb();
-    auto pack = db.get_pack(packId.toUtf8().constData());
+    auto pack = db.get_pack(qUtf8Printable(packId));
     if (!pack) {
         return false;
     }
@@ -2493,9 +2578,9 @@ bool StickerStore::renameStickerFile(const QString& packId,
     const QByteArray newRelU = newRel.toUtf8();
     const QByteArray packU = packId.toUtf8();
     const QByteArray oldRelU = oldRel.toUtf8();
-    if (!stmt.bind(1, newRelU.constData())) return false;
-    if (!stmt.bind(2, packU.constData())) return false;
-    if (!stmt.bind(3, oldRelU.constData())) return false;
+    if (!stmt.bind(1, qbaConstData(newRelU))) return false;
+    if (!stmt.bind(2, qbaConstData(packU))) return false;
+    if (!stmt.bind(3, qbaConstData(oldRelU))) return false;
     const bool ok = stmt.step();
     if (ok) emit dataChanged();
     return ok;
@@ -2514,8 +2599,8 @@ bool StickerStore::renamePack(const QString& packId, const QString& newTitle)
     }
     QByteArray titleUtf8 = newTitle.trimmed().toUtf8();
     QByteArray packUtf8 = packId.toUtf8();
-    if (!stmt.bind(1, titleUtf8.constData())) return false;
-    if (!stmt.bind(2, packUtf8.constData())) return false;
+    if (!stmt.bind(1, qbaConstData(titleUtf8))) return false;
+    if (!stmt.bind(2, qbaConstData(packUtf8))) return false;
     const bool ok = stmt.step();
     if (ok) emit dataChanged();
     return ok;
@@ -2526,7 +2611,7 @@ bool StickerStore::deletePack(const QString& packId)
     if (!ensureInit()) {
         return false;
     }
-    const bool ok = stickerDb().delete_pack(packId.toUtf8().constData());
+    const bool ok = stickerDb().delete_pack(qUtf8Printable(packId));
     // 子表情由外键策略级联清除
     if (ok) emit dataChanged();
     return ok;
@@ -2537,7 +2622,7 @@ bool StickerStore::deleteSticker(const QString& stickerId)
     if (!ensureInit()) {
         return false;
     }
-    const bool ok = stickerDb().delete_sticker(stickerId.toUtf8().constData());
+    const bool ok = stickerDb().delete_sticker(qUtf8Printable(stickerId));
     if (ok) emit dataChanged();
     return ok;
 }
@@ -2547,7 +2632,7 @@ bool StickerStore::restoreSticker(const QString& stickerId)
     if (!ensureInit()) {
         return false;
     }
-    const bool ok = stickerDb().restore_sticker(stickerId.toUtf8().constData());
+    const bool ok = stickerDb().restore_sticker(qUtf8Printable(stickerId));
     if (ok) emit dataChanged();
     return ok;
 }
@@ -2559,7 +2644,7 @@ bool StickerStore::setStickerDescription(const QString& stickerId,
         return false;
     }
     const bool ok = stickerDb().update_sticker_description(
-        stickerId.toUtf8().constData(), description.toUtf8().constData());
+        qUtf8Printable(stickerId), qUtf8Printable(description));
     if (ok) emit dataChanged();
     return ok;
 }
@@ -2569,7 +2654,7 @@ void StickerStore::touchSticker(const QString& stickerId)
     if (!ensureInit()) {
         return;
     }
-    stickerDb().touch_sticker(stickerId.toUtf8().constData(),
+    stickerDb().touch_sticker(qUtf8Printable(stickerId),
         QDateTime::currentSecsSinceEpoch());
 }
 
@@ -2615,7 +2700,7 @@ static bool stashAnimationClipboard(const QByteArray& fmt,
         mime->setData("org.kde.anystik.apng", bytes);
         // public.png 别名：APNG 默认图像是合法独立 PNG，原生查看器可显示静态首帧
         QBuffer pb;
-        pb.open(QIODevice::WriteOnly);
+        qOpenWriteOnly(pb);
         if (pngFallback.save(&pb, "PNG"))
             mime->setData("public.png", pb.data());
     }
@@ -2625,7 +2710,7 @@ static bool stashAnimationClipboard(const QByteArray& fmt,
     mime->setImageData(pngFallback);        // PNG 位图回退（缩放结果）
     QGuiApplication::clipboard()->setMimeData(mime);
     qInfo("[StickerCopy] fmt=%s bytes=%d frames=%d",
-          fmt.constData(), bytes.size(), imageAnimationFrames(bytes, fmt));
+          qbaConstData(fmt), bytes.size(), imageAnimationFrames(bytes, fmt));
     return true;
 }
 
@@ -2641,10 +2726,9 @@ static bool copyScaledFramesToClipboard(const QList<QImage>& frames,
     QList<QImage> scaled;
     scaled.reserve(frames.size());
     for (const QImage& fr : frames) {
-        QImage s = fr.scaled(targetSize, Qt::KeepAspectRatio,
-                             Qt::SmoothTransformation);
+        QImage s = qImageScaledKeepAspectSmooth(fr, targetSize);
         if (s.isNull()) return false;
-        scaled << s.convertToFormat(QImage::Format_RGBA8888);
+        scaled << qImageRgba(s);
     }
 
     if (srcFmt == "gif") {
@@ -2698,7 +2782,7 @@ bool StickerStore::copyStickerToClipboard(const QString& filePath)
     {
         QFile pb(filePath);
         QByteArray pRaw;
-        if (pb.open(QIODevice::ReadOnly)) pRaw = pb.readAll();
+        if (qOpenReadOnly(pb)) pRaw = pb.readAll();
         QByteArray pFmt; QSize pSize; int pFrames = 0;
         if (probeImageValidity(pRaw, &pFmt, &pSize, &pFrames)
                 && ((pFmt == "gif") || (pFmt == "apng" && pFrames > 1)))
@@ -2706,12 +2790,12 @@ bool StickerStore::copyStickerToClipboard(const QString& filePath)
     }
     if (!animFmt.isEmpty()) {
         QFile f(filePath);
-        if (f.open(QIODevice::ReadOnly)) {
+        if (qOpenReadOnly(f)) {
             const QByteArray raw = f.readAll();
             if (verifyScaledResult(raw, raw, "desktop-copy"))
                 return stashAnimationClipboard(animFmt, raw, filePath, QImage(filePath));
             qWarning("[StickerCopy] animation passthrough verify failed fmt=%s",
-                     animFmt.constData());
+                     qbaConstData(animFmt));
         }
     }
     QImage img(filePath);
@@ -2730,7 +2814,7 @@ static bool storeScaledTmpThenCopy(const QImage& scaled)
     const QString tmpPath = QStandardPaths::writableLocation(
         QStandardPaths::AppLocalDataLocation) + QStringLiteral("/scaled.png");
     QFile out(tmpPath);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+    if (!qOpenWriteOnly(out)) return false;   // Qt3 IO_WriteOnly 本身即截断（已实测）
     scaled.save(&out, "PNG");
     out.close();
 
@@ -2767,7 +2851,7 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
     QByteArray raw;
     {
         QFile pb(filePath);
-        if (!pb.open(QIODevice::ReadOnly)) return false;
+        if (!qOpenReadOnly(pb)) return false;
         raw = pb.readAll();
         QByteArray fmt; QSize size; int cnt = 0;
         probeImageValidity(raw, &fmt, &size, &cnt);
@@ -2777,8 +2861,7 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
     if (frames.size() < 2) {
         QImage img(filePath);
         if (img.isNull()) return false;
-        img = img.scaled(cappedScaledSize(img.size(), scale), Qt::KeepAspectRatio,
-                         Qt::SmoothTransformation);
+        img = qImageScaledKeepAspectSmooth(img, cappedScaledSize(img.size(), scale));
         return storeScaledTmpThenCopy(img);
     }
 
@@ -2786,9 +2869,9 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
     QList<QImage> scaled;
     scaled.reserve(frames.size());
     for (const QImage& fr : frames) {
-        QImage s = fr.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QImage s = qImageScaledKeepAspectSmooth(fr, target);
         if (s.isNull()) return false;
-        scaled << s.convertToFormat(QImage::Format_RGBA8888);
+        scaled << qImageRgba(s);
     }
 
     QString ext;
@@ -2804,7 +2887,7 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
         bytes = QByteArray();
         const QImage first = scaled.first();
         QBuffer wb;
-        wb.open(QIODevice::WriteOnly);
+        qOpenWriteOnly(wb);
         if (!first.save(&wb, "PNG")) return false;
         bytes = wb.data();
         ext = QStringLiteral(".png");
@@ -2815,7 +2898,7 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
     if (!verifyScaledResult(raw, bytes, "android-anim")) {
         const QImage first = scaled.first();
         QBuffer wb;
-        wb.open(QIODevice::WriteOnly);
+        qOpenWriteOnly(wb);
         if (!first.save(&wb, "PNG")) return false;
         bytes = wb.data();
         ext = QStringLiteral(".png");
@@ -2824,7 +2907,7 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
     const QString tmpPath = QStandardPaths::writableLocation(
         QStandardPaths::AppLocalDataLocation) + QStringLiteral("/scaled") + ext;
     QFile out(tmpPath);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+    if (!qOpenWriteOnly(out)) return false;   // Qt3 IO_WriteOnly 本身即截断（已实测）
     out.write(bytes);
     out.close();
 
@@ -2847,7 +2930,7 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
 
 #else
     QFile pb(filePath);
-    if (!pb.open(QIODevice::ReadOnly)) return false;
+    if (!qOpenReadOnly(pb)) return false;
     const QByteArray raw = pb.readAll();
     pb.close();
 
@@ -2868,8 +2951,7 @@ bool StickerStore::copyStickerScaledToClipboard(const QString& filePath, qreal s
 
     QImage img(filePath);
     if (img.isNull()) return false;
-    img = img.scaled(cappedScaledSize(img.size(), scale), Qt::KeepAspectRatio,
-                     Qt::SmoothTransformation);
+    img = qImageScaledKeepAspectSmooth(img, cappedScaledSize(img.size(), scale));
     QGuiApplication::clipboard()->setImage(img);
     return true;
 #endif
@@ -2920,14 +3002,14 @@ static RemoteKind matchRemoteRepo(const QString& url,
     };
     for (const auto& prefix : kGhProxyPrefixes) {
         if (inner.startsWith(prefix)) {
-            inner = inner.mid(prefix.size());
+            inner = inner.mid(prefix.length());
             break;
         }
     }
     if (inner.startsWith(QLatin1String("github.com/"))) {
-        inner.remove(0, QStringLiteral("github.com/").size());
+        inner.remove(0, QStringLiteral("github.com/").length());
     } else if (inner.startsWith(QLatin1String("raw.githubusercontent.com/"))) {
-        inner.remove(0, QStringLiteral("raw.githubusercontent.com/").size());
+        inner.remove(0, QStringLiteral("raw.githubusercontent.com/").length());
     } else {
         return RemoteKind::None;
     }
@@ -2937,10 +3019,10 @@ static RemoteKind matchRemoteRepo(const QString& url,
     if (parts.size() == 4 && parts.at(2) == QLatin1String("archive")) {
         QString rev = parts.at(3);
         if (rev.endsWith(QLatin1String(".zip"))) {
-            rev = rev.left(rev.size() - 4);
+            rev = rev.left(rev.length() - 4);
         }
         const QByteArray dec = QByteArray::fromHex(rev.toLatin1());
-        if (dec.size() == 20 && rev.size() == 40) {
+        if (dec.size() == 20 && rev.length() == 40) {
             if (owner) *owner = parts.at(0);
             if (repo) *repo = parts.at(1);
             if (branch) *branch = rev;
@@ -2951,7 +3033,7 @@ static RemoteKind matchRemoteRepo(const QString& url,
     if (parts.size() >= 4) {
         const QString rev = parts.at(2);
         const QByteArray dec = QByteArray::fromHex(rev.toLatin1());
-        if (dec.size() == 20 && rev.size() == 40) {
+        if (dec.size() == 20 && rev.length() == 40) {
             if (owner) *owner = parts.at(0);
             if (repo) *repo = parts.at(1);
             if (branch) *branch = rev;
@@ -3319,7 +3401,7 @@ const unsigned kBuiltinSourceCount =
 static QByteArray fileMd5(const QString& path)
 {
     QFile f(path);
-    if (!f.open(QIODevice::ReadOnly)) {
+    if (!qOpenReadOnly(f)) {
         return QByteArray();
     }
     QCryptographicHash hash(QCryptographicHash::Md5);
@@ -3385,7 +3467,7 @@ void StickerStore::probeRemote(const QString& url)
             if (reply->hasRawHeader("Content-Length")) {
                 size = reply->rawHeader("Content-Length").toLongLong();
             }
-            if (branch.size() == 40) {
+            if (branch.length() == 40) {
                 raw = branch;                   // raw/文件源：已知 commit sha 作版本
                 ver = QStringLiteral("commit ") + branch.left(7);
             } else {
@@ -3493,12 +3575,13 @@ void StickerStore::startDownload(const QString& url, bool noRange)
         task->name = builtinName.isEmpty() ? urlDisplayName(url) : builtinName;
     }
 
-    QDir().mkpath(QFileInfo(partPath).absolutePath());
+    qMkpath(qAbsPath(QFileInfo(partPath)));
     auto* file = new QFile(partPath);
-    const QIODevice::OpenMode mode = (offset > 0)
-        ? (QIODevice::Append | QIODevice::WriteOnly)
-        : (QIODevice::WriteOnly | QIODevice::Truncate);
-    if (!file->open(mode)) {
+    // 断点续传：offset>0 走追加，否则整文件重写（Qt3 IO_WriteOnly 本身即截断）
+    const bool opened = (offset > 0)
+        ? qOpenWriteOnlyAppend(*file)
+        : qOpenWriteOnly(*file);
+    if (!opened) {
         delete task;
         delete file;
         emit downloadFinished(url, false, "无法写入下载目录");
@@ -3706,7 +3789,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
 {
     const QString url = task->url;
     const QString partPath = task->partPath;
-    const QString zipPath = partPath.left(partPath.size() - 5)
+    const QString zipPath = partPath.left(partPath.length() - 5)
                             + QStringLiteral(".zip");
     const QString base = stickerBaseDir();
 
@@ -3729,7 +3812,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     // 与 zip 包按头部魔数判别后走不同安装链路。
     QFile headF(zipPath);
     QByteArray head8;
-    if (headF.open(QIODevice::ReadOnly)) {
+    if (qOpenReadOnly(headF)) {
         head8 = headF.read(8);
         headF.close();
     }
@@ -3799,12 +3882,12 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
 
     const QString targetDir = base + QStringLiteral("/packs/") + title;
     if (QFile::exists(targetDir)) {
-        if (!QDir(targetDir).removeRecursively()) {
+        if (!qDirRemoveRecursively(QDir(targetDir))) {
             zip.close();
             return failNow(QStringLiteral("无法清理旧包目录"), true);
         }
     }
-    if (!QDir().mkpath(targetDir)) {
+    if (!qMkpath(targetDir)) {
         zip.close();
         return failNow(QStringLiteral("无法创建包目录"), true);
     }
@@ -3822,7 +3905,12 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
         QDirIterator eifIt(targetDir,
             QStringList() << QStringLiteral("*.eif")
                           << QStringLiteral("*.EIF"),
-            QDir::Files | QDir::NoDotAndDotDot,
+            // Qt3 无 NoDotAndDotDot；此处去掉该位是**行为等价**的：调用点是
+            // "*.eif"/"*.EIF" 名字过滤，Qt3 下 "."/".." 本就不匹配该通配
+            // （已用探针实测：垫片仅返回 a.eif/b.EIF/sub/deep.eif，无 . 与
+            // ..），且 QDir::Files 已排除目录。与上面 scanRecursive 的
+            // Files|Dirs 情形不同 —— 那里没有名字过滤，才必须显式跳过。
+            QDir::Files,
             QDirIterator::Subdirectories);
         bool expandedAny = false;
         const QStringList eifs = [&] {
@@ -3852,7 +3940,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     QString packId;
     for (const auto& p : stickerDb().list_packs(-1)) {
         if (QString::fromUtf8(p.title.c_str()) == title) {
-            packId = QString::fromStdString(p.id);
+            packId = qFromStdString(p.id);
             break;
         }
     }
@@ -3896,12 +3984,12 @@ StickerStore::InstallResult StickerStore::runInstallEif(
 
     const QString targetDir = base + QStringLiteral("/packs/") + title;
     if (QFile::exists(targetDir)) {
-        if (!QDir(targetDir).removeRecursively()) {
+        if (!qDirRemoveRecursively(QDir(targetDir))) {
             return {false, QStringLiteral("无法清理旧包目录"), {}, {},
                     {}, {}, {}};
         }
     }
-    if (!QDir().mkpath(targetDir)) {
+    if (!qMkpath(targetDir)) {
         return {false, QStringLiteral("无法创建包目录"), {}, {}, {}, {}, {}};
     }
 
@@ -3924,7 +4012,7 @@ StickerStore::InstallResult StickerStore::runInstallEif(
     QString packId;
     for (const auto& p : stickerDb().list_packs(-1)) {
         if (QString::fromUtf8(p.title.c_str()) == title) {
-            packId = QString::fromStdString(p.id);
+            packId = qFromStdString(p.id);
             break;
         }
     }
@@ -3968,12 +4056,12 @@ StickerStore::InstallResult StickerStore::runInstallTgs(
 
     const QString targetDir = base + QStringLiteral("/packs/") + title;
     if (QFile::exists(targetDir)) {
-        if (!QDir(targetDir).removeRecursively()) {
+        if (!qDirRemoveRecursively(QDir(targetDir))) {
             return {false, QStringLiteral("无法清理旧包目录"), {}, {},
                     {}, {}, {}};
         }
     }
-    if (!QDir().mkpath(targetDir)) {
+    if (!qMkpath(targetDir)) {
         return {false, QStringLiteral("无法创建包目录"), {}, {}, {}, {}, {}};
     }
 
@@ -3995,7 +4083,7 @@ StickerStore::InstallResult StickerStore::runInstallTgs(
     QString packId;
     for (const auto& p : stickerDb().list_packs(-1)) {
         if (QString::fromUtf8(p.title.c_str()) == title) {
-            packId = QString::fromStdString(p.id);
+            packId = qFromStdString(p.id);
             break;
         }
     }
@@ -4069,7 +4157,7 @@ bool StickerStore::setPackInstalled(const QString& packId, bool installed)
         return false;
     }
     const bool ok = stickerDb().update_pack_installed(
-        packId.toUtf8().constData(), installed ? 1 : 0);
+        qUtf8Printable(packId), installed ? 1 : 0);
     if (ok) {
         emit dataChanged();
     }
@@ -4085,10 +4173,10 @@ bool StickerStore::uninstallPack(const QString& packId, bool removeFiles)
     if (removeFiles) {
         dir = packMeta(packId).value("dir").toString();
     }
-    const bool ok = stickerDb().delete_pack(packId.toUtf8().constData());
+    const bool ok = stickerDb().delete_pack(qUtf8Printable(packId));
     if (ok) {
         if (removeFiles && !dir.isEmpty()) {
-            QDir(dir).removeRecursively();
+            qDirRemoveRecursively(QDir(dir));
         }
         QSettings settings;
         QStringList list = settings.value(
@@ -4120,7 +4208,7 @@ void StickerStore::cleanupAbandonedDownloads(const QStringList& knownUrls)
     if (dlDir.exists()) {
         const auto parts = dlDir.entryList(QStringList() << "*.part", QDir::Files);
         for (const QString& name : parts) {
-            const QString key = name.left(name.size() - 5); // 去掉 .part
+            const QString key = name.left(name.length() - 5); // 去掉 .part
             if (!keep.contains(key)) {
                 QFile::remove(dlDir.filePath(name));
             }
@@ -4146,7 +4234,7 @@ qint64 StickerStore::packDiskSize(const QString& packId)
     }
     qint64 total = 0;
     const auto rows = stickerDb().list_stickers(
-        packId.toUtf8().constData(), "rowid DESC", 0, 0, 0, nullptr);
+        qUtf8Printable(packId), "rowid DESC", 0, 0, 0, nullptr);
     for (const auto& row : rows) {
         total += row.size;
     }
@@ -4169,7 +4257,7 @@ QString normalizeSourceUrl(const QString& url)
     };
     for (const auto& prefix : kGhProxyPrefixes) {
         if (url.startsWith(prefix))
-            return url.mid(prefix.size());
+            return url.mid(prefix.length());
     }
     return url;
 }

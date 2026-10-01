@@ -140,21 +140,13 @@ private:
 // 这里的 QSslCertificate 是**数据载体**：指纹由 qsslprobe 用 OpenSSL 真实算出，
 // 校验本身由 curl/OpenSSL 完成，类型层不做任何桩断言。
 //
-// 注意：QCryptographicHash 在本垫片里只暴露 digest 计算所需的 Md5/Sha1；
-// QWebdavDirParser 用的 Md5 是 QSslCertificate::digest() 的实参。
+// 注意：QCryptographicHash 在本垫片里只用到 digest 计算所需的 Md5/Sha1
+// 枚举（QSslCertificate::digest() 的实参）。**不在这里另定义一个同名类** ——
+// stikcommon/qcryptographichash_shim.h 已提供真正可算摘要的实现
+// （接 qlcomp/md5.c 与 stikcommon/sha1.c），两个无守卫的同名 class 会
+// redefinition。故直接复用那一个。
 // ─────────────────────────────────────────────────────────────────────────────
-class QCryptographicHash
-{
-public:
-    enum Algorithm { Md5 = 0, Sha1 = 1 };
-    // Qt4+ 的 QCryptographicHash 是 QIODevice 子类（hash.addData/result）。
-    // QWebdav 只用 digest() 的枚举值，故此处只需枚举可被引用。
-    Algorithm algorithm() const { return m_alg; }
-    explicit QCryptographicHash(Algorithm a) : m_alg(a) {}
-
-private:
-    Algorithm m_alg;
-};
+#include "qcryptographichash_shim.h"
 
 class QSslCertificate
 {

@@ -93,10 +93,21 @@ static inline QString qAbsPath(const QFileInfo& fi)
 #endif
 }
 
-static inline bool qMkdir(const QString& path)
+// 命名说明：刻意**不叫 qMkdir**。qlcomp/compatcore34.h:57 已声明
+// `bool qMkdir(const QString& path, bool recursive = true)`，而 qnam_shim.h:44
+// 包含了该头（本文件的调用方 stickerstore.cpp 经此间接可见），同名重载会让
+// `qMkdir(toRoot)` 二义（编译器报 there are 2 candidates）。
+//
+// 两者语义还不同，不能简单二选一：compatcore34.cpp:334 的 Qt3 分支以
+// `return QDir().mkdir(p)` 收尾，目录**已存在**时 QDir::mkdir 返回 false；
+// 而 QDir::mkpath 的契约是「已存在 → true」。stickerstore.cpp 的 11 处
+// `QDir().mkpath(...)` 是要按 mkpath 语义替换的，故本函数实现 mkpath 语义
+// （末级 `|| QFileInfo(p).isDir()`），并在上面先做 isDir 短路。
+// 已实测（/tmp/qim/mk2.cpp）：深层绝对/相对路径、重复调用、已存在目录均返回 1。
+static inline bool qMkpath(const QString& path)
 {
 #ifdef QT3_BUILD
-    // QDir 无 mkpath；逐级 mkdir。与 qlcomp/compatcore34.cpp 的 qMkdir 同思路。
+    // QDir 无 mkpath；逐级 mkdir（思路与 compatcore34.cpp 的 qMkdir 相同）。
     QString p = path;
     while (p.endsWith(QChar('/'))) {
         p.truncate(p.length() - 1);
@@ -119,6 +130,13 @@ static inline bool qMkdir(const QString& path)
     return QDir().mkpath(path);
 #endif
 }
+
+// 兼容别名：qcabundle.cpp:84 / qzipreader_shim.cpp:147,610 / qlstik/src/config.cpp:52
+// / stikcommon/test_qmkdir.cpp 一律按 **单参 qMkdir** 调用建目录（历史接口名，
+// 另有专门用例覆盖其 mkpath 语义）。改名 qMkpath 会打断这批既有调用点（实测：
+// qcabundle.cpp:84 直接 "qMkdir was not declared"），故保留别名转调同一实现 ——
+// 单点实现、单份语义，不是两份拷贝。
+static inline bool qMkdir(const QString& path) { return qMkpath(path); }
 
 // ── qOpenReadOnly()：QIODevice 打开模式（Qt3 宏 / Qt4+ 枚举）──────────────
 // Qt3 的 QIODevice 只有 IO_ReadOnly/IO_WriteOnly/IO_ReadRead 宏、类作用域里
@@ -152,6 +170,18 @@ inline bool qOpenWriteOnly(QIODevice& dev)
     return dev.open(IO_WriteOnly);
 #else
     return dev.open(QIODevice::WriteOnly);
+#endif
+}
+
+// ── qOpenWriteOnlyAppend()：追加写模式（Qt3 宏 / Qt4+ 枚举位或）────────────
+// stickerstore.cpp:3546 用 `QIODevice::Append | QIODevice::WriteOnly` 做断点
+// 续传。Qt3 无 Append 枚举，需用 IO_Append|IO_WriteOnly（qiodevice.h:64-68）。
+inline bool qOpenWriteOnlyAppend(QIODevice& dev)
+{
+#if QT_VERSION < 0x050000
+    return dev.open(IO_Append | IO_WriteOnly);
+#else
+    return dev.open(QIODevice::WriteOnly | QIODevice::Append);
 #endif
 }
 
