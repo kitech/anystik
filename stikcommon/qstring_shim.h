@@ -25,6 +25,11 @@
 // QStringList 在 Qt3 是独立类（<qstringlist.h>，QValueList<QString> 的子类），
 // qstring.h 里只有前向声明；qStringListRemoveDuplicates 要按值操作它，必须真包含。
 #include <qstringlist.h>
+#else
+// Qt5+ 把 QStringList 并入 QtCore，但 <qstring.h> 不保证拉入完整定义；
+// 下面 qStringListRemoveDuplicates 的 Qt5+ 分支按值操作 QStringList，
+// 缺了会报 "incomplete type"。故显式包含。此分支对 Qt3 不参与编译。
+#include <QStringList>
 #endif
 #include <string.h>
 

@@ -33,9 +33,7 @@
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QCryptographicHash>
 #include <QDateTime>
-#include <QByteArrayView>
 #include <QMutex>
 #include <QDebug>
 #include <QMimeDatabase>
@@ -48,6 +46,19 @@
 #include <QNetworkRequest>
 #include <QSet>
 #include <QtConcurrent/QtConcurrent>
+// qToUtf8BA()：跨版本 QString→UTF-8 QByteArray（Qt3 走 QCString 中转，Qt4+
+// 即 toUtf8）。QCryptographicHash 的 5 处入参用它替代 Qt6 专有的 .toUtf8()。
+// 本垫片在两个分支都定义 qToUtf8BA，Qt6 侧不定义任何宏，故可无条件包含。
+#include "qstring_shim.h"
+#ifdef QT3_BUILD
+// Qt3 无 QCryptographicHash（Qt4.1 引入）、无 QByteArrayView（Qt5.10 引入）：
+// 用 stikcommon 的对应垫片（见 stikcommon.pri「批次 5：QCryptographicHash」段）。
+#include "qcryptographichash_shim.h"
+#include "qbytearrayview_shim.h"
+#else
+#include <QCryptographicHash>
+#include <QByteArrayView>
+#endif
 #ifdef QT3_BUILD
 // Qt3 无 qzipreader 私有类：用 stikcommon/qzipreader_shim（按 Qt 6.7 的
 // corelib/io/qzip.cpp 移植，与 Qt6 原生逐项行为对拍通过，见
@@ -694,7 +705,7 @@ static bool scanRecursive(QDir dir, QVector<QString>& files)
 
 static QString fileIdFor(const QString& path)
 {
-    return QString(QCryptographicHash::hash(path.toUtf8(),
+    return QString(QCryptographicHash::hash(qToUtf8BA(path),
         QCryptographicHash::Sha1).toHex());
 }
 
@@ -1606,7 +1617,7 @@ static QString findOrCreatePack(StickerDbSyncInterface& db,
     }
 
     packId = QString("pack_%1").arg(QString(
-        QCryptographicHash::hash(packTitle.toUtf8(),
+        QCryptographicHash::hash(qToUtf8BA(packTitle),
             QCryptographicHash::Sha1).toHex().left(12)));
     StickerPackRow pack;
     pack.id = packId.toStdString();
@@ -2889,7 +2900,7 @@ static QString sanitizeToken(const QString& in)
 
 static QString urlHex(const QString& url)
 {
-    return QString(QCryptographicHash::hash(url.toUtf8(),
+    return QString(QCryptographicHash::hash(qToUtf8BA(url),
         QCryptographicHash::Md5).toHex()).left(16);
 }
 
@@ -3316,7 +3327,7 @@ static QByteArray fileMd5(const QString& path)
     buf.resize(64 * 1024);
     qint64 got = 0;
     while ((got = f.read(buf.data(), buf.size())) > 0) {
-        hash.addData(QByteArrayView(buf.constData(), int(got)));
+        hash.addData(QByteArrayView(buf.data(), int(got)));
     }
     return hash.result();
 }

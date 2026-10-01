@@ -333,6 +333,40 @@ isEmpty(QT_VERSION) {
 # 侧整块不参与编译，故无需 .cpp。
 STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qtemporaryfile_shim.h
 
+# ── 批次 5：QCryptographicHash 分版本实现 ─────────────────────────────────
+# 需求：stickerstore.cpp 用 QCryptographicHash 生成贴纸包/文件/URL 的稳定 ID，
+# 全仓仅 5 处且只用 Md5/Sha1：fileIdFor(697)、packIdFromTitle(1609)、
+# 安装包 ID(2240)、urlHex(2892) 走静态 hash().toHex()；fileMd5(3314) 走
+# 增量 addData()+result()。QCryptographicHash 随 Qt 4.1 引入，Qt3.5 无。
+#
+# Qt3 侧用 stikcommon/qcryptographichash_shim.h：
+#   · 枚举只实现 Md5/Sha1；静态 hash() 返回 Qt3HashBytes（公开继承 QByteArray），
+#     补出 Qt3 的 QMemArray 没有的 toHex()（**小写**，对齐 Qt6）与 left()，
+#     使 stickerstore.cpp 那 4 处 `.toHex().left(n)` 无需改调用形态。
+#   · 增量路径走 md5.c 的 MD5_Init/Update/Final（**注意** md5 是
+#     Final(digest,ctx)，sha1 是 Final(ctx,digest)，两者参数顺序相反）。
+#   · 依赖 qlcomp/md5.c 提供 MD5_*（qlite.pri:19 已编，qlstik.pro:47 已 -I）。
+#     故这里**不**把 md5.c 列入 SOURCES，否则 MD5_* 重复定义。
+#   · sha1.c/sha1.h 是 Steve Reid 的 100% Public Domain SHA-1（上游
+#     github.com/henryk/tinydnssec），全仓无既有 SHA-1，作为新文件在 Qt3 下编。
+#
+# QByteArrayView（Qt 5.10 引入）另有 stikcommon/qbytearrayview_shim.h，
+# 只补 fileMd5(3317) 用到的 `QByteArrayView(const char*, int)` 形态。
+#
+# 实测（Qt3.5 + /opt/qt338sh 真机，探针 /tmp/vtest/thash.cpp 复刻 5 处调用点）：
+#   · SHA1("abc")/MD5("abc") 与 sha1sum/md5sum 逐字节一致（小写）；
+#   · 4 处静态调用点长度为 40/12/40/16，输出与系统 sha1sum/md5sum 一致；
+#   · fileMd5 的 200000B 分块增量 == 一次性 hash；result() 可重入（不改状态）。
+#
+# .h 无条件登记（依赖扫描），内容整体由 QT_VERSION < 0x040100 门控；
+# sha1.c 仅在 Qt3 侧编译。
+STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qcryptographichash_shim.h \
+                      $$STIKCOMMON_DIR/qbytearrayview_shim.h \
+                      $$STIKCOMMON_DIR/sha1.h
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/sha1.c
+}
+
 # myi18n 的 settings_trace.h 在 anystik 侧；davobfus 的 libobfuscate 在 vendor
 STIKCOMMON_INCLUDES += $$ANYSTIK_SRC_DIR \
                        $$ANYSTIK_SRC_DIR/../vendor/include
