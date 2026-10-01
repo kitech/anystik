@@ -2,9 +2,22 @@
 #include "eifreader.h"
 #include "storage.h"
 #include "sticker_db.h"
+// androidutils.h 是 Android 专用（头内用大写 <QString>，Qt3 只认小写
+// <qstring.h>，故 Qt3 桌面包含它会直接编译失败）。本文件用到它的 4 处符号
+// （androidPicturesStickerBaseDir / showAndroidToast ×3）全在 Q_OS_ANDROID
+// 守卫内，故按平台条件包含——Qt6 行为不变：桌面不定义 Q_OS_ANDROID，本来也
+// 用不到这些函数；Android 下照常包含。
+#ifdef Q_OS_ANDROID
 #include "androidutils.h"
-#include "macpasteboard.h"
+#endif
+// macgifconverter.h / macpasteboard.h 是 macOS 专用（头内用大写 <QByteArray>/
+// <QList>/<QString>，Qt3 只认小写头，包含即编译失败）。本文件用它们的 4 处调用
+// （ensureMacGifConverter ×2、macCollectPasteboard、macPasteboardData）全在
+// Q_OS_MACOS 块内，故按平台条件包含；Qt6 行为不变（非 macOS 本就只调空实现）。
+#if defined(Q_OS_MACOS)
 #include "macgifconverter.h"
+#include "macpasteboard.h"
+#endif
 #include "qnaturalsort.h"
 
 #include <QStandardPaths>

@@ -1,6 +1,31 @@
 #ifndef STICKER_STORE_H
 #define STICKER_STORE_H
 
+#ifdef QT3_BUILD
+// Qt3.5.0 无同名驼峰头，且三个类型名不同：
+//   * QByteArray 是 typedef QMemArray<char>，实用面在 <qcstring.h>；
+//   * QVariantMap 在 Qt3 叫 QStringVariantMap（qvariant.h:87 已 typedef 到
+//     QMap<QString,QVariant>，QVariant::toMap() / QVariant(QMap) 都在）；
+//   * QHash 由 stikcommon/qhash_shim.h 提供。
+// ⚠ 语义漂移点：Qt3 的 QMap 是**有序**（按 key 排序），Qt6 的 QVariantMap 基于
+// QHash 是**无序**。packMeta() 的返回值若被按遍历顺序消费，两侧顺序会不同。
+#include <qobject.h>
+#include <qstring.h>
+#include <qstringlist.h>
+#include <qcstring.h>
+#include <qvector.h>
+#include <qmap.h>
+#include <qvariant.h>
+#include <qdatetime.h>
+
+#include "qhash_shim.h"
+#include "qstring_shim.h"
+// qint64/qreal 是 Qt4 引入的类型别名，Qt3 只有 Q_LONG；由本垫片提供
+// （qglobaltype_shim.h:43,51）。
+#include "qglobaltype_shim.h"
+
+typedef QStringVariantMap QVariantMap;
+#else
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -9,6 +34,7 @@
 #include <QHash>
 #include <QVariantMap>
 #include <QDateTime>
+#endif
 
 class QFile;
 class QNetworkAccessManager;
@@ -189,7 +215,7 @@ public:
     bool renameStickerFile(const QString& packId, const QString& oldFileName,
                            const QString& newFileName);
 
-Q_SIGNALS:
+signals:
     void dataChanged();
     // 迁移进度：进度按「文件数」计算（done/total）；copiedBytes 为已拷贝字节，
     // 仅用于展示、不参与进度计算。copiedFiles/skippedFiles 分别为实际拷贝和

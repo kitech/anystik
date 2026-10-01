@@ -308,6 +308,31 @@ isEmpty(QT_VERSION) {
     STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qzipreader_shim.cpp
 }
 
+# ── 批次 5：QTemporaryFile 分版本实现 ─────────────────────────────────────
+# 需求：stickerstore.cpp 的 verifyScaledResult（1155 行）与 buildGifBytes
+# （1429 行）各建一个 QTemporaryFile 落盘缩放结果。QTemporaryFile 随 Qt 4.3
+# 引入，Qt3.5 无此类。故 Qt3 侧用 stikcommon/qtemporaryfile_shim.h：按「模板名
+# XXXXXX 段填 pid+时间戳+序号+随机数，用 QFile::exists() 探测唯一名」的思路
+# 拼出等价行为，并补 Qt4+ 的 fileName()/setFileName() 成员名。
+#
+# 实测（Qt3.5 + /opt/qt338sh 真机，探针 /tmp/vtest/ttmp.cpp）：
+#   · 模板 XXXXXX 被替换、fileName() 拿到路径、open()+write+flush+close 后
+#     重新打开读回内容一致；
+#   · setAutoRemove(false) 析构后文件仍在，默认 autoRemove=true 析构后消失；
+#   · 无 XXXXXX 段的模板 open() 失败（与 Qt 原生一致）；
+#   · 连开 50 个全部不重名。
+# ⚠ 已知弱于 Qt 原生之处：Qt 原生用 open(O_CREAT|O_EXCL) 原子建文件，本垫片是
+#   exists() 探测后再 open()，两步间有竞态窗口。批次 5 这两处都是单线程临时
+#   文件（文件名含 pid+时间戳+序号），撞名概率可忽略；若日后出现并发/多线程
+#   创建临时文件的场景，须改回 O_EXCL 原子建。
+# ⚠ Qt3 的打开模式是 int + IO_* 宏（QIODevice::OpenMode 枚举类与 ReadWrite
+#   成员是 Qt4 才有的），故本垫片 open() 收 int，与 qtemporaryfile_shim.h
+#   文件头「不写模板」的原因同理（QFile 只有 open(int)，qfile.h:78）。
+#
+# .h 无条件登记（依赖扫描），内容整体由 QT_VERSION < 0x040300 门控，Qt4.3+
+# 侧整块不参与编译，故无需 .cpp。
+STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qtemporaryfile_shim.h
+
 # myi18n 的 settings_trace.h 在 anystik 侧；davobfus 的 libobfuscate 在 vendor
 STIKCOMMON_INCLUDES += $$ANYSTIK_SRC_DIR \
                        $$ANYSTIK_SRC_DIR/../vendor/include

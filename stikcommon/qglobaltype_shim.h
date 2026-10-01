@@ -14,7 +14,16 @@
 // ══ QIODevice 打开模式 ═════════════════════════════════════════════════
 // Qt3 的 QIODevice 用 IO_ReadOnly/IO_WriteOnly/IO_ReadWrite 宏且无枚举成员，
 // Qt4+ 用 QIODevice::ReadOnly 等枚举——这是没法放进一个类型里的差异，一律走
-// qOpenReadOnly() 自由函数（与 qAbsPath/qMkdir 同范式），实现见文件末尾。
+// qOpenReadOnly() / qOpenWriteOnly() 自由函数（与 qAbsPath/qMkdir 同范式）。
+//
+// ══ 字节读写 ═════════════════════════════════════════════════════════
+// Qt3 的 QFile/QBuffer 只有 writeBlock/readBlock（形参 Q_ULONG），Qt4+ 才有
+// write(const QByteArray&) / read(char*, qint64)；且 Qt3 的 QBuffer 是
+// setBuffer(QByteArray) 按值深拷贝，Qt4+ 是 setData() 隐式共享。对应自由函数：
+//   qFileWrite(QFile&, QByteArray)   —— QFile 专版
+//   qIoWrite(QIODevice&, QByteArray) —— 基类版，QBuffer/QFile 通吃
+//   qBufferSetData(QBuffer&, QByteArray) —— Qt3 setBuffer ↔ Qt4+ setData
+// 语义差异均已实测（见各函数注释），实现见文件末尾。
 
 //
 // ══ qAbsPath() / qMkdir() ══════════════════════════════════════════════
@@ -31,12 +40,16 @@
 #include <qfileinfo.h>
 #include <qiodevice.h>
 #include <qfile.h>
+#include <qbuffer.h>
+#include <qcstring.h>
 #else
 #include <QString>
 #include <QDir>
 #include <QFileInfo>
 #include <QIODevice>
 #include <QFile>
+#include <QBuffer>
+#include <QByteArray>
 #endif
 
 #if QT_VERSION < 0x040000
@@ -127,6 +140,12 @@ inline bool qOpenReadOnly(QIODevice& dev)
 
 // ── qOpenWriteOnly()：QIODevice 写模式（Qt3 宏 / Qt4+ 枚举）────────────────
 // 同 qOpenReadOnly，Qt3 用 IO_WriteOnly 宏，Qt4+ 用 QIODevice::WriteOnly 枚举。
+//
+// ⚠ 截断语义已实测确认（Qt3.5 + /opt/qt338sh 真机）：Qt3 的 IO_WriteOnly
+//   **本身就截断**——对同一文件先写 10 字节、再以 IO_WriteOnly 写 5 字节，
+//   读回 size=5 且内容纯为新数据，无旧尾部残留。故此处无需（也不应）再加
+//   IO_Truncate，与 Qt4+ 的 QIODevice::WriteOnly 语义一致。
+//   （该宏值 0x0002，IO_Truncate 另有 0x0008，见 qiodevice.h:65,68。）
 inline bool qOpenWriteOnly(QIODevice& dev)
 {
 #if QT_VERSION < 0x050000
@@ -147,6 +166,41 @@ inline long qFileWrite(QFile& f, const QByteArray& data)
     return (long)f.writeBlock(data.data(), (Q_ULONG)data.size());
 #else
     return (long)f.write(data);
+#endif
+}
+
+// ── qIoWrite()：任意 QIODevice 写字节（QFile 与 QBuffer 通吃）──────────────
+// qFileWrite() 的形参写死 QFile&，但 Qt4 的 QIODevice::write(const QByteArray&)
+// 是基类虚函数，QBuffer / QFile / QTemporaryFile 都能调——stickerstore.cpp 的
+// 写缓冲正是 QBuffer（如 QBuffer wb; wb.open(WriteOnly); ... wb.write(...)）。
+// Qt3 侧统一转发到 QIODevice::writeBlock。
+inline long qIoWrite(QIODevice& dev, const QByteArray& data)
+{
+#if QT_VERSION < 0x040000
+    return (long)dev.writeBlock(data.data(), (Q_ULONG)data.size());
+#else
+    return (long)dev.write(data);
+#endif
+}
+
+// ── qBufferSetData()：QBuffer::setData（Qt3 只有 setBuffer）──────────────────
+// Qt3.5 的 QBuffer 是 setBuffer(QByteArray)（qbuffer.h:58，按值传），Qt4+ 才是
+// setData(const QByteArray&) 且是隐式共享引用。
+//
+// ⚠ 语义差异（已实测，Qt3.5 + /opt/qt338sh）：Qt3 的 setBuffer 是**快照深拷贝**——
+//   设 buffer 后改源 QByteArray，buffer() 内容不变；Qt4+ 的 setData 是隐式共享
+//   （改源会影响 buffer）。故 Qt3 版对「setData 后只读」的用法（stickerstore 的
+//   7 处 `QBuffer probe; probe.setData(bytes);` 全部如此）**行为等价**；
+//   若日后出现「setData 后改源、期望 buffer 跟着变」的用法则不成立，须改写该处。
+// ⚠ Qt3 的 QByteArray 是 QMemArray<char>（qcstring.h:98），**无隐式共享**，
+//   故拷贝是 Qt3 的固有行为，无法也不必对齐 Qt4+。
+inline bool qBufferSetData(QBuffer& buf, const QByteArray& data)
+{
+#if QT_VERSION < 0x040000
+    return buf.setBuffer(data);
+#else
+    buf.setData(data);
+    return true;
 #endif
 }
 

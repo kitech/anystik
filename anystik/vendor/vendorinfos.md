@@ -315,3 +315,138 @@ unifiedPushTopicLength = 14     // 总长度必须 14 字符（含 "up"）
   `signals`/`slots`/`emit` 宏与 doctest 无冲突
 - **用途**: `stikcommon/` 与 `qlstik/` 两处单元测试套件的框架。include 路径为
   `anystik/vendor` 根（与 `pugixml` 同一手法），写作 `#include "doctest/doctest.h"`
+
+## uc_apng_loader + stb_image（APNG 解码，批次 5 Qt3 侧实际使用）
+
+- **Name**: uctakeoff/uc_apng_loader（主用） + nothings/stb（仅取 `stb_image.h`）
+- **Upstream**: https://github.com/uctakeoff/uc_apng_loader
+- **License**: uc_apng_loader 为 MIT（`uc_apng_loader/LICENSE`）；`stb_image.h` 为 public domain
+  （v2.30，头部自述 `stb_image - v2.30 - public domain image loader`）
+- **Files** (SHA256):
+  - `uc_apng_loader/uc_apng_loader.h`（17027 字节，头文件第 4-5 行自述 MIT）
+    `126257eeb00cab85b0c685ac20fc8c572309d351c637da90a4c058e1b6278c6b`
+  - `uc_apng_loader/stb_image.h`（283010 字节，v2.30）
+    `594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3`
+  - `uc_apng_loader/LICENSE`（1057 字节）
+    `afb11426e09da40a1ae4f8fa17ddcc6b6a52d14df04c29bc5bcd06eb8730624d`
+- **能力**: 解析 `acTL`/`fcTL`/`fdAT`；`create_file_loader()`/`create_memory_loader(buf,len)`
+  （返回**对象本身**，不是指针）；`width()`/`height()`/`num_frames()`/`num_plays()`；
+  `has_frame()`/`next_frame()` → `frame{index, image}`。`frame.image` 恒为**全画布尺寸**
+  的已合成结果，合成代码在头文件内：`blend_frame()`（L329，按 `blend_op_t::SOURCE`/OVER 混合）
+  与 `next_frame()` 的 `dispose_op_t::NONE`/`BACKGROUND`/`PREVIOUS` 三分支（L413-427）；
+  L485-487 实现了规范细节「首帧 `dispose_op==PREVIOUS` 视为 `BACKGROUND`」
+- **已实测**（`~/ztprobe/img/apngtest.cpp` / `apngscale.cpp`，PIL 生成 3 帧 40x40 APNG，
+  duration 120/80/200ms，loop=0）：`canvas=40x40 frames=3 plays=0` 与 PIL `n_frames=3` 一致；
+  每帧输出全画布 40x40；首帧左上 `ff0000ff`、后两帧 `00000000`，与帧内容相符；
+  缩放到 20x20 后用 PIL 复核三张 PNG 尺寸/颜色均正确。`-std=c++11` 与 `-std=c++23`
+  （项目 `CMAKE_CXX_STANDARD 23`）均编译通过
+- **⚠ 上游缺陷：不能喂静态 PNG**。`uc_apng_loader.h:241-248` 的 `image_t(std::vector<uint8_t>&)`
+  先调 `stbi_load_from_memory(..., STBI_rgb_alpha)`，再 `UC_APNG_ASSERT(d == BPP)`；
+  但 stb 在指定 `req_comp` 强制转换时**不改写** `d`，故 RGB 静态 PNG（`d==3`）必然断言失败，
+  抛 `uc::apng::exception: image_t : d == BPP failed.`。**本项目只把它用于 APNG 分支**，
+  静态 PNG 仍走 Qt 自己的 `QImageReader`，两者不混用
+- **⚠ 不可定义 `UC_APNG_LOADER_NO_EXCEPTION`**：实测该宏下 APNG 静默解析失败
+  （`canvas=0x0 frames=0 plays=0`、`decoded=0`，不抛异常也不报警），错误被完全吞掉。
+  保持默认异常模式，调用侧用 try/catch 转成错误返回
+- **落地三个坑（均实测）**:
+  1. 头文件**自身不 include `<cstdint>`**，调用方须先 `#include <cstdint>`，
+     否则 `uint8_t`/`uint16_t`/`uint32_t` 全部报错
+  2. 需在某 TU 里 `#define STB_IMAGE_IMPLEMENTATION` + `#include "stb_image.h"`，
+     否则链接期报 `undefined reference to stbi_image_free`
+  3. `create_memory_loader` 返回对象，写 `loader->` 编译失败，须 `loader.`
+- **成熟度风险（选型时已知并接受）**: 仅 **11★ / 3 forks**，created 2017-04-08，
+  pushed **2024-07-24**，无 OSS-Fuzz 等安全审计、无公开发行版。选它是因为功能完整
+  （已含合成，不必自写 150-200 行）且 header-only 体量小（17KB+283KB）
+- **为何不选 Firefox `media/libpng/apng.patch`**: 该 patch 只提供帧流 API
+  （`png_get_acTL`/`png_read_frame_head`/`png_write_frame_head`/`png_write_frame_tail`），
+  `pnginfo.h` 新增字段全是元数据（`num_frames`/`next_frame_dispose_op`/`next_frame_blend_op` 等）、
+  **不含已合成画布**，合成仍要自写；且 patch 是针对 Mozilla 内 **libpng 1.6.59** 打的，
+  本机系统是 1.6.50，不能直接 apply。上游 `pnggroup/libpng` PR #706 中维护者明确要求
+  「disabling APNG handling by default」，长期游离于上游之外。详见 `qlstik/移植计划.md` §6.3k
+- **用途**: 批次 5 `stickerstore` 在 Qt3 侧的 APNG 多帧解码（Qt3 无 APNG 动图支持）；
+  GIF 走 libnsgif、WebP 走系统 libwebp，见 `qlstik/移植计划.md` §6.3k K.1
+
+## libnsgif（GIF 动图解码，批次 5 Qt3 侧实际使用）
+
+- **Name**: NetSurf libnsgif
+- **Upstream**: 官方 git 在 `source.netsurf-browser.org/libnsgif.git`（**不在 GitHub**）。
+  入库取自镜像 `netsurf-plan9/libnsgif` 的 `master` 分支 commit `e97bc7b86f`
+- **License**: MIT（`libnsgif/COPYING`；© 2004 Richard Wilson / © 2008 Sean Fox /
+  © 2013-2021 Michael Drake）
+- **为何这样取**：官方源是 git 而非 tarball 快照，GitHub 镜像 `netsurf-plan9/libnsgif`
+  仅 9★ 且 push 停在 2024-03-29，**未跟进官方 master**。镜像仓库的文件路径与官方不同
+  （镜像用 `src/gif.c`、`include/nsgif.h`，而非常见的 `libnsgif.c`），故按镜像实际布局入库。
+  文件名以镜像为准，源码是上游 NetSurf 原件。GitHub 上 `NetSurf/libnsgif`、
+  `giflib/giflib` 均返回 404
+- **Files** (SHA256):
+  - `libnsgif/gif.c`（50874 字节，**注意不叫 `libnsgif.c`**）
+    `e9d5fe0e63b10d9be603e1ad2f1fede0a5acf0909bc17c8c7911b776f0a0a1af`
+  - `libnsgif/lzw.c`（16711 字节）
+    `55ee58985717ad622c42ac853d241470ed48fbf9d78820ac497a29c83a5bf794`
+  - `libnsgif/lzw.h`（4878 字节）
+    `6191b797a275e9c250aad591853bc2825593bb182b5002b7ae1cd9e50329a6f2`
+  - `libnsgif/nsgif.h`（15318 字节）
+    `586ed21a3e12d6b0cd423af262fb6beee4f0e45b848672040505cb5d395d71fa`
+  - `libnsgif/COPYING`（1133 字节）
+    `1469b759cf18e43c6e1b4ff892307d3962cbbb337ac497620d6690a219fad10c`
+- **零外部依赖（已核对全部 include）**：`gif.c`/`lzw.c` 只 include
+  `<assert.h> <stdint.h> <stdlib.h> <string.h> <stdbool.h>` + 本目录 `lzw.h`/`nsgif.h`；
+  `nsgif.h` 只 include `<stdint.h> <stdbool.h> <inttypes.h>`。C99 即可编译
+- **API 范式（与官方 README 一致，两步式）**:
+  `nsgif_create(&vt, fmt, &gif)` → `nsgif_data_scan(gif, size, data)`（可多次喂增量数据）
+  → `nsgif_data_complete(gif)` → `nsgif_get_info(gif)` 取 `const nsgif_info_t*`
+  （`width/height/frame_count/loop_max/background/global_palette`）
+  → 循环 `nsgif_frame_prepare(gif,&area,&delay,&frame)` + `nsgif_frame_decode(gif,frame,bitmap)`
+- **⚠ 三个 API 陷阱（实测踩过，务必先读）**:
+  1. **`nsgif_frame_decode` 的 bitmap 参数是二级指针** `nsgif_bitmap_t **bitmap`
+     （`gif.c:1947`），库会**自己创建并回填** bitmap。传单层指针会让库写进调用方的
+     栈上临时变量，随后读另一个 buffer 就得到 `905c1aef` 之类垃圾值——极易误判成
+     库有 bug。正确写法：`nsgif_bitmap_t* bmp=NULL; nsgif_frame_decode(gif,frame,&bmp);`
+     之后用 `bmp`（库持有，勿 free）
+  2. **`delay` 是 GIF 原始单位（1/100 秒），不是毫秒**。`gif.c:774`
+     `frame->info.delay = data[3] | (data[4] << 8)` 直接取 GCE 两字节小端。
+     实测对照：`t3.gif` 文件 GCE 字节为 `0c`/`08`/`14`，libnsgif 报 12/8/20，
+     而 stb_image 报 120/80/200（它内部已 ×10）。`stickerstore` 现有 delay 语义是
+     **毫秒**，接 libnsgif 必须 **×10**
+  3. **`nsgif_frame_prepare()` 不会自己停**：`loop_max == 0`（永久循环）时永远返回
+     `NSGIF_OK` 并从第 0 帧重来，实测 3 帧 GIF 无限吐帧。须在拿到
+     `NSGIF_ERR_ANIMATION_END`（仅有限循环结束时出现）**或自行按 `loop_max` 计数退出**
+- **与其他解码器的实测对照**（同一批文件，40x40）：
+  `t3.gif`（无 disposal）与 `d2.gif`（`disposal=2`）两者的**像素与 stb_image v2.30、
+  PIL 完全一致**，含 disposal=2 的透明处理（帧1 `(0,0)=000000ff` 透明、`(15,15)=00ff00ff` 绿）。
+  唯一差异就是上面第 2 条的 delay 单位
+- **stb_image 也能解 GIF 动画**（`stb_image.h:433` 有 `stbi_load_gif_from_memory`，
+  返回紧凑排列的 `frames×w×h×4` RGBA + `int** delays` 毫秒数组，两个 buffer 都要
+  `stbi_image_free`，链接需 `-lm`）。本项目仍选 libnsgif 而非 stb_image 解 GIF，
+  原因见下条 stb 维护者立场
+- **已实测**（`/tmp/vtest/nsgiftest.c`，`-std=c99 -O2 -Wall`，PIL 生成 3 帧 40x40 GIF，
+  duration 120/80/200ms、loop=0）：`canvas=40x40 frames=3 loop=0` 与 PIL `n_frames=3` 一致；
+  三帧 `delay` 分别回读为 **12/8/20ms**（GIF 时间单位是 10ms，120ms→12 正确）；
+  第 3 帧 `redraw` 区域为 **32x32**，正确反映了该帧的局部尺寸（前两帧为全画布 40x40）
+- **成熟度**: GitHub star 数不具参考性（官方源不在 GitHub）。真实采用证据：
+  **libvips**（11697★）、**OBS Studio**（76826★）、**GEGL**、**NetSurf 浏览器** 均内置。
+  维护者 Michael Drake 是 NetSurf 核心开发者
+- **用途**: 批次 5 `stickerstore` 在 Qt3 侧的 GIF 多帧解码（Qt 3.5.0 只有 `libqmng.so`
+  + `libqjpeg.so`，实测 gif 解码失败）。GIF **编码**侧沿用现有 `vendor/tangora_gif.h`
+  （纯编码器，`GifBegin`/`GifWriteFrame`/`GifEnd`）。见 `qlstik/移植计划.md` §6.3k
+
+## stb_image（含 GIF 动画，评估参考）
+
+- **Name**: nothings/stb
+- **File**: `uc_apng_loader/stb_image.h` 已入库（v2.30，public domain）
+- **API（GIF 动画）**: `stbi_load_gif_from_memory(buf, len, int **delays, int *x, int *y,
+  int *z, int *comp, int req_comp)`，其中 `*z` 是帧数，`**delays` 返回每帧时长
+  数组（**毫秒**）。返回值是紧凑排列的 `frames × w × h × 4` RGBA，两个 buffer
+  均须用 `stbi_image_free()` 释放，链接需 `-lm`
+- **实测对照**（与 libnsgif/PIL）：像素数据完全一致（包括 `disposal=2` 的透明处理）。
+  **唯一差异**：delay 单位 —— libnsgif 返回 GIF 原始 10ms 单位（GCE 两字节小端÷10），
+  stb_image 返回**毫秒**
+- **stb 维护者立场（重要）**：`nothings/stb` issue #1568（作者本人）明确表示
+  _"The plan is to remove all support for animated gifs from stb_image and fork them
+  into a separate library (which I personally will not be maintaining), because this
+  has just been a source of headaches and it's really outside the original intent of
+  stb_image."_ 此外 issue #1688（2024-09）还报告 disposal method 2/3 的处理有 PR
+  未合并，说明动画 GIF 路径并非 stb 的长期维护重心
+- **项目选型结论**：GIF 动图解码选用 **libnsgif**（NetSurf 官方、MIT、被 libvips/OBS/GEGL
+  广泛采用，API 明确、维护活跃于 NetSurf 生态）。stb_image 的 GIF 动画实现**不选作主路线**，
+  仅在此作为对照验证之用（已实测可用）
