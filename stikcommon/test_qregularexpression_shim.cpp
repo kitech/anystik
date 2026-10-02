@@ -287,7 +287,7 @@ TEST_CASE("qFromUtf8BA: 显式长度解码，不依赖 NUL 终止")
     //   fromUtf8(const char*, int len = -1)，而 QMemArray<char> 有隐式
     //   operator const char*()，于是 ba 被当 C 串、len 取 -1 → strlen 语义。
     //   qnam_shim 的 readAll() 产物不保证 NUL 终止，直接 fromUtf8 会越界读。
-    const QString s = QString::fromUtf8("\xe7\xab\x99\xe7\x82\xb9\xe5\x8A\xA0\xe8\xBD\xBD");  // 站点加载
+    const QString s = QString::fromUtf8("站点加载");  // 站点加载
     const QByteArray ba = qToUtf8BA(s);
     CHECK_EQ(ba.size(), 12);                       // 4 个汉字 × 3 字节，无尾 NUL
     const QString back = qFromUtf8BA(ba);
@@ -368,9 +368,14 @@ TEST_CASE("qStringChop: 真删尾字符（Qt3 的 left() 返回值必须回写�
     CHECK_EQ(cp(s), QCString("ab"));
 
     // n >= length() 整串清空（对齐 Qt4+ chop），不做负下标 left()
+    // ⚠ 清空后必须是**非 null** 空串：Qt6 实测 chop(越界) 给 isNull=0
+    //   （/tmp/opencode/probe/zk9.cpp），且 Qt3 下 null != QString("")。
+    //   此前这里断言 s.isNull()，钉的是 Qt3 旧实现 `s = QString()` 的分叉行为。
     s = QString("ab");
     qStringChop(s, 5);
-    CHECK(s.isNull());
+    CHECK(s.isEmpty());
+    CHECK(!s.isNull());
+    CHECK_EQ(s, QString(""));
 
     // davbisync canonicalRel 的收敛形态：必须终止
     QString r = QString("pastes/x/");

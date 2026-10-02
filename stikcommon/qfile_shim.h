@@ -161,11 +161,18 @@ inline QByteArray qIODeviceReadN(QIODevice& dev, qint64 maxlen)
 {
 #ifdef QT3_BUILD
     if (maxlen <= 0) return QByteArray();
-    const QByteArray all = dev.readAll();
-    const int n = all.size() < int(maxlen) ? all.size() : int(maxlen);
+    // ⚠ 不能用「readAll 全量 + 取前 maxlen」：readAll 会把设备**读到 EOF**，之后再调
+    //   本函数恒返回空，而 Qt6 的 read(maxSize) 只消费 maxSize 个字节、保留余量。
+    //   实测 Qt 6.7.3，9 字节文件：read(8) → 8，再 read(100) → 1。
+    //   原实现的注释曾断言「对只读普通文件等价」——该断言仅对**单次**调用成立
+    //   （本仓唯一调用点 stickerstore.cpp:3939 读 8 字节魔数正是单次），但不成立
+    //   就不该写成结论；故改为按 Qt6 语义只读本次所需字节。
+    const qint64 kCap = (maxlen < (qint64)0x7FFFFFFF) ? maxlen : (qint64)0x7FFFFFFF;
     QByteArray out;
-    out.resize(n);                        // Qt3 QByteArray 无 (size,ch) 公有构造
-    if (n > 0) memcpy(out.data(), all.data(), n);
+    out.resize((int)kCap);                     // Qt3 QByteArray 无 (size,ch) 公有构造
+    const int got = dev.readBlock(out.data(), (Q_ULONG)kCap);
+    if (got < 0) return QByteArray();
+    if (got < (int)kCap) out.resize(got);      // 只返回实际读到的字节，不补齐
     return out;
 #else
     return dev.read(maxlen);
@@ -208,13 +215,18 @@ inline bool qFileInfoExists(const QString& path) { return QFile::exists(path); }
 // 基名，故直接实现规则本身而非重组字符串：
 //   末点位于 index 0 时（点开头的隐藏文件，如 ".bashrc"），Qt6 返回空 —— 与
 //   baseName() 一致，单独处理；其余情况返回 [0, 末点) 的子串。
+//   ⚠ 该「空」必须是**非 null** 空串：Qt 6.7.3 实测 completeBaseName() 对
+//     ".bashrc" / "." 返回 isNull=0、isEmpty=1；而 Qt3 里 QString() 与
+//     QString("") **不相等**（前者 latin1() 为 nil，后者非 nil）。若返回
+//     QString()，上层 `base != QString("")` 之类的比较会走错分支，且 doctest
+//     之类按 const char* 打印 null QString 的工具会直接崩。
 inline QString qFileInfoCompleteBaseName(const QFileInfo& fi)
 {
     const QString fileName = fi.fileName();
     // Qt3 用 findRev()（Qt 4.1 才有 findLast()）
     const int lastDot = fileName.findRev(QChar('.'));
     if (lastDot < 0) return fileName;              // 无点 → 整名
-    if (lastDot == 0) return QString();            // ".bashrc" → Qt6 返回空
+    if (lastDot == 0) return QString::fromLatin1("");   // ".bashrc"/"." → 空（非 null）
     return fileName.left(lastDot);
 }
 

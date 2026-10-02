@@ -52,6 +52,13 @@ QString QStandardPaths::writableLocation(StandardLocation type)
         base = h.isEmpty() ? QString(".local/share")
                            : h + QString("/.local/share");
     }
+    // 1b) 剥掉尾部斜杠：XDG_DATA_HOME="/path/" 若原样采纳，下面拼 "/<org>"
+    //     会产出 "/path//org"（Qt5/6 会先归一化，不会有双斜杠）。
+    //     调用方会把这个返回值直接拿去拼文件路径，双斜杠在 POSIX 上能用但
+    //     会让「路径字符串比较」类逻辑（缓存键、去重）判不相等。
+    while (base.endsWith(QLatin1Char('/')) && base.length() > 1) {
+        base = base.left(base.length() - 1);
+    }
 
     // 2) 追加组织名（非空才加）
     const QString org = QCoreApplication::organizationName();

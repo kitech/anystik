@@ -23,7 +23,8 @@ mkdir -p "$OUTDIR"
 CXX="g++ -std=c++11 -g -O0 -w"
 # 测试与被测产品代码同在 stikcommon/，故 -I. ；doctest 在 anystik/vendor
 FLAGS="-DQT3_BUILD -DQT_NO_DEBUG -DQT_SHARED -DQT_THREAD_SUPPORT \
-  -I. -I../anystik/vendor -I$QTDIR/include -I../qldox -I../qlcomp"
+  -I. -I../anystik/vendor -I../anystik/vendor/libnsgif \
+  -I../anystik/vendor/uc_apng_loader -I$QTDIR/include -I../qldox -I../qlcomp"
 
 # ── 测试文件（新增一个就在这里加一行）────────────────────────────────
 TESTS="
@@ -51,6 +52,16 @@ test_qtrimmed_shim.cpp
 test_qtemporaryfile_shim.cpp
 test_qconnect_slots.cpp
 test_qmkdir.cpp
+test_qfile_shim.cpp
+test_qsavefile_shim.cpp
+test_qstandardpaths_shim.cpp
+test_qcryptographichash_shim.cpp
+test_qcontainers_shim.cpp
+test_qbytearrayview_shim.cpp
+test_qzipreader_shim.cpp
+test_qimagereader_shim.cpp
+test_qcoreapplication_shim.cpp
+test_qnam_shim.cpp
 "
 
 # ── 被测产品代码：链接 run_tests 所需的 stikcommon/qlcomp/qldox 部分 ──
@@ -71,6 +82,8 @@ dav207pugi.cpp
 qsavefile_shim.cpp
 qjson_shim.cpp
 qstandardpaths_shim.cpp
+qzipreader_shim.cpp
+qimagereader_shim.cpp
 ../anystik/vendor/pugixml/pugixml.cpp
 "
 
@@ -94,6 +107,17 @@ done
 $CXX $FLAGS -c ../qldox/cJSON.c -o "$OUTDIR/prod_cJSON.o"
 OBJS="$OBJS $OUTDIR/prod_cJSON.o"
 
+# libnsgif 是纯 C 源（GIF 动画后端，qimagereader_shim.cpp 依赖），用 gcc 编，
+# 避免 g++ 把 C 代码按 C++ 解析时对旧式构造/隐式转换报错。
+# qlcomp/md5.c 与 sha1.c 是 QCryptographicHash 垫片的摘要实现（C 源），
+# 不编进来会在链接期报 MD5_Init/SHA1_* 未定义。
+for csrc in ../anystik/vendor/libnsgif/gif.c ../anystik/vendor/libnsgif/lzw.c \
+            ../qlcomp/md5.c sha1.c; do
+    o="$OUTDIR/prod_$(basename "${csrc%.c}").o"
+    gcc -std=gnu99 -g -O0 -w $FLAGS -c "$csrc" -o "$o"
+    OBJS="$OBJS $o"
+done
+
 echo "=== 编译测试（逐个，出错即定位到文件）==="
 $CXX $FLAGS -c test_main.cpp -o "$OUTDIR/test_main.o"
 OBJS="$OBJS $OUTDIR/test_main.o"
@@ -105,7 +129,7 @@ done
 
 echo "=== 链接 ==="
 $CXX -o "$OUTDIR/run_tests" $OBJS \
-  -L$QTDIR/lib -lqt-mt -lcurl -lssl -lcrypto -lz -lpthread \
+  -L$QTDIR/lib -lqt-mt -lcurl -lssl -lcrypto -lz -lwebp -lwebpdemux -lpthread \
   -ldl -lX11 -lXss
 
 echo "=== 运行 ==="

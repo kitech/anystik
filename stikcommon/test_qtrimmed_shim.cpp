@@ -173,7 +173,7 @@ TEST_CASE("qTrimmed(QString) 两版本差异码位 U+0085 / U+200B")
 TEST_CASE("qTrimmed(QString) 保住非 ASCII 内容的码点")
 {
     // 「纸」= U+7EB8，「优」= U+4F18。预期值必须用 fromUtf8，见 AGENTS.md。
-    QString cjk = QString::fromUtf8("\xe7\xba\xb8\xe4\xbc\x98");
+    QString cjk = QString::fromUtf8("纸优");
     CHECK_EQ(cjk.length(), 2);
     CHECK(cjk.at(0).unicode() == 0x7EB8);
     CHECK(cjk.at(1).unicode() == 0x4F18);

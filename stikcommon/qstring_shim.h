@@ -90,7 +90,10 @@ private:
 // 注：刻意**不**提供 split 垫——Qt3 只有 split(const QString&, Qt::SplitFlags)，
 // 语义（是否保留空段）与 Qt4 的 split(QChar) 不同，误垫会静默改变解析结果；
 // 需要时用 split(QString(c)) 显式写。
-// clear()：Qt3 无（QString 在 Qt3 不可变语义地靠 = QString() 归零）。
+// clear()：Qt3 无 clear()，只能 `s = <非 null 空串>` 归零。
+//   ⚠ 不能写 `s = QString()`：那是 null，与 Qt6 clear() 的非 null 空串不等价
+//     （Qt3 下 `QString() == QString("")` 为 false，Qt6 为 true）。详见
+//     下面 qStringClear 的注释。
 #if QT_VERSION < 0x040000
 // QCString 与 QByteArray 在 Qt3 是**不同类**（QByteArray=QMemArray<char>），
 // 无隐式转换；且 QCString(QByteArray) 构造实测不可靠，故按长度 memcpy。
@@ -134,13 +137,20 @@ inline QByteArray qToLocal8BA(const QString& s)  { return qQStringToBA(s.local8B
 //       后续拼出的绝对路径全是 `//`。
 //   故必须显式回写 s。
 // 语义对齐 Qt4+ chop()：「n >= length() 时整串清空」，不做负下标 left()。
+// ⚠⚠ 清空必须给**非 null** 空串：Qt3 的 QString() 是 null，而 Qt6 的 clear()
+//   给的是非 null 空串，且 Qt3 下 `QString() == QString("")` 为 **false**
+//   （Qt6 为 true）。故写 `s = QString()` 会让「清空后与空串比较」这类调用点
+//   在两版本上结论相反（静默分叉）。fromLatin1("") 是 Qt3 下最短的非 null
+//   空串构造，与 qSplit / qFileInfoCompleteBaseName 的同一处处理一致。
 inline void qStringChop(QString& s, int n)
 {
     if (n <= 0) return;
-    if (n >= s.length()) { s = QString(); return; }
+    if (n >= s.length()) { s = QString::fromLatin1(""); return; }
     s = s.left(s.length() - n);
 }
-inline void qStringClear(QString& s)             { s = QString(); }
+// ⚠ 同上：Qt3 不能写 `s = QString()`（那是 null，不是空串）。Qt3 没有 clear()，
+//   故这里只能赋值；Qt4+ 分支用原生 s.clear()（本就非 null，无需处理）。
+inline void qStringClear(QString& s)             { s = QString::fromLatin1(""); }
 
 // ── QByteArray → QString（UTF-8），显式长度，绝不依赖 NUL 终止 ───────────
 // ★ 为什么不能直接写 QString::fromUtf8(ba)：Qt3 的 QString::fromUtf8 只有
@@ -323,12 +333,28 @@ inline QString qFromStdU16String(const std::u16string& s)
 #if QT_VERSION < 0x040000
 inline QStringList qSplit(const QString& s, QChar sep)
 {
+    // ⚠⚠ Qt3 的 QString::mid() 在「起点 == 长度」时返回 **null** QString。
+    //   于是「尾部分隔符」产生的空段、以及空输入的唯一一段，拿到的都是 null
+    //   而不是空串。实测（/opt/qt338sh，Qt6 6.7.3 对照）：
+    //     qSplit("a,,b,")[3].isNull() == 1，且 `== QString("")` 为 **false**；
+    //     Qt6 同一表达式 isNull() == 0、`== QString("")` 为 true。
+    //   后果：调用点写 `if (part == QString(""))` 时，Qt3 走进「非空」分支而
+    //   Qt6 走进「空」分支 —— **静默分叉，且两边都不报错**。产品侧凡是拿
+    //   split 结果比空串的（路径分段、关键词切分）都中招。
+    //   故这里统一把 null 段换成非 null 空串（fromLatin1("") 保证非 null），
+    //   与 qFileInfoCompleteBaseName 对 ".bashrc" 的同一处处理一致。
+    //   注：isEmpty() 在两侧都为 true，故用 isEmpty() 判断的调用点不受影响。
     QStringList out;
     int start = 0;
     for (;;) {
         const int ix = s.find(sep, start);
-        if (ix < 0) { out << s.mid(start); break; }
-        out << s.mid(start, ix - start);
+        if (ix < 0) {
+            const QString t = s.mid(start);
+            out << (t.isNull() ? QString::fromLatin1("") : t);
+            break;
+        }
+        const QString t = s.mid(start, ix - start);
+        out << (t.isNull() ? QString::fromLatin1("") : t);
         start = ix + 1;
     }
     return out;
@@ -355,6 +381,15 @@ inline std::string qToStdString(const QString& s)
 
 inline QString qFromStdString(const std::string& s)
 {
+    // ⚠⚠ 已知限制（Qt3 实测，勿改注释前先复测）：Qt3 的
+    //   QString::fromUtf8(const char*, int len) **在遇到 NUL 就停**，给的长度
+    //   不起作用 —— `fromUtf8("a\0b", 3).length()` 实测为 **1**（Qt6 为 3）。
+    //   故本函数在 Qt3 上**无法**保留内嵌 NUL，二进制缓冲会被截断且不报错。
+    //   产品侧全部调用点都是文本字段（stickerstore.cpp 的 row.id /
+    //   cover_path / file_path / pack_id，见 grep），不含 NUL，故不实现
+    //   手工 UTF-8 解码来补这个能力（那会引入一份新的解码器 bug 面）。
+    //   若将来真要传二进制，必须另开 qFromStdStringBytes() 走 memcpy + resize，
+    //   不能在这里悄悄改语义 —— 截断至少是已知的、静默的。
     return QString::fromUtf8(s.data(), (int)s.size());
 }
 #else
@@ -460,15 +495,31 @@ inline void qStringListRemoveAll(QStringList& list, const QString& v)
 #endif
 
 // ── qStringRefAt()：按索引取**可写**的 QChar 引用 ───────────────────────
-// ⚠ Qt3 的 QString::operator[] 与 at() 都按**值**返回 QChar（qstring.h:646-648：
-//   `QChar at(uint) const` / `QChar operator[](int) const`），拿不到可写引用，
+// ⚠ Qt3 的 QString::operator[] 与 at() 都按**值**返回 QChar（qstring.h:648
+//   `QChar operator[](int) const` / `QChar at(uint) const`），拿不到可写引用，
 //   `out[i] = '_'` 会被丢弃。真正可写的只有 `QChar& ref(uint)`（qstring.h:654）。
-//   Qt4+ 的 QString::operator[] 返回 QCharRef，可直接读写。
 // 用于「原地逐字符替换」这类按位改写。
+//
+// ⚠⚠ Qt4/Qt5 的 operator[] **不能**用来实现本函数（2026-10 实测修正）：
+//   本行原注释写的是「Qt4+ 的 operator[] 返回 QCharRef，可直接读写」——
+//   **只有 Qt4 勉强成立，Qt5 直接编译失败**。逐版本核实真实头文件：
+//     Qt3  qstring.h:650  QCharRef operator[](int)      + :654 QChar& ref(uint)
+//     Qt4  qstring.h:128  QCharRef operator[](int)      + :117 QChar* data()
+//     Qt5  qstring.h:304  QCharRef operator[](int)      + :293 QChar* data()
+//     Qt6  qstring.h:214  QChar&    operator[](qsizetype)+ :203 QChar* data()
+//   Qt4/Qt5 的 operator[] 返回的是**按值返回的代理对象**（prvalue），
+//   `return s[i];` 要把临时量绑到 `QChar&` 上，clang 直接报：
+//       non-const lvalue reference to type 'QChar' cannot bind to a
+//       temporary of type 'QCharRef'
+//   （注意 Qt6 已移除 QCharRef，operator[] 回到 `QChar&`，所以这条只炸 Qt4/5。
+//     本仓历史上一直只编 Qt3 与 Qt6，Qt4/Qt5 这条分支从未被编译过。）
+//
+// 结论：Qt3 走 ref()，Qt4+ 一律走 data()[i]。四个版本的 data() 都已核实存在
+// （Qt4:117 / Qt5:293 / Qt6:203），故只需两分支，不必为 Qt6 单开一条。
 #if QT_VERSION < 0x040000
 inline QChar& qStringRefAt(QString& s, int i) { return s.ref((uint)i); }
 #else
-inline QChar& qStringRefAt(QString& s, int i) { return s[i]; }
+inline QChar& qStringRefAt(QString& s, int i) { return s.data()[i]; }
 #endif
 
 // ── qStringListBuild(...)：Qt3 下的「初始化列表」替代 ───────────────────

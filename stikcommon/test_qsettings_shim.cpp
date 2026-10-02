@@ -23,6 +23,7 @@
 
 #include <qsettings.h>
 #include <qdir.h>
+#include <qfile.h>
 #include <qstring.h>
 #include <qstringlist.h>
 #include <qvariant.h>
@@ -36,6 +37,7 @@
 
 #include "qsettings_shim.h"
 #include "qdir_shim.h"                     // qDirTempPath / qDirRemoveRecursively
+#include "qstring_shim.h"                  // qToUtf8BA（落盘字节校验用）
 
 static inline QString S(const char* s) { return QString::fromUtf8(s); }
 
@@ -50,6 +52,20 @@ static void wipe()                          // 清掉本组测试写的所有键
     qSettingsRemove(S("qlstiktest/m"));
     qSettingsRemove(S("qlstiktest/nested/a"));
     qSettingsRemove(S("qlstiktest/nested/deep/b"));
+    // CJK 组的键（见文件末尾 CJK 用例群）
+    qSettingsRemove(S("站点/贴纸"));
+    qSettingsRemove(S("站点/标题"));
+    qSettingsRemove(S("站点/标题2"));
+    qSettingsRemove(S("sp/等号"));
+    qSettingsRemove(S("sp/井号"));
+    qSettingsRemove(S("sp/分号"));
+    qSettingsRemove(S("sp/首空格"));
+    qSettingsRemove(S("sp/尾空格"));
+    qSettingsRemove(S("sp/全等"));
+    qSettingsRemove(S("sl/中文表"));
+    qSettingsRemove(S("sl/逗号"));
+    qSettingsRemove(S("ext/生僻"));
+    qSettingsRemove(S("fw/ＳＶＣ"));
 }
 
 // ── 隔离 HOME（每个用例进出成对）────────────────────────────────────
@@ -254,14 +270,12 @@ TEST_CASE_FIXTURE(QsHomeScope, "QSettings: remove 后回落默认值")
 TEST_CASE_FIXTURE(QsHomeScope, "QSettings: 非 ASCII 键名与值无损")
 {
     wipe();
-    // 值 = 优/的/目录（U+4F18 / U+7684 / U+76EE / U+5F55），共 6 个 QChar。
     // ⚠ 期望值必须用 S()（=QString::fromUtf8）构造，不能写 QString("...")
     //   ——Qt3 的 QString(const char*) 走 Latin-1，会把一个汉字拆成 3 个
     //   QChar（'e4''bc''98'），比较必然失败且报错信息具有误导性。
-    qSettingsSetStr(S("qlstiktest/\xe8\xb4\xb4\xe7\xba\xb8"),
-                    S("\xe4\xbc\x98/\xe7\x9a\x84/\xe7\x9b\xae\xe5\xbd\x95"));
-    const QString v = qSettingsValueStr(S("qlstiktest/\xe8\xb4\xb4\xe7\xba\xb8"));
-    CHECK_EQ(v, S("\xe4\xbc\x98/\xe7\x9a\x84/\xe7\x9b\xae\xe5\xbd\x95"));
+    qSettingsSetStr(S("qlstiktest/贴纸"), S("优/的/目录"));
+    const QString v = qSettingsValueStr(S("qlstiktest/贴纸"));
+    CHECK_EQ(v, S("优/的/目录"));
     // 按码位核对，不靠终端 printf 显示
     REQUIRE(v.length() == 6);
     CHECK_EQ(v.at(0).unicode(), 0x4F18);   // 优
@@ -269,7 +283,229 @@ TEST_CASE_FIXTURE(QsHomeScope, "QSettings: 非 ASCII 键名与值无损")
     CHECK_EQ(v.at(2).unicode(), 0x7684);   // 的
     CHECK_EQ(v.at(4).unicode(), 0x76EE);   // 目
     CHECK_EQ(v.at(5).unicode(), 0x5F55);   // 录
-    qSettingsRemove(S("qlstiktest/\xe8\xb4\xb4\xe7\xba\xb8"));
+    qSettingsRemove(S("qlstiktest/贴纸"));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CJK 键名与值（全部实测于 /opt/qt338sh 真机，不是照 Qt6 语义推的）
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 为什么单开一组：stickerstore 的真实用法就是中文键 + 中文值（中文存储根、
+// 贴纸标题），而 Qt3 的 QSettings 落盘是**纯文本 ini**，键名直接当 group 名
+// 写进文件名、值直接当行内容写进文件 —— 中文在这条链上有三处可能坏：
+//   ① 键规范化（qSettingsQt3Key）会不会把中文段改写；
+//   ② ini 的行语法（= # ; 与首尾空格）对中文值有没有转义歧义；
+//   ③ QStringList 用逗号分隔，值里自带逗号会不会被拆开。
+// 三者坏了都不报任何错，只是配置静默不生效。
+
+TEST_CASE_FIXTURE(QsHomeScope, "QSettings: 中文 group 键与中文根层裸键")
+{
+    wipe();
+    // ① 中文 group：规范化只去首尾斜杠，中文段逐字保留
+    qSettingsSetStr(S("站点/贴纸"), S("猫喵"));
+    CHECK_EQ(qSettingsValueStr(S("站点/贴纸")), S("猫喵"));
+    CHECK_EQ(qSettingsQt3Key(S("站点/贴纸"), 0), S("站点/贴纸"));
+    CHECK_EQ(qSettingsQt3Key(S("/站点/贴纸"), 0), S("站点/贴纸"));   // 前导斜杠等价
+
+    // 根层中文裸键 → 注入合成组 "qlstik/"（与 stickerstore 的 storageRoot 同形）
+    qSettingsSetStr(S("存储根"), S("/tmp/我的站点"));
+    CHECK_EQ(qSettingsValueStr(S("存储根")), S("/tmp/我的站点"));
+    CHECK_EQ(qSettingsQt3Key(S("存储根"), 0), S("qlstik/存储根"));
+
+    // 码点自检：期望值里的中文确实是 2 个 QChar（守住守门人）
+    const QString mao = S("猫喵");
+    REQUIRE(mao.length() == 2);
+    CHECK(mao.at(0) == QChar(0x732B));
+    CHECK(mao.at(1) == QChar(0x55B5));
+
+    // 前缀共存：中文键 "标题" 与 "标题2" 互不覆盖
+    qSettingsSetStr(S("站点/标题"), S("A"));
+    qSettingsSetStr(S("站点/标题2"), S("B"));
+    CHECK_EQ(qSettingsValueStr(S("站点/标题")), S("A"));
+    CHECK_EQ(qSettingsValueStr(S("站点/标题2")), S("B"));
+
+    // 不存在的中文键回落**中文**默认值
+    CHECK_EQ(qSettingsValueStr(S("站点/缺省键"), S("默认中文")), S("默认中文"));
+    wipe();
+}
+
+TEST_CASE_FIXTURE(QsHomeScope, "QSettings: 中文值含 ini 行语法字符（= # ; 与首尾空格）无损")
+{
+    wipe();
+    // Qt3 ini 一行是 "键=值"，'#' 与 ';' 起注释、值首尾空格会被吃掉。这几组
+    // 若没被正确转义，读回来就会掉字符或整行变注释 —— 且不报错。
+    qSettingsSetStr(S("sp/等号"), S("a=b"));
+    qSettingsSetStr(S("sp/井号"), S("a#b"));
+    qSettingsSetStr(S("sp/分号"), S("a;b"));
+    qSettingsSetStr(S("sp/首空格"), S(" a"));
+    qSettingsSetStr(S("sp/尾空格"), S("a "));
+    qSettingsSetStr(S("sp/全等"), S("a=b#c;d"));
+    qSettingsSetStr(S("sp/中文混排"), S("优=的;目#录"));
+
+    CHECK_EQ(qSettingsValueStr(S("sp/等号")), S("a=b"));
+    CHECK_EQ(qSettingsValueStr(S("sp/井号")), S("a#b"));
+    CHECK_EQ(qSettingsValueStr(S("sp/分号")), S("a;b"));
+    CHECK_EQ(qSettingsValueStr(S("sp/首空格")), S(" a"));
+    CHECK_EQ(qSettingsValueStr(S("sp/尾空格")), S("a "));
+    CHECK_EQ(qSettingsValueStr(S("sp/全等")), S("a=b#c;d"));
+    CHECK_EQ(qSettingsValueStr(S("sp/中文混排")), S("优=的;目#录"));
+
+    // 中文键本身含 '=' 是不可能的（键用 '/' 分组），但含 '#' 的键也测一下：
+    // 键里的 '#' 若没转义，落盘后会被当成注释而读不回来。
+    qSettingsSetStr(S("sp/井号键"), S("值"));
+    CHECK_EQ(qSettingsValueStr(S("sp/井号键")), S("值"));
+    wipe();
+}
+
+TEST_CASE_FIXTURE(QsHomeScope, "QSettings: QStringList 中文项往返（含逗号项不被拆开）")
+{
+    wipe();
+    QStringList sl;
+    sl << S("甲") << S("乙丙") << S("丁");
+    qSettingsSetStringList(S("sl/中文表"), sl);
+    const QStringList back = qSettingsValueStringList(S("sl/中文表"));
+    REQUIRE(back.count() == 3);
+    CHECK_EQ(back[0], S("甲"));
+    CHECK_EQ(back[1], S("乙丙"));
+    CHECK_EQ(back[2], S("丁"));
+
+    // ⚠ 实测要点：值里自带逗号时，Qt3 会把它转义，**不会**被拆成两项。
+    //   若哪天垫片改成自己拼逗号，这一项会被切成 "含" 与 "逗号" 而静默出错。
+    QStringList withComma;
+    withComma << S("含,逗号") << S("正常");
+    qSettingsSetStringList(S("sl/逗号"), withComma);
+    const QStringList back2 = qSettingsValueStringList(S("sl/逗号"));
+    REQUIRE(back2.count() == 2);
+    CHECK_EQ(back2[0], S("含,逗号"));
+    CHECK_EQ(back2[1], S("正常"));
+
+    // 空表 vs 单个空串项：两者语义不同，不得混为一谈
+    qSettingsSetStringList(S("sl/空表"), QStringList());
+    CHECK_EQ(qSettingsValueStringList(S("sl/空表")).count(), 0);
+    QStringList oneEmpty;
+    oneEmpty << S("");
+    qSettingsSetStringList(S("sl/空项"), oneEmpty);
+    const QStringList back3 = qSettingsValueStringList(S("sl/空项"));
+    CHECK_EQ(back3.count(), 1);
+    CHECK(back3[0].isEmpty());
+    qSettingsRemove(S("sl/空表"));
+    qSettingsRemove(S("sl/空项"));
+    wipe();
+}
+
+TEST_CASE_FIXTURE(QsHomeScope, "QSettings: 全角与半角不折叠，中文键与 ASCII 键互不干扰")
+{
+    wipe();
+    // 全角 ＳＶＣ / ｓｖｃ１２３ 与半角 svc 是不同键不同值，不能被归一化合并
+    qSettingsSetStr(S("fw/ＳＶＣ"), S("ｓｖｃ１２３"));
+    qSettingsSetStr(S("fw/svc"), S("halfwidth"));
+    CHECK_EQ(qSettingsValueStr(S("fw/ＳＶＣ")), S("ｓｖｃ１２３"));
+    CHECK_EQ(qSettingsValueStr(S("fw/svc")), S("halfwidth"));
+    const QString full = S("ｓｖｃ１２３");
+    REQUIRE(full.length() == 6);
+    CHECK(full.at(0) == QChar(0xFF53));       // ｓ
+    CHECK(full.at(5) == QChar(0xFF13));       // ３
+
+    // 中文组与 ASCII 组并存，写中文不得覆盖 ASCII 的同名叶子
+    qSettingsSetStr(S("mix/ascii"), S("EN"));
+    qSettingsSetStr(S("mix/中文"), S("中"));
+    CHECK_EQ(qSettingsValueStr(S("mix/ascii")), S("EN"));
+    CHECK_EQ(qSettingsValueStr(S("mix/中文")), S("中"));
+    wipe();
+}
+
+TEST_CASE_FIXTURE(QsHomeScope, "QSettings: 中文键落盘为 UTF-8 文件名与 UTF-8 内容")
+{
+    wipe();
+    qSettingsSetStr(S("站点/贴纸"), S("猫喵"));
+
+    // Qt3 落盘路径是 $HOME/.qt/<键首段>rc —— 中文 group 名直接成为**文件名**。
+    // 断言"以 站点 开头的文件存在"而不是死钉 "站点rc"：rc 后缀是 Qt3 内部实现，
+    // 但"中文进了文件名"这件事本身是必须钉住的（它决定了中文 group 在某些
+    // 非 UTF-8 locale 的文件系统上会真的建不出文件）。
+    const QDir qtDir(QDir(S(getenv("HOME"))).absFilePath(S(".qt")));
+    // 走跨版本垫片而非 QDir::entryList：Qt3 只有 entryList(int filter, int sort)，
+    // 没有 Qt4+ 的 entryList(QStringList filters, FilterSpec) 重载。
+    const QStringList names = qDirEntryList(qtDir, S("*"), QDir::Files);
+    QString cjkFile;
+    for (int i = 0; i < names.count(); ++i) {
+        if (names[i].startsWith(S("站点"))) cjkFile = names[i];
+    }
+    REQUIRE(!cjkFile.isEmpty());
+
+    // 文件内容是 UTF-8 明文（非 \uXXXX 转义、非 Latin-1 高位字节）
+    QFile f(qtDir.absFilePath(cjkFile));
+    REQUIRE(f.open(IO_ReadOnly));
+    const QByteArray bytes = f.readAll();
+    f.close();
+    CHECK(bytes.size() > 0);
+    const QString text = QString::fromUtf8(bytes.data(), (int)bytes.size());
+    CHECK(text.contains(S("猫喵")));
+    // 值所在那一行不含 ASCII 转义序列 "\u"（Qt3 ini 不做 \u 转义）
+    CHECK(!text.contains(S("\\u")));
+    // 键名也是原样中文，而不是问号替换
+    CHECK(text.contains(S("贴纸")));
+}
+
+TEST_CASE_FIXTURE(QsHomeScope, "QSettings: 非 BMP 字符以代理对存储，往返仍相等")
+{
+    wipe();
+    // 𠮷 = U+20BB7（CJK 扩展 B），UTF-8 4 字节 F0 A0 AE B7。
+    // ⚠ Qt3 的 QString 是 UCS-4 容器，但 fromUtf8 对 4 字节序列产出的是
+    //   **代理对**两个 QChar（U+D842 U+DFB7），不是一个 U+20BB7。故：
+    //   · 往返相等（写什么读回什么，落盘字节也是对的）；
+    //   · 但 length() 多算 1，任何按 length()/索引 推算 UTF-8 字节数或
+    //     字符数的代码在含非 BMP 字符时都会偏 1 —— 故这里把该行为钉死。
+    const QString src = S("𠮷品");
+    qSettingsSetStr(S("ext/生僻"), src);
+    const QString back = qSettingsValueStr(S("ext/生僻"));
+    CHECK_EQ(back, src);
+    REQUIRE(back.length() == 3);              // 2 个代理 + 品
+    CHECK(back.at(0) == QChar(0xD842));
+    CHECK(back.at(1) == QChar(0xDFB7));
+    CHECK(back.at(2) == QChar(0x54C1));       // 品
+    // 落盘仍是 4 字节 UTF-8（没被代理对写坏）
+    CHECK_EQ(qToUtf8BA(src).size(), 7);       // 4 + 3
+    wipe();
+}
+
+TEST_CASE_FIXTURE(QsHomeScope, "QSettings: 中文键 remove 后回落默认值，且不影响同组其它键")
+{
+    wipe();
+    qSettingsSetStr(S("站点/标题"), S("贴纸一"));
+    qSettingsSetStr(S("站点/标题2"), S("贴纸二"));
+    qSettingsRemove(S("站点/标题"));
+    CHECK_EQ(qSettingsValueStr(S("站点/标题"), S("已删")), S("已删"));
+    CHECK_EQ(qSettingsValueStr(S("站点/标题2")), S("贴纸二"));   // 邻居不受影响
+    // 删一个中文键后，同前缀的新键仍可正常写入（组没被误删）
+    qSettingsSetStr(S("站点/标题3"), S("贴纸三"));
+    CHECK_EQ(qSettingsValueStr(S("站点/标题3")), S("贴纸三"));
+    // 删不存在的键不得连带删掉别的（Qt3 的 removeEntry 对不存在的键是静默 no-op）
+    qSettingsRemove(S("站点/从来没有过"));
+    CHECK_EQ(qSettingsValueStr(S("站点/标题2")), S("贴纸二"));
+    wipe();
+}
+
+TEST_CASE_FIXTURE(QsHomeScope, "QSettings: 【已知限制】根层裸键与显式 qlstik/ 前缀键会撞车")
+{
+    wipe();
+    // 规范化把根层裸键注入合成组 "qlstik/"，于是显式写成 "qlstik/x" 的键
+    // 与根层裸键 "x" **落到同一个槽位**，后写的覆盖先写的。
+    // 实测（/opt/qt338sh）：写 "x"=BARE 后再写 "qlstik/x"=EXPLICIT，
+    // 读 "x" 变成 EXPLICIT。
+    // 影响面：产品现有键（storageRoot、dlProgress/<hex>）都不以 "qlstik/"
+    // 开头，故当前无实际冲突；但**新增**键时若取名 "qlstik/xxx" 就会踩到。
+    // 故把该行为钉在这里，评审新增键时能被看见。
+    qSettingsSetStr(S("x"), S("BARE"));
+    CHECK_EQ(qSettingsValueStr(S("x")), S("BARE"));
+    qSettingsSetStr(S("qlstik/x"), S("EXPLICIT"));
+    CHECK_EQ(qSettingsValueStr(S("qlstik/x")), S("EXPLICIT"));
+    CHECK_EQ(qSettingsValueStr(S("x")), S("EXPLICIT"));         // ← 撞车
+    // 反向也一样：写根层裸键会覆盖显式 qlstik/ 键
+    qSettingsSetStr(S("x"), S("BARE2"));
+    CHECK_EQ(qSettingsValueStr(S("qlstik/x")), S("BARE2"));
+    qSettingsRemove(S("qlstik/x"));
+    wipe();
 }
 
 // ── map（Qt3 走 JSON 文本通道）───────────────────────────────────────
@@ -292,12 +528,12 @@ TEST_CASE_FIXTURE(QsHomeScope, "QSettings: QVariantMap 非 ASCII 键值无损")
 {
     wipe();
     QVariantMap m;
-    m.insert(S("\xe8\xb4\xb4"), QVariant(S("\xe7\xba\xb8")));
+    m.insert(S("贴"), QVariant(S("纸")));
     qSettingsSetMap(S("qlstiktest/m"), m);
     const QVariantMap back = qSettingsValueMap(S("qlstiktest/m"));
     CHECK_EQ(back.count(), 1);
-    REQUIRE(back.contains(S("\xe8\xb4\xb4")));
-    CHECK_EQ(back[S("\xe8\xb4\xb4")].toString(), S("\xe7\xba\xb8"));
+    REQUIRE(back.contains(S("贴")));
+    CHECK_EQ(back[S("贴")].toString(), S("纸"));
     wipe();
 }
 

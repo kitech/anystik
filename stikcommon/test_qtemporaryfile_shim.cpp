@@ -324,7 +324,7 @@ TEST_CASE("QTemporaryFile 写入内容可被另一句柄读到（须先 close）
 TEST_CASE("QTemporaryFile 非 ASCII 目录下正常工作")
 {
     // 目录名用 UTF-8 构造（「临时-测试」），验证 shim 没把路径编码搞坏。
-    const QString dirName = QString::fromUtf8("\xe4\xb8\xb4\xe6\x97\xb6");
+    const QString dirName = QString::fromUtf8("临时");
     const QString dir = qDirTempPath() + "/" + dirName
                         + "_" + QString::number(uint(getpid()));
     if (!QDir(dir).exists() && !QDir().mkdir(dir)) {

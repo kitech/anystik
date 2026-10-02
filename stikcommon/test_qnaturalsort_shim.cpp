@@ -207,7 +207,7 @@ TEST_CASE("QNaturalSort: 结果与 locale 无关（切 C / en_US.UTF-8 不变）
         { "Pack02", "pack02", true },
         { "Zebra", "apple", false },
         { "img2", "img10", false },
-        { "\xe8\xb4\xb4", "a", false },          // 贴 vs a（跨 ASCII/非 ASCII）
+        { "贴", "a", false },                     // 贴 vs a（跨 ASCII/非 ASCII）
     };
     const int n = (int)(sizeof(probes)/sizeof(probes[0]));
 

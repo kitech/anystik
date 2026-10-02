@@ -118,7 +118,7 @@ static inline QByteArray qToPercentEncoding(const QString& input)
     //   拷贝**，而 Qt3 的 length() **含终止 NUL**（实测「猫喵」的 18 字节编码
     //   结果返回 size()==19，末字节 0x00）。fromUtf8 会丢掉尾部 NUL，故
     //   imagesearchclient 的 QString::fromUtf8(QLSTIK_PCT_ENCODE(kw)) 这条链
-    //   实测干净（url=[https://x/y?q=%E7%8C%AB%E5%92%AA]，无 NUL）；但任何按
+    //   实测干净（url=[https://x/y?q=%E7%8C%AB%E5%96%B5]，无 NUL）；但任何按
     //   size() 切片或交给 C API 的用法都会被尾部 NUL 坑到，故这里给精确长度。
     //
     // ⚠ Qt3.3 的 QByteArray **只有 QByteArray() 和 QByteArray(int size)**

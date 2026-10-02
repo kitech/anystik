@@ -303,7 +303,7 @@ TEST_CASE("QMimeData: urls() 解析外部写入的 uri-list（注释/空行/CRLF
         "# a comment line\r\n"
         "\r\n"
         "file:///tmp/a.png\r\n"
-        "file:///tmp/\xe8\xb4\xb4\xe7\xba\xb8.png\n"      // 贴纸.png
+        "file:///tmp/贴纸.png\n"                  // 贴纸.png
         "file:///tmp/b.png\r\n";
     QByteArray list = qbaFromRaw(body, (int)strlen(body));
     md.setData(S("text/uri-list"), list);

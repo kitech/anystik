@@ -36,6 +36,21 @@ static QByteArray toCleanQBA(const QCString& s)
     return out;
 }
 
+// std::string → QByteArray，**按长度**拷贝，不经 c_str()。
+// ⚠⚠ 头值可能是二进制（含内嵌 NUL），而 std::string::c_str() 会在第一个 NUL
+//   处截断：旧实现 rawHeader() 走 `QCString(it->second.c_str())`，实测把
+//   4 字节 'a'\0'b'\0 读回成 1 字节 'a'（/tmp/opencode/probe/zk7.cpp）。
+//   这类头（如 Content-MD5 的原始摘要、签名头）会静默损坏，且不报错。
+static QByteArray qbaFromStdString(const std::string& s)
+{
+    if (s.empty()) {
+        return QByteArray();
+    }
+    QByteArray out((int)s.size());
+    memcpy(out.data(), s.data(), s.size());
+    return out;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 事件类型
 // ─────────────────────────────────────────────────────────────────────────────
@@ -94,7 +109,7 @@ QByteArray QNetworkRequest::rawHeader(const char* name) const
     for (std::map<std::string,std::string>::const_iterator it =
              m_rawHeaders.begin(); it != m_rawHeaders.end(); ++it) {
         if (strcasecmp(it->first.c_str(), name) == 0) {
-            return toCleanQBA(QCString(it->second.c_str()));
+            return qbaFromStdString(it->second);   // 按长度取，含内嵌 NUL
         }
     }
     return QCString();

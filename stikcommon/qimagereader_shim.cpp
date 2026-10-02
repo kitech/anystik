@@ -462,8 +462,14 @@ QImage QImageReader::read()
     }
     m_lastDelayMs = m_delaysMs[m_index];
     const QImage im = m_frames[m_index];
-    // 与 Qt6 插件一致：只有 supportsOption(Animation) 为真时 read() 才自推进
-    if (m_animated) ++m_index;
+    // ⚠⚠ 必须**无条件**推进游标，不能只在 m_animated 时推进。
+    //   Qt6 对照实测（/tmp/opencode/probe/zk6.cpp，6.7.3，静态 JPEG）：
+    //     read#0 isNull=0 → read#1 isNull=1 → read#2 isNull=1
+    //   即静态格式**读一次就耗尽**。而旧实现 `if (m_animated) ++m_index;`
+    //   让静态图永远停在第 0 帧，第二次 read() 又返回首帧 —— 上层
+    //   `while (!im.isNull()) im = reader.read();` 对静态图会**死循环**。
+    //   （该 if 是早期按「动画才自推进」的想当然写的，未经 Qt6 对照。）
+    ++m_index;
     return im;
 }
 

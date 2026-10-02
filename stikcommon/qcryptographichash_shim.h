@@ -44,7 +44,13 @@
 #include <qstring.h>
 
 #include "sha1.h"
+// ⚠ qlcomp/md5.h 没有 C++ linkage 保护（同目录 sha1.h 的 __cplusplus 分支是有
+//   的），若直接 include，从 C++ 引用会生成 _Z8MD5_Init… 修饰名，而 md5.c 由
+//   gcc 编译产出的是不带修饰的 MD5_Init，链接期报未定义。显式 extern "C" 包住，
+//   与 sha1.h 的 C linkage 语义对齐。
+extern "C" {
 #include "md5.h"
+}
 #include "qbytearrayview_shim.h"
 
 // ── Qt3HashBytes：补出 toHex() / left() 的 QByteArray 派生类 ──────────────

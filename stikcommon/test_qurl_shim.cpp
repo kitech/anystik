@@ -58,9 +58,9 @@ TEST_CASE("qUrlQueryDecode: 仅 %XX 解码，'+' 保留，非 ASCII 替换为 '?
     CHECK(qUrlQueryDecode(QString("cat+red")) == QString("cat+red"));
     CHECK(qUrlQueryDecode(QString("a+b%20c")) == QString("a+b c"));
     // %XX 逐字节收集后按 UTF-8 解释：%E4%B8%AD = 「中」(U+4E2D, 3 字节)
-    CHECK(qUrlQueryDecode(QString("%E4%B8%AD")) == QString::fromUtf8("\xe4\xb8\xad"));
+    CHECK(qUrlQueryDecode(QString("%E4%B8%AD")) == QString::fromUtf8("中"));
     // 非 ASCII 的**输入**字符不在常态范围，契约是替换为 '?'
-    CHECK(qUrlQueryDecode(QString::fromUtf8("\xe4\xb8\xad")) == QString("?"));
+    CHECK(qUrlQueryDecode(QString::fromUtf8("中")) == QString("?"));
     // 非法 hex：% 保留、只前进 1 字节，后续字符按普通字符处理
     CHECK(qUrlQueryDecode(QString("a%ZZb")) == QString("a%ZZb"));
     CHECK(qUrlQueryDecode(QString("a%2")) == QString("a%2"));
@@ -133,7 +133,7 @@ TEST_CASE("qToPercentEncoding: 保留 -_.~ 与 alnum，其余按 UTF-8 转 %XX")
     // 十六进制为大写（头文件里的 HEX 表是大写）
     checkEnc(QString(" "), "%20");
     // 非 ASCII 按 UTF-8 逐字节编码：「中」= E4 B8 AD
-    checkEnc(QString::fromUtf8("\xe4\xb8\xad"), "%E4%B8%AD");
+    checkEnc(QString::fromUtf8("中"), "%E4%B8%AD");
     // 空串
     const QByteArray empty = qToPercentEncoding(QString(""));
     CHECK(QString::fromLatin1(QCString(empty.data(), empty.size())).isEmpty());
@@ -160,13 +160,18 @@ TEST_CASE("qToPercentEncoding: 返回定长 QByteArray，无尾部 NUL（已修�
     CHECK_EQ(sp.size(), 5);
     const QByteArray empty = qToPercentEncoding(QString(""));
     CHECK_EQ(empty.size(), 0);
-    // 非 ASCII：末字节是编码字符（%AA 的 'A'），不是 0x00
-    const QByteArray cn = qToPercentEncoding(QString::fromUtf8("\xe7\x8c\xab\xe5\x92\xaa"));
-    CHECK_EQ(cn.size(), 18);
-    CHECK_EQ((unsigned char)cn.at(cn.size() - 1), (unsigned char)'A');
+    // 非 ASCII：末字节是**编码字符**（某个 hex 位），不是 0x00
+    // ⚠ 原先此处写的是 "\xe7\x8c\xab\xe5\x92\xaa"，末字节 0xAA；那串解出来是
+    //   U+54AA 而**不是**「喵」(U+55B5，正确末字节为 0xB5)。断言本身自洽所以
+    //   没暴露问题，但会让后来者以为 %E5%92%AA 就是「喵」。已改为 CJK 原文。
+    const QByteArray cn = qToPercentEncoding(QString::fromUtf8("猫喵"));
+    CHECK_EQ(cn.size(), 18);                   // 6 个 UTF-8 字节 × 3
+    const unsigned char lastByte = (unsigned char)cn.at(cn.size() - 1);
+    CHECK(lastByte != 0x00);                   // 尾 NUL 会污染 URL
+    CHECK(lastByte == '5');                    // 0xB5 的高位 hex 位
     // 整串按精确长度读回来（不能用 QCString(data, size)，那是 qstrncpy 少拷一字符）
     CHECK(QString::fromLatin1(cn.data(), (int)cn.size())
-          == QString("%E7%8C%AB%E5%92%AA"));
+          == QString("%E7%8C%AB%E5%96%B5"));
 }
 
 TEST_CASE("qUrlRawString: 剥掉 Qt3 对无 scheme 输入注入的 file: 污染")
@@ -298,4 +303,120 @@ TEST_CASE("qUrlRemoveFilename: 等价 QUrl::adjusted(QUrl::RemoveFilename)")
     //   结尾，path 已是目录走原样分支；QFace 有显式 baseUrl，走不到这里。
     CHECK(rmf("https://a.com") == QString("https://a.com/"));
     CHECK_EQ(QUrl(QString("https://a.com")).path(), QString("/"));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CJK（中文）—— 本仓真实 URL 的关键词就是中文
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠⚠ 为什么这组必须单独钉：URL 链路上任何一处把 UTF-8 当 Latin-1 处理，
+//   中文都会变成乱码，且**全程不报错**（用户只看到搜不到图）。而 ASCII 用例
+//   对这类缺陷完全免疫 —— 这是本文件此前最大的盲区。
+//
+// ⚠ 构造一律走 QString::fromUtf8，**不能**写 QString("中文")：Qt3 的
+//   QString(const char*) 是按 Latin-1 逐字节转的（qt/qstring.h:qstring(const
+//   char*)），中文会被展开成 6 个高位字符的串，且不报错。同理不得用 latin1()。
+//
+// ⚠ 下面第一条用例把字面量的**码点**钉死：期望值与实际值都由同一段中文字面量
+//   经 fromUtf8 构造，若有人把构造改成 latin1，两边会一起错、断言照样通过，
+//   测试变成假绿。码点基准由 python3 按 UTF-8 算出，非手算。
+
+TEST_CASE("CJK 字面量码点自检（防测试数据自身走错编码）")
+{
+    const QString mao = QString::fromUtf8("猫喵");
+    CHECK_EQ(mao.length(), 2);
+    CHECK(mao.at(0) == QChar(0x732B));         // 猫
+    CHECK(mao.at(1) == QChar(0x55B5));         // 喵
+
+    const QString zhan = QString::fromUtf8("站点");
+    CHECK_EQ(zhan.length(), 2);
+    CHECK(zhan.at(0) == QChar(0x7AD9));         // 站
+    CHECK(zhan.at(1) == QChar(0x70B9));         // 点
+
+    const QString tie = QString::fromUtf8("贴纸.png");
+    CHECK_EQ(tie.length(), 6);
+    CHECK(tie.at(0) == QChar(0x8D34));          // 贴
+    CHECK(tie.at(1) == QChar(0x7EB8));          // 纸
+    CHECK(tie.at(2) == QChar('.'));
+    CHECK(tie.at(5) == QChar('g'));
+
+    // 反向：同一个串的 UTF-8 字节必须是 6 字节（若有人误用 latin1 构造，
+    // 这里的长度会变成 4 —— 2 个汉字各被当成 2 个字节的高位字符）。
+    // ⚠ 必须用 length() 而不是 size()：Qt3 的 QString::utf8() 返回 QCString，
+    //   其 size() **含尾 NUL**（utf8().size()=7 / length()=6），见
+    //   qstring_shim.h:101 记的同一条坑。
+    CHECK_EQ(zhan.utf8().length(), 6);
+    CHECK_EQ(zhan.utf8().size(), 7);
+}
+
+// ⚠ 多字节 CJK 的百分号编码：必须按 **UTF-8 逐字节**编码，且十六进制大写。
+//   若误用 latin1()，2 个汉字会各变成 1 个 %XX（结果只有 6 字符而非 18）。
+TEST_CASE("qToPercentEncoding: 多字节 CJK 按 UTF-8 逐字节编码")
+{
+    checkEnc(QString::fromUtf8("猫喵"), "%E7%8C%AB%E5%96%B5");
+    checkEnc(QString::fromUtf8("站点"), "%E7%AB%99%E7%82%B9");
+    // 中英混排：中文段编码、ASCII 段原样，两者交界不得多/少一个 %
+    checkEnc(QString::fromUtf8("站a1"), "%E7%AB%99a1");
+    // ⚠ 结果里绝不能出现裸的非 ASCII 字节（Latin-1 漏编码的特征）
+    const QByteArray got = qToPercentEncoding(QString::fromUtf8("站"));
+    CHECK_EQ(got.size(), 9);                 // 3 字节 → 每字节 3 字符
+    for (int i = 0; i < got.size(); ++i) {
+        CHECK(((unsigned char)got.at(i)) < 0x80);
+    }
+}
+
+// ⚠ 百分号编码的中文必须能解回原文（编码/解码成对）。这才是产品真正依赖的：
+//   搜索词「猫喵」→ q=%E7%8C%AB%E5%96%B5 → 解析回「猫喵」去拼请求。
+TEST_CASE("qUrlQueryDecode: 百分号编码的中文解回原文，与编码成对")
+{
+    const QString mao = QString::fromUtf8("猫喵");
+    CHECK(qUrlQueryDecode(QString("%E7%8C%AB%E5%96%B5")) == mao);
+    // 小写 hex 同样要解（URL 里小写 %xx 合法且常见）
+    CHECK(qUrlQueryDecode(QString("%e7%8c%ab%e5%96%b5")) == mao);
+    // 编码→解码 往返：把 qToPercentEncoding 的输出直接喂回去
+    const QByteArray enc = qToPercentEncoding(mao);
+    CHECK(qUrlQueryDecode(QString::fromLatin1(enc.data(), (int)enc.size())) == mao);
+    // ⚠ 而**未编码**的中文按契约替换为 '?'（逐字符）：2 个汉字 → 2 个 '?'
+    CHECK(qUrlQueryDecode(mao) == QString("??"));
+    CHECK_EQ(qUrlQueryDecode(mao).length(), 2);
+}
+
+// ⚠ CJK 出现在 URL **路径**里（WebDAV 上按站点/贴纸名建目录）：
+//   Qt3 的 QUrl 不对 path 做百分号编码，中文应原样保留，不得被改写或吞掉。
+//   （实测 Qt3 QUrl::path() 对 "http://h/站点/贴纸.png" 返回含 U+7AD9/U+70B9
+//     的原串，见探针；故这些断言按「原样保留」写，而不是按「被编码」写。）
+TEST_CASE("qUrlNormUrlPath: CJK 路径段原样保留，且照常消解 . 与 ..")
+{
+    // 站点/贴纸.png → 消掉 ./ 与 sub/../ 之后仍是 站点/贴纸.png
+    CHECK(qUrlNormUrlPath(QString::fromUtf8("http://h/站点/./sub/../贴纸.png"))
+          == QString::fromUtf8("http://h/站点/贴纸.png"));
+    // 尾斜杠必须保留（WebDAV 目录遍历靠它区分文件与集合）
+    CHECK(qUrlNormUrlPath(QString::fromUtf8("http://h/站点/"))
+          == QString::fromUtf8("http://h/站点/"));
+    // 已干净则原样
+    CHECK(qUrlNormUrlPath(QString::fromUtf8("http://h/站点/贴纸.png"))
+          == QString::fromUtf8("http://h/站点/贴纸.png"));
+}
+
+TEST_CASE("qResolveUrl: base 目录 + CJK 相对名，拼接后中文不被改写")
+{
+    const QUrl base(QString::fromUtf8("http://h:8080/a/b.html"));
+    // 目录相对 + 中文两级路径
+    CHECK(raw(qResolveUrl(base, QUrl(QString::fromUtf8("站点/贴纸.png"))))
+          == QString::fromUtf8("http://h:8080/a/站点/贴纸.png"));
+    // 绝对 URL 里带中文：绝对分支胜出，中文保留
+    CHECK(raw(qResolveUrl(base, QUrl(QString::fromUtf8("https://o/站/../贴.png"))))
+          == QString::fromUtf8("https://o/贴.png"));
+    // 中文文件名 + 上跳一级
+    CHECK(raw(qResolveUrl(base, QUrl(QString::fromUtf8("../贴纸.png"))))
+          == QString::fromUtf8("http://h:8080/贴纸.png"));
+}
+
+TEST_CASE("qUrlRemoveFilename: CJK 文件名截掉后留目录，query 仍保留")
+{
+    CHECK(rmf(QString::fromUtf8("https://a.com/站点/贴纸.png?q=1"))
+          == QString::fromUtf8("https://a.com/站点/?q=1"));
+    // 目录（带尾斜杠）→ 原样
+    CHECK(rmf(QString::fromUtf8("https://a.com/站点/"))
+          == QString::fromUtf8("https://a.com/站点/"));
 }
