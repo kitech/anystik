@@ -17,11 +17,40 @@
 #include <string>
 #include <string.h>
 
-// Qt3 无 QString::trimmed() / 无 QByteArray 成员（简单 typedef）——Qt3 提供
-// stripWhiteSpace()，语义等同（去首尾空白）。函数式宏把 .trimmed() 一次映射，
-// 避免 QString 与 QByteArray 两套调用点逐处收口。仅 QT3_BUILD 编译单元生效，
-// Qt 原生头在宏定义前已完成预处理，不受影响。
-#define trimmed() stripWhiteSpace()
+// ⚠ 本头用到了 qint64（qNumberToByteArray 的形参），但 **Qt3 根本没有
+//   qint64** —— 那个 typedef 是 stikcommon/qglobaltype_shim.h:56 自己写的。
+//   于是本头**不能独立编译**：只要调用方没恰好先 include qglobaltype_shim.h，
+//   就在 qNumberToByteArray 处报 "'qint64' was not declared in this scope"。
+//   （隔离探针实证：仅 include 本头即失败。）qdatetime_shim.h 有同样的隐式
+//   依赖，属同一类问题。
+//   这里自带 typedef 修掉。C++ 允许重复的**相同** typedef，故与
+//   qglobaltype_shim.h:56 并存无害（两者都是 long long）。
+#if QT_VERSION < 0x040000
+typedef long long qint64;
+typedef unsigned long long quint64;
+#endif
+
+// ── 已移除：#define trimmed() stripWhiteSpace() ──────────────────────
+//
+// 原先这里有个函数式宏，把所有 `.trimmed()` 一律改写成 `.stripWhiteSpace()`。
+// 现已删除，调用点改用 qTrimmed()（qstring_shim.h 的 QString 重载 +
+// qba_shim.h 的 QByteArray 重载，构成重载对，调用点不必判断类型）。
+//
+// 为什么必须删掉它：
+//   1) 它对 QByteArray 是**错的**。Qt3 的 QByteArray 就是
+//      `typedef QMemArray<char> QByteArray`（qcstring.h:105），而
+//      QMemArray 既无 trimmed() 也无 stripWhiteSpace()。宏会把
+//      `someQByteArray.trimmed()` 展开成 `someQByteArray.stripWhiteSpace()`
+//      → 编译期 "'QByteArray' {aka 'class QMemArray<char>'} has no member
+//      named 'stripWhiteSpace'"。隔离探针实证过。
+//   2) 它污染整个 TU：任何第三方/产品代码里的 `.trimmed()` 都会被无声改写，
+//      包括 Qt6 分支（若该头在 Qt6 下也被包含，Qt6 原生 trimmed() 会被
+//      改成不存在的 stripWhiteSpace()）。
+//   3) 无版本守卫，两种编译都生效，风险面比它省下的事大。
+//
+// 参考正确范式：anystik/src/sitelistclient.cpp:61 的
+//   #define QLSTIK_TRIMMED(s)  qTrimmed(s)      ← QT3_BUILD 分支
+//   #define QLSTIK_TRIMMED(s)  ((s).trimmed())  ← Qt6 分支
 
 // ══ QByteArray::append（Qt4 起）═══════════════════════════════════════
 // Qt3 的 QByteArray 是 QMemArray<char>，只有 resize()/data()，无 append。

@@ -55,6 +55,12 @@
 #if QT_VERSION < 0x040000
 typedef long long qint64;
 typedef unsigned long long quint64;
+// qulonglong：Qt4.0 起 qglobal.h 才有此名。Qt3 侧的基础 64 位无符号整型
+// 是 Q_ULLONG（qglobal.h:728 → unsigned long long），语义完全一致，故补同名
+// typedef。用到它的 qsettings_shim.h（qSettingsValueULongLong/SetULongLong）
+// 在 Qt3 分支本来就把值当 QString 存（Qt3 无 writeEntry(key, qulonglong)，
+// 只有 writeEntry(key, const QString&)），故此 typedef 不引入语义风险。
+typedef unsigned long long qulonglong;
 #ifndef Q_INT64_C
 #define Q_INT64_C(c)   c##LL
 #define Q_UINT64_C(c)  c##ULL
@@ -235,22 +241,44 @@ inline bool qBufferSetData(QBuffer& buf, const QByteArray& data)
 }
 
 // ── qBufferMake()：让 QBuffer 绑定到一块外部 QByteArray ───────────────────
-// ⚠ 构造签名不同：Qt3 是 QBuffer(QByteArray) **按值**（qbuffer.h:54），
-//   Qt4+ 是 QBuffer(QByteArray*) 指针（隐式共享，就地读写）。
-//   故 Qt6 惯用的 `QBuffer b(&bytes);` 在 Qt3 下会报
-//   "invalid conversion from QByteArray* to int"（它去匹配别的重载了）。
+// ⚠ 形参用**出参**而非返回值：QBuffer 两版本都禁拷贝
+//   —— Qt3 把拷贝构造放在 private（qbuffer.h:87 `QBuffer(const QBuffer&)`），
+//      Qt6 更是直接 `Q_DISABLE_COPY`（qbuffer.h:61）。
+//   故 `return QBuffer(ba);` 那种写法两版本都编不过，只能就地绑定。
 //
-// ⚠ 语义差异（重要，决定写路径怎么写）：Qt3 按值传参 + Qt3 的 QByteArray 是
-//   QMemArray<char>，无隐式共享，故 QBuffer 持有的是**独立缓冲**，往里写
-//   **不会**回写到外部变量；Qt4+ 则写的就是那块共享内存。
-//   → 故「编码后要拿结果」的用法（stickerstore 的 PNG/BMP 自检分支）不能只
-//     依赖构造，必须显式 `bytes = b.buffer();` 把内容取回来。见 qBufferTake。
+// ⚠ 绑定 API 两版本同名不同参，但**语义一致**（都别名到调用方那块内存）：
+//   Qt3 `bool setBuffer(QByteArray)`（qbuffer.h:58）形参虽**按值**，但
+//      Qt3 的 QByteArray 是 QMemArray<char>、带引用计数，按值传参共享存储。
+//      实测 setBuffer(ba) 后 `b.buffer().data() == ba.data()` 为真，写进去
+//      的内容 ba 立即可见（QBuffer 覆写了 ba 的旧内容 "XY"）。
+//      ⚠ 别按「C++ 按值传参 = 深拷贝」推断这里不回写 —— 实测是回写的。
+//   Qt6 `void setBuffer(QByteArray*)`（qbuffer.h:33）直接用那块内存，
+//      Qt 官方文档明写 "write something into the QBuffer, byteArray
+//      **will be modified**"。
+//   ⚠ 别用 Qt6 的 `setData(const QByteArray&)`（qbuffer.h:35）：文档是
+//     "Sets the **contents** ... same as assigning data to buffer()"，即
+//     赋值语义，与按指针绑定不是一回事。
+//   ⚠ 两版本的 setBuffer 在 buffer 已 open 时都只发 qWarning 且**什么都不做**
+//     （Qt6 qbuffer.cpp:200-203），故必须在 open 之前调用。
+inline void qBufferMake(QBuffer& buf, QByteArray& ba)
+{
 #if QT_VERSION < 0x040000
-inline QBuffer qBufferMake(QByteArray& ba) { return QBuffer(ba); }
-inline QByteArray qBufferTake(const QBuffer& buf) { return buf.buffer(); }
+    buf.setBuffer(ba);
 #else
-inline QBuffer qBufferMake(QByteArray& ba) { return QBuffer(&ba); }
-inline const QByteArray& qBufferTake(const QBuffer& buf) { return buf.data(); }
+    buf.setBuffer(&ba);
 #endif
+}
+
+// 取回缓冲内容。两版本下 qBufferMake 都已经让 ba 可见，故本函数**不是**
+// 正确性所必需（不是「Qt3 必须显式取回」）；保留它是让调用点写法在两版本
+// 统一、且不依赖上面那条别名语义。返回值都是拷贝。
+inline QByteArray qBufferTake(const QBuffer& buf)
+{
+#if QT_VERSION < 0x040000
+    return buf.buffer();
+#else
+    return QByteArray(buf.data(), static_cast<int>(buf.size()));
+#endif
+}
 
 #endif // QLSTIK_QGLOBALTYPE_SHIM_H

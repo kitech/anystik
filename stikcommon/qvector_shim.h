@@ -33,7 +33,10 @@
 // ⚠ 派生类里若要用基类的 at()，必须写 `QValueVector<T>::at(i)` 显式限定：
 //   本类新加的 removeAll/begin 等若走 this->at()，在有重载时会选中错的那个。
 
+#ifdef QT3_BUILD
+
 #include <qvaluevector.h>
+#include <qptrvector.h>  // 仅为占住 include guard，防止后续 Qt 头再次 #define QVector
 
 #ifdef QVector
 #undef QVector
@@ -78,5 +81,15 @@ public:
         return *this;
     }
 };
+
+#else
+
+// Qt4+ 用原生 QVector。本头仍需引入它，否则依赖方在本头加守卫后就再也拿不到
+// QVector 定义（stickerstore.h 的 `QVector<StickerPackBrief>` 返回值会报
+// incomplete type）。守卫放在头文件内部而非各调用点，是为了杜绝「某个
+// unguarded 的 include 点把 Qt6 原生 QVector 顶掉」这种静默破坏。
+#include <QVector>
+
+#endif // QT3_BUILD
 
 #endif // QLSTIK_QVECTOR_SHIM_H

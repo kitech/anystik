@@ -7,18 +7,39 @@
 //   qmap_shim.h  —— Qt3 的 QMap 缺 Qt4+ 的 value()/constFind()/cbegin()/cend()
 //                   与「erase(iterator) 返回下一个」的 Qt5 语义。
 //
-// 两个头都是纯模板，**无需链接任何产品 .cpp**。
+// ⚠ 本文件只管**容器**垫片。其它 shim 各有专属测试文件（一个 shim 一个
+//   test_<name>_shim.cpp），别再往这里堆 —— 2026-10 曾把 qBuffer/
+//   QVariantMap/qString/qba 四组塞进来，导致这个文件的 include 顺序成了
+//   隐式雷区（qmap_shim.h 末尾的 QMap 宏会改写后续所有 QMap token）。
+//   现已拆为：
+//     test_qglobaltype_shim.cpp  qBufferMake/qBufferTake
+//     test_qvariant_shim.cpp     qVariantMapValue
+//     test_qstring_shim.cpp      qStringSplitSkipEmpty/qStringRefAt/…
+//     test_qba_shim.cpp          qbaToLongLong
+//     test_qdir_shim.cpp         qDirEntryInfoList/qDirEntryList/…
+//
+// 两个容器头都是纯模板，**无需链接任何产品 .cpp**。
 //
 // ⚠ include 顺序：qmap_shim.h 末尾是**对象式**宏
 //   `#define QMap qlstik_qt3::QMapShim`，会重写本 TU 里所有 `QMap` token
 //   （连 `::QMap` 也会被重写），故必须放在 doctest 与其它 Qt 头之后。
 // ⚠ 本文件不测 `::QMap`（Qt3 原生 QMap）：如上，宏定义后该写法不可用。
+// ⚠ qvariant_shim.h / qstring_shim.h 的 include 顺序同理受此约束。
 
 #include <qstring.h>
 #include <qvaluelist.h>
+#include <qbuffer.h>
 
 #include "doctest/doctest.h"
 
+#include "qglobaltype_shim.h"
+#include "qba_shim.h"
+// ⚠ 必须在 qmap_shim.h 之前：那个头末尾的 `#define QMap` 会改写本 TU 后续
+//   所有 QMap token。qvariant_shim.h 的 Qt3 分支要写原生 QMap 的
+//   ConstIterator，所以要抢在宏生效前解析（与生产侧一致 —— stickerstore.cpp
+//   根本不引 qmap_shim.h）。
+#include "qvariant_shim.h"
+#include "qstring_shim.h"
 #include "qlist_shim.h"
 #include "qmap_shim.h"
 
@@ -182,6 +203,30 @@ TEST_CASE("QList 垫片: contains / cbegin-cend / 基类面未被遮蔽")
     l.pop_back();
     CHECK_EQ(l.count(), 3);
     CHECK_EQ(l.size(), l.count());
+}
+
+// ── qListReserve：必须 no-op，绝不能 resize ──────────────────────────────
+// 回归点：Qt3 的 QValueList/QPtrList 无 capacity 概念，也没有 Qt4 的
+// reserve()。早期有人想用 resize(n) 顶替，那会把 size 真的变成 n，后续
+// append 从 n 起追加 —— 贴纸缩略图列表会带一串前导空元素。size 不变是
+// 唯一可观察契约，必须锁死。
+TEST_CASE("qListReserve: Qt3 侧是 no-op，size 与内容都不变")
+{
+    QList<QString> l;
+    l.append(QString("a"));
+    l.append(QString("b"));
+    qListReserve(l, 100);
+    CHECK_EQ(l.count(), 2);
+    CHECK(l[0] == QString("a"));
+    CHECK(l[1] == QString("b"));
+    // reserve 后 append 仍接在尾部，不产生前导空元素
+    l.append(QString("c"));
+    CHECK_EQ(l.count(), 3);
+    CHECK(l[2] == QString("c"));
+    // 空容器上 reserve 也不能凭空造出 n 个元素
+    QList<int> e;
+    qListReserve(e, 5);
+    CHECK_EQ(e.count(), 0);
 }
 
 // ── QMap 垫片 ────────────────────────────────────────────────────────

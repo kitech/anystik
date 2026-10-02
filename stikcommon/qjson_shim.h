@@ -56,6 +56,8 @@
 #endif
 #include "qstring_shim.h"   // Qt3 的 QString 无 fromUtf8 之外的 QStringLiteral
 
+#ifdef QT3_BUILD
+
 #include "cJSON.h"
 
 namespace qjsonshim {
@@ -261,6 +263,11 @@ private:
     qjsonshim::Tree* m_tree;
     cJSON* m_node;
 };
+
+#endif // QT3_BUILD
+// ↑ 上方整套 cJSON 版 QJsonValue/Object/Array/Document **仅 Qt3**。
+//   Qt4.5+ 有原生 QJson*，无守卫会在 Qt6 下报 "redefinition of 'class QJsonValue'"
+//   等一串错。下面 qJsonParseObject() 才是两版本共用的跨版本入口。
 
 // ── qJsonParseObject()：解析并取顶层 object ──────────────────────────────
 // QJsonDocument/QJsonParseError 都是 Qt4.5 才引入的类型，Qt3 侧本 shim 的

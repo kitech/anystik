@@ -1,5 +1,8 @@
 #include "imagesearchpopup.h"
 
+// 公共代码里用到 qTrimmed()（Qt3/Qt6 都要编），故放在版本守卫之外。
+#include "qstring_shim.h"
+
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskProgressBar.h>
@@ -250,7 +253,7 @@ void ImageSearchPopup::setFailed(const QString& reason)
 
 void ImageSearchPopup::setDescription(const QString& desc)
 {
-    const QString text = desc.trimmed();
+    const QString text = qTrimmed(desc);
     if (text.isEmpty()) {
         m_descLabel->setText(QString());
         m_descLabel->setVisible(false);
@@ -263,7 +266,7 @@ void ImageSearchPopup::setDescription(const QString& desc)
 
 void ImageSearchPopup::setDescriptionFailed(const QString& reason)
 {
-    const QString text = reason.trimmed();
+    const QString text = qTrimmed(reason);
     m_descLabel->setTextColor(QColor(180, 180, 185));
     m_descLabel->setText(tr("AI 描述：%1")
         .arg(text.isEmpty() ? tr("未获取到图片描述") : text));

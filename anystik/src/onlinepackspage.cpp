@@ -1,4 +1,7 @@
 #include "onlinepackspage.h"
+
+// 公共代码里用到 qTrimmed()（QT3/Qt6 都要编），故放在版本守卫之外。
+#include "qstring_shim.h"
 #include "searchresultgrid.h"
 #include "imagesearchclient.h"
 #include "sitelistclient.h"
@@ -197,7 +200,7 @@ void OnlinePacksPage::onCreate(const QVariantMap&, const QVariantMap&)
 void OnlinePacksPage::doSearch()
 {
     const int idx = m_siteCombo->currentIndex();
-    const QString kw = m_keywordEdit->text().trimmed();
+    const QString kw = qTrimmed(m_keywordEdit->text());
 
     if (kw.isEmpty()) {
         m_statusLabel->setTextColor(QColor(240, 190, 90));
@@ -247,7 +250,7 @@ void OnlinePacksPage::doBrowse()
 void OnlinePacksPage::openCurrentInBrowser()
 {
     const int idx = m_siteCombo->currentIndex();
-    const QString kw = m_keywordEdit->text().trimmed();
+    const QString kw = qTrimmed(m_keywordEdit->text());
 
     const char* url = nullptr;
     switch (idx) {
@@ -279,7 +282,7 @@ void OnlinePacksPage::onStop()
     if (m_siteCombo)
         QSettings().setValue("onlinepacks_site", m_siteCombo->currentIndex());
     if (m_keywordEdit)
-        QSettings().setValue("onlinepacks_kw", m_keywordEdit->text().trimmed());
+        QSettings().setValue("onlinepacks_kw", qTrimmed(m_keywordEdit->text()));
     if (m_searchClient)
         m_searchClient->abortAll();
     if (m_siteClient)

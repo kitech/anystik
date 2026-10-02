@@ -10,6 +10,10 @@
 // “这个目录列过了吗”的去重过滤，**不遍历、不依赖顺序**，故顺序差异无影响。
 // 仅 Qt3 引入（Qt4+ 有原生 QSet）。
 
+#include <qglobal.h>
+
+#ifdef QT3_BUILD   // 仅 Qt3 需要垫片：Qt4+ 有原生 QSet
+
 #include <qmap.h>
 #include <qstring.h>
 
@@ -22,5 +26,14 @@ public:
         return this->QMap<Key, Key>::insert(key, key);
     }
 };
+
+#else
+
+// Qt4+ 用原生 QSet。本头仍需引入它，否则依赖方（如 qba_shim.h 的
+// qByteArraySetBuildAscii）在本头被加守卫后就再也拿不到 QSet 定义，
+// 报 "return type 'class QSet<QByteArray>' is incomplete"。
+#include <QSet>
+
+#endif
 
 #endif // QLSTIK_QSET_SHIM_H

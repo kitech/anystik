@@ -30,6 +30,14 @@
 #include <qdir.h>
 #include <qfile.h>
 #include <qfileinfo.h>
+// ⚠ 必须自己引 qlist_shim.h：本头的 qDirEntryInfoList() 返回 QList<QFileInfo>
+//   并用 `out << **it` 追加，若调用方没先引 shim，Qt3 的 QList 仍是
+//   qptrlist.h:189 的 `#define QList QPtrList` 指针宏，于是报
+//   "no match for operator<< (QPtrList<QFileInfo>, QFileInfo)"。
+//   之前该依赖是隐式的（只有 stickerstore.cpp 恰好先引了），写测试时暴露。
+//   ⚠ 顺序：本头解析时 Qt 原生 QList 宏必须**先**占住，故 shim 放在
+//     qdir.h 之后 —— qlist_shim.h 内部会 include qptrlist.h 占 guard 并 #undef。
+#include "qlist_shim.h"
 #else
 #include <QString>
 #include <QStringList>
@@ -238,20 +246,42 @@ inline QString qDirAbsolutePath(const QDir& dir)
 // 结果 = "../" × 层数 + file.mid(i+1)（跳过 file[i]，它在 dir 继续时必为 '/'，
 // 在双方不等时必为首个分歧字符），结果为空串时用 "."。
 // ── qDirEntryInfoList()：统一 entryInfoList 的返回类型 ─────────────────
-// ⚠ 两侧返回类型不同，且 Qt3 侧是**调用方拥有的堆指针**：
+// ⚠ 两侧返回类型不同，Qt3 侧是指针、Qt6 侧是值列表：
 //   Qt3  const QFileInfoList* entryInfoList(...)   —— QFileInfoList 就是
-//        typedef QPtrList<QFileInfo>（qdir.h:52），存的是指针，且 QDir 内部
-//        new 出来交给调用方 delete；
+//        typedef QPtrList<QFileInfo>（qdir.h:52），存的是指针；
 //   Qt6  QFileInfoList entryInfoList(...)           —— QList<QFileInfo>，值列表。
 // 直接 `const auto infoList = dir.entryInfoList(...)` 在 Qt3 下会把**指针**
 // 存进 auto，于是 `for (const auto& fi : infoList)` 迭代的是指针 →
-// "begin/end was not declared in this scope"，且那份 QFileInfoList 还会泄漏。
+// "begin/end was not declared in this scope"。
 // 故本垫片把两种形态都归一成值列表（QFileInfo 本身可值拷贝，按值持有，
-// 与 Qt6 的 QList<QFileInfo> 语义一致），并在 Qt3 分支负责 delete。
+// 与 Qt6 的 QList<QFileInfo> 语义一致）。
+//
+// ⚠⚠⚠ 所有权实测（Qt3.5 /opt/qt338sh，2026-10 隔离探针实证，**修正旧注释**）
+//   那个指针**归 QDir 所有，不是调用方的**！entryInfoList() 返回的是 QDir
+//   内部缓存成员 fiList 的地址，QDir 析构函数里会 `delete fiList`。
+//   故对返回值调用 delete 是 **double free**，必崩：
+//     探针情形A（不 delete，直接析构 QDir）→ exit=0，正常；
+//     探针情形B（delete p，再析构 QDir）   → exit=139 (SIGSEGV)，
+//     gdb 回溯帧 #0 = QDir::~QDir() at tools/qdir.cpp:275 `delete fiList`。
+//   旧代码/旧注释写的「Qt3 由调用方 delete」是错的 —— 那是把 Qt5+ 的
+//   QList 值返回语义套到了 Qt3 的指针返回上。已改掉。
+//   本垫片只做**值拷贝**（QFileInfo 可值拷贝），拷贝完指针归属谁都不影响，
+//   析构 QDir 后 out 依然有效 —— 这也正是必须归一成值列表的原因之一。
 // ⚠ Qt3 没有 NoDotAndDotDot（qdir.h FilterSpec 无此项），Qt3 还会把 "." / ".."
 //   列进来 —— 已在文件头记备查，调用点需按名字自行排除，本垫片不代劳。
+// ⚠ 过滤参数的**类型**两版本不同：Qt3 的 entryList/entryInfoList 收 `int`
+//   （qdir.h:138 `entryList(const QString&, int, int)`），Qt6 收 `QDir::Filters`
+//   （强枚举）。调用点写的 `QDir::Files|QDir::Dirs` 在 Qt6 下是 Filters，
+//   塞进 `int` 形参会报 "invalid conversion from int to QDir::Filter"。
+//   故形参类型随版本走，调用点两边都不用改。
 #if QT_VERSION < 0x040000
-inline QList<QFileInfo> qDirEntryInfoList(const QDir& dir, int filterSpec)
+typedef int qDirFilter;
+#else
+typedef QDir::Filters qDirFilter;
+#endif
+
+#if QT_VERSION < 0x040000
+inline QList<QFileInfo> qDirEntryInfoList(const QDir& dir, qDirFilter filterSpec)
 {
     QList<QFileInfo> out;
     const QFileInfoList* p = dir.entryInfoList(filterSpec);
@@ -259,11 +289,11 @@ inline QList<QFileInfo> qDirEntryInfoList(const QDir& dir, int filterSpec)
     for (QFileInfoList::ConstIterator it = p->begin(); it != p->end(); ++it) {
         if (*it) out << **it;      // QPtrList 取元素得到 QFileInfo*，解两次到值
     }
-    delete p;                      // Qt3 由调用方负责释放
+    // ⚠⚠ **绝对不要 delete p** —— 那会 double free，见上方「所有权实测」。
     return out;
 }
 #else
-inline QList<QFileInfo> qDirEntryInfoList(const QDir& dir, int filterSpec)
+inline QList<QFileInfo> qDirEntryInfoList(const QDir& dir, qDirFilter filterSpec)
 {
     return dir.entryInfoList(filterSpec);
 }
@@ -280,9 +310,16 @@ inline QList<QFileInfo> qDirEntryInfoList(const QDir& dir, int filterSpec)
 //   **单个**模式，且刻意不给 QStringList 重载，避免调用点以为多模式在
 //   Qt3 下也成立（那会静默返回空列表而非报错，最难查）。多模式需求请改为
 //   分别调用本函数后自行合并去重。
-inline QStringList qDirEntryList(const QDir& dir, const QString& nameFilter, int filterSpec)
+inline QStringList qDirEntryList(const QDir& dir, const QString& nameFilter, qDirFilter filterSpec)
 {
+#if QT_VERSION < 0x040000
     return dir.entryList(nameFilter, filterSpec);
+#else
+    // Qt6 **删掉了** 单串重载：只剩 entryList(Filters, SortFlags) 与
+    // entryList(const QStringList&, Filters, SortFlags)（qdir.h:162-163）。
+    // 单模式要包成单元素 QStringList 才匹配得上。
+    return dir.entryList(QStringList() << nameFilter, filterSpec);
+#endif
 }
 
 // ── qDirEntryInfoList 的参数在 Qt3/Qt6 上枚举类型不同（Qt3 int，Qt6 Filters），

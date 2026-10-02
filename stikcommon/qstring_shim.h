@@ -178,14 +178,16 @@ inline QString qFromUtf8BA(const QByteArray& ba)
 //   mean 'qFromStdU16String'?" —— Qt3 语法门禁看不到这个洞，只有 Qt6 正式
 //   构建能暴露。教训：跨版本共用代码所依赖的垫片，定义必须落在版本守卫之外。
 
-// ── QString::trimmed()（Qt4 才有，Qt3 只有 stripWhiteSpace()）────────────
-// sitelistclient.cpp 解析 <img src=" ..."> 时要 .trimmed()。Qt3 的
-// stripWhiteSpace() 与 Qt4+ 的 trimmed() 都只去首尾空白，内部空白不动，语义一致。
-#if QT_VERSION < 0x040000
-inline QString qTrimmed(const QString& s) { return s.stripWhiteSpace(); }
-#else
-inline QString qTrimmed(const QString& s) { return s.trimmed(); }
-#endif
+// ── QString::trimmed() ──────────────────────────────────────────────────
+// Qt3 的 QString 无 trimmed()，只有 stripWhiteSpace()；Qt4+ 有 trimmed()。
+// 二者都只去首尾空白、不动内部空白，语义一致，故三版本等价。
+// ⚠ qTrimmed(const QString&) 的**唯一权威定义**在本文件末尾（带完整取舍
+//   说明的那处）。此处不再重复定义 —— 本文件历史上曾有两份同名定义
+//   （一处在版本守卫内、一处在 Qt6 分支尾部），加上末尾那份共三份，
+//   导致任何同时经过两处的 TU 直接编译失败：
+//     "error: redefinition of 'QString qTrimmed(const QString&)'"
+//   触发者：qdebug_shim.h、qtemporaryfile_shim.h 等包含了本文件两次以上
+//   版本分支路径的头。新增重载函数时务必全文搜索确认只有一处定义。
 
 // ── QStringList::removeDuplicates()（Qt4.1+ 才有）────────────────────────
 // imagesearchclient.cpp 的 parseBing/parseYandex 在收集完原图 URL 后去重。
@@ -210,8 +212,10 @@ inline QByteArray qToLatin1BA(const QString& s) { return s.toLatin1(); }
 inline QByteArray qToLocal8BA(const QString& s)  { return s.toLocal8Bit(); }
 inline void qStringChop(QString& s, int n)       { if (n > 0) s.chop(n); }
 inline void qStringClear(QString& s)             { s.clear(); }
-inline QString qFromUtf8BA(const QByteArray& ba) { return QString::fromUtf8(ba); }
-inline QString qTrimmed(const QString& s) { return s.trimmed(); }
+// ⚠ qFromUtf8BA 的**唯一权威定义**在上面的版本守卫内（带长度安全说明的
+//   那处），Qt6 分支此处不再重复 —— 否则同 TU 经过两分支时直接
+//   "redefinition of 'QString qFromUtf8BA(const QByteArray&)'"。
+//   与 qTrimmed 同一类问题，本文件历史上多处如此，新增前务必全文搜索。
 inline void qStringListRemoveDuplicates(QStringList& list)
 {
     list.removeDuplicates();
@@ -526,13 +530,50 @@ QStringList qStringListBuild(const A1& a1, const A2& a2, const A3& a3, const A4&
 }
 
 // 长列表（贴纸格式白名单有 18 项）走「字符指针数组 + 个数」，避免堆 18 个重载。
-// 元素按 const char* 原样进 QString —— ⚠ 走的是 fromAscii/Latin1 语义，
-// 故只可用于纯 ASCII 字面量（含格式名、URL 这类），不能放非 ASCII 文本。
+// 元素按 const char* 原样进 QString —— ⚠ 走的是 Latin1 语义，故只可用于纯
+// ASCII 字面量（含格式名、URL 这类），不能放非 ASCII 文本。
+//
+// 用 fromLatin1 而非 fromAscii：后者在 Qt6 已被移除（Qt5 起弃用），
+// 而 fromLatin1 在 Qt3（qstring.h:660）与 Qt6 都在；对纯 ASCII 输入两者
+// 等价，故一处写法通吃两版本。
 inline QStringList qStringListBuildAscii(const char* const* items, int count)
 {
     QStringList l;
-    for (int i = 0; i < count; ++i) l << QString::fromAscii(items[i]);
+    for (int i = 0; i < count; ++i) l << QString::fromLatin1(items[i]);
     return l;
 }
+
+// ── qTrimmed(const QString&) ───────────────────────────────────────────
+// 取代原先 qbytearray_shim.h 里的 `#define trimmed() stripWhiteSpace()`。
+//
+// 为什么不用宏：那个无参函数式宏会把 include 它的**整个 TU** 里所有
+// `.trimmed()` 文本替换掉 —— 不分 QString 还是 QByteArray、不分是不是
+// 第三方头里的 token，也无法在局部关掉。实测它还会让
+// stikcommon/qba_shim.h 与 qlcomp/limelog.h 里为说明用途而写的
+// 「.trimmed()」字样被一并展开。宏改写调用点语法而非补 API，与本仓
+// 既定范式相反（见 qdir_shim.h:13-14：「不用同名宏 …… 宏替换反而会
+// 误伤无关文本；自由函数让调用点自己标明意图」）。
+//
+// 为什么用重载而不是 qStringTrimmed/qbaTrimmed 两个名字：调用点是
+// 36 处 QString/QByteArray 混用，同名重载让调用方不必先判断类型，
+// 也不必记住该用哪个前缀。两侧同名 qTrimmed，靠形参类型解析。
+//
+// 语义：Qt3 无 trimmed()，只有 stripWhiteSpace()（qstring.h）。两者都是去首尾
+// 空白、**不动内部空白**，qTrimmed 只是忠实代理，不引入任何行为改变（探针实证：
+// 0x0000-0xFFFF 全码位扫描，qTrimmed 与当版本原生函数裁剪集合逐位相同）。
+//
+// ⚠ 但**两个 Qt 版本之间并不等价**，实测差两个码位（/tmp 差分探针，见
+//   test_qtrimmed_shim.cpp 的「两版本差异已钉住」用例）：
+//     U+0085 NEL  —— Qt6 trimmed() 裁掉，Qt3 stripWhiteSpace() 保留
+//     U+200B ZWSP —— Qt3 stripWhiteSpace() 裁掉，Qt6 trimmed() 保留
+//   故写文档/写注释时**不能**声称「三版本语义一致」。绝大多数场景（URL、标题、
+//   提示词）碰不到这两个码位，故不在 shim 里强行统一成某一版 —— 那等于把 Qt6
+//   的原生行为也改掉，风险更大。若某天确实需要跨版本位级一致，得显式实现固定
+//   空白集，并在本文件记录该决定。
+#if QT_VERSION < 0x040000
+inline QString qTrimmed(const QString& s) { return s.stripWhiteSpace(); }
+#else
+inline QString qTrimmed(const QString& s) { return s.trimmed(); }
+#endif
 
 #endif // QLSTIK_QSTRING_SHIM_H

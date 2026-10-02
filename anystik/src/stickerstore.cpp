@@ -5,10 +5,12 @@
 // 原因：stickerstore.h:104 就声明了 `QVector<StickerPackBrief> packs(...)`，
 // 若该头在 shim 之前被解析，声明处的 QVector 会展开成 QPtrVector<StickerPackBrief>，
 // 而定义处（shim 之后）却是 shim 的 QVector<StickerBrief> —— 两者是**不同类型**，
-// 编译器报 "no declaration matches"。Qt 头自带 include guard，故本段与文件
-// 后面重复 include 的那批 Qt 头互不冲突，也不会二次定义宏。
-#include <qptrlist.h>
-#include <qptrvector.h>
+// 编译器报 "no declaration matches"。
+//
+// ⚠ 不要在这里裸写 `#include <qptrlist.h>` / `<qptrvector.h>`：那是 Qt3 专有头，
+//   Qt6 侧不存在（会 fatal error: No such file or directory）。两个 shim 已在
+//   各自的 QT3_BUILD 守卫内自己 include 它们（qlist_shim.h:23、
+//   qvector_shim.h），顺序语义不变，且 Qt4+ 分支改为引入原生容器。
 #include "qlist_shim.h"
 #include "qvector_shim.h"
 
@@ -125,8 +127,20 @@
 #include "qglobaltype_shim.h"
 #include "qdir_shim.h"   // qDirTempPath/qDirCleanPath/qDirRemoveRecursively/qDirRelativeFilePath
 #include "qfile_shim.h"  // qFileCopy/qFileRename/qFileInfoSuffix/qFileInfoCompleteBaseName/...
+// 这三个与上面同样属于「Qt3/Qt6 共用代码」的垫片，头内各函数都带版本守卫，
+// Qt6 分支取原生实现，缺包含就会报 "was not declared in this scope"：
+//   qclipboard_shim.h  → qUrlToLocalFile（stickerstore 的剪贴板贴纸路径）
+//   qdatetime_shim.h   → qDateTimeEpochSecs
+//   qbytearray_shim.h  → qNumberToByteArray
+#include "qclipboard_shim.h"
+#include "qdatetime_shim.h"
+#include "qbytearray_shim.h"
 #include <QMimeDatabase>
 #include <QMimeType>
+// qJsonParseObject()：跨版本自由函数（Qt3 走本 shim 的 cJSON 实现，
+// Qt4.5+ 转调原生 QJsonDocument）。头内部逐项带版本守卫，两版本都安全可含，
+// 且必须包含 —— 下面的调用点是 Qt3/Qt6 共用的一份代码。
+#include "qjson_shim.h"
 #include <QSettings>
 #include <QUrl>
 #include <QSet>
@@ -149,6 +163,11 @@
 // 即 toUtf8）。QCryptographicHash 的 5 处入参用它替代 Qt6 专有的 .toUtf8()。
 // 本垫片在两个分支都定义 qToUtf8BA，Qt6 侧不定义任何宏，故可无条件包含。
 #include "qstring_shim.h"
+// qVariantMapValue()：Qt3 的 QMap 没有 Qt4.0 才加的 value()/value(key,def)，
+// 而 QVariantMap 就是 QMap<QString,QVariant>（qvariant.h:87）。⚠ 必须放在
+// 上面这个**共用区**（两个版本分支的 #endif 之后）—— 放进任一分支都会让
+// 另一版本报 "qVariantMapValue was not declared in this scope"。
+#include "qvariant_shim.h"
 // Qt3 无 QImage 的 Format 概念（构造参数是 int depth）、无 scaled()、
 // 无 Format_RGBA8888/Format_ARGB32_Premultiplied、Qt3 32 位图内存是 BGRA
 // 而非 RGBA。qimage_shim.h 把这些差异收进自由函数，Qt6 分支转调原生 API，
@@ -707,11 +726,13 @@ int StickerStore::countStickers(const QString& packId)
 // ── 目录导入：每个子目录 = 一个贴纸包，支持图片递归 ──
 static bool isSupportedImage(const QString& suffix)
 {
+    // ⚠ 用 fromLatin1 而非 fromAscii：后者 Qt5 起弃用、Qt6 已移除，而
+    //   fromLatin1 在 Qt3（qstring.h:660）与 Qt6 都在；对纯 ASCII 字面量两者等价。
     static const QStringList exts = qStringListBuild(
-        QString::fromAscii("png"),  QString::fromAscii("jpg"),
-        QString::fromAscii("jpeg"), QString::fromAscii("gif"),
-        QString::fromAscii("webp"), QString::fromAscii("bmp"),
-        QString::fromAscii("svg"),  QString::fromAscii("tgs"));
+        QString::fromLatin1("png"),  QString::fromLatin1("jpg"),
+        QString::fromLatin1("jpeg"), QString::fromLatin1("gif"),
+        QString::fromLatin1("webp"), QString::fromLatin1("bmp"),
+        QString::fromLatin1("svg"),  QString::fromLatin1("tgs"));
     return exts.contains(qToLower(suffix));
 }
 
@@ -2313,12 +2334,14 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
         for (qImageFormat fmt : kFormats) {
             const QImage c = qImageConvertToFormat(img, fmt);
             QByteArray trial;
-            QBuffer b = qBufferMake(trial);
+            QBuffer b;
+            qBufferMake(b, trial);
             if (!qOpenWriteOnly(b)) continue;
             if (!c.save(&b, "PNG")) continue;
             b.close();
-            // ⚠ Qt3 的 QBuffer 按值持有独立缓冲（无隐式共享），写进去的内容
-            //   不会自动回写 trial，必须显式取回 —— Qt6 侧这是 no-op 语义。
+            // 两版本 qBufferMake 都别名到 trial 这块内存（Qt3 的 setBuffer 虽
+            // 按值传参，但 QByteArray 带引用计数、共享存储），写完 trial 即可见；
+            // 这里再 qBufferTake 一次是为让写法不依赖该别名语义，纯拷贝。
             trial = qBufferTake(b);
             QByteArray tf;
             QSize ts;
@@ -2335,13 +2358,15 @@ bool StickerStore::pasteFromClipboard(QString* errorOut, bool* dup,
         if (!done) {
             const QImage c = qImageConvertToFormat(img, qFmtArgb32);
             srcType = QStringLiteral("bitmap");
-            QBuffer b = qBufferMake(bytes);
+            QBuffer b;
+            qBufferMake(b, bytes);
             if (!qOpenWriteOnly(b) || !c.save(&b, "BMP")) {
                 if (errorOut) *errorOut = QStringLiteral("图片编码失败");
                 return false;
             }
             b.close();
-            bytes = qBufferTake(b);   // Qt3 必须显式取回，理由同上
+            bytes = qBufferTake(b);   // 同上：纯拷贝，非正确性必需
+
             QByteArray tf;
             QSize ts;
             if (!probeImageValidity(bytes, &tf, &ts)) {
@@ -2506,7 +2531,7 @@ QString StickerStore::sanitizeDirName(const QString& name)
 
 QString StickerStore::ensurePack(const QString& title)
 {
-    if (!ensureInit() || title.trimmed().isEmpty()) {
+    if (!ensureInit() || qTrimmed(title).isEmpty()) {
         return QString();
     }
     auto& db = stickerDb();
@@ -2683,7 +2708,7 @@ bool StickerStore::renameStickerFile(const QString& packId,
 
 bool StickerStore::renamePack(const QString& packId, const QString& newTitle)
 {
-    if (!ensureInit() || newTitle.trimmed().isEmpty()) {
+    if (!ensureInit() || qTrimmed(newTitle).isEmpty()) {
         return false;
     }
     auto& db = Storage::instance().msgDb();
@@ -2692,7 +2717,7 @@ bool StickerStore::renamePack(const QString& packId, const QString& newTitle)
     if (!stmt.isPrepared()) {
         return false;
     }
-    QByteArray titleUtf8 = qToUtf8BA(newTitle.trimmed());
+    QByteArray titleUtf8 = qToUtf8BA(qTrimmed(newTitle));
     QByteArray packUtf8 = qToUtf8BA(packId);
     if (!stmt.bind(1, qbaConstData(titleUtf8))) return false;
     if (!stmt.bind(2, qbaConstData(packUtf8))) return false;
@@ -3072,7 +3097,7 @@ static QString sanitizeToken(const QString& in)
             c = QLatin1Char('_');
         }
     }
-    if (out.trimmed().isEmpty()) {
+    if (qTrimmed(out).isEmpty()) {
         out = QStringLiteral("pack");
     }
     return out;
@@ -3591,12 +3616,12 @@ void StickerStore::probeRemote(const QString& url)
 
 qint64 StickerStore::cachedRealSize(const QString& url) const
 {
-    return dlHint(url).value(QStringLiteral("realSize"), -1).toLongLong();
+    return qVariantMapValue(dlHint(url), QStringLiteral("realSize"), -1).toLongLong();
 }
 
 qint64 StickerStore::cachedApproxSize(const QString& url) const
 {
-    return dlHint(url).value(QStringLiteral("approxSize"), -1).toLongLong();
+    return qVariantMapValue(dlHint(url), QStringLiteral("approxSize"), -1).toLongLong();
 }
 
 void StickerStore::seedBuiltinApproxSizes()
@@ -3606,7 +3631,7 @@ void StickerStore::seedBuiltinApproxSizes()
             continue;                                  // 预留源不上种子表
         const QString url = QString::fromUtf8(kBuiltinSources[i].url);
         auto hint = dlHint(url);
-        if (hint.value(QStringLiteral("approxSize")).toLongLong() > 0)
+        if (qVariantMapValue(hint, QStringLiteral("approxSize")).toLongLong() > 0)
             continue;                                  // 有效正值不动；-1/缺失则升级填入
         hint.insert(QStringLiteral("approxSize"), kBuiltinSources[i].approxSize);
         setDlHint(url, hint);
@@ -3655,11 +3680,11 @@ void StickerStore::startDownload(const QString& url, bool noRange)
     task->offset = offset;
 
     const QVariantMap hint = dlHint(url);
-    task->total = hint.value("total", -1).toLongLong();
+    task->total = qVariantMapValue(hint, QStringLiteral("total"), -1).toLongLong();
     if (task->total < 0) {
         task->total = -1;
     }
-    task->name = hint.value("name").toString();
+    task->name = qVariantMapValue(hint, QStringLiteral("name")).toString();
     if (task->name.isEmpty()) {
         // 内置源优先其展示名，保证「待安装列表 ↔ 安装后分组」一一对应
         QString builtinName;
@@ -4057,8 +4082,9 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     // A2 内容变化检测：同源同包且 md5 变化 → 附加提示
     const QVariantMap oldMeta = QSettings().value(
         QStringLiteral("downloadedPackMeta/") + packId).toMap();
-    const QString oldMd5 = oldMeta.value("md5").toString();
-    if (!oldMd5.isEmpty() && oldMeta.value("url").toString() == url
+    const QString oldMd5 = qVariantMapValue(oldMeta, QStringLiteral("md5")).toString();
+    if (!oldMd5.isEmpty()
+            && qVariantMapValue(oldMeta, QStringLiteral("url")).toString() == url
             && oldMd5 != r.md5Hex) {
         r.note = QStringLiteral("（远端内容已变化，已覆盖安装）");
     }
@@ -4129,8 +4155,9 @@ StickerStore::InstallResult StickerStore::runInstallEif(
 
     const QVariantMap oldMeta = QSettings().value(
         QStringLiteral("downloadedPackMeta/") + packId).toMap();
-    const QString oldMd5 = oldMeta.value("md5").toString();
-    if (!oldMd5.isEmpty() && oldMeta.value("url").toString() == url
+    const QString oldMd5 = qVariantMapValue(oldMeta, QStringLiteral("md5")).toString();
+    if (!oldMd5.isEmpty()
+            && qVariantMapValue(oldMeta, QStringLiteral("url")).toString() == url
             && oldMd5 != r.md5Hex) {
         r.note = QStringLiteral("（远端内容已变化，已覆盖安装）");
     }
@@ -4200,8 +4227,9 @@ StickerStore::InstallResult StickerStore::runInstallTgs(
 
     const QVariantMap oldMeta = QSettings().value(
         QStringLiteral("downloadedPackMeta/") + packId).toMap();
-    const QString oldMd5 = oldMeta.value("md5").toString();
-    if (!oldMd5.isEmpty() && oldMeta.value("url").toString() == url
+    const QString oldMd5 = qVariantMapValue(oldMeta, QStringLiteral("md5")).toString();
+    if (!oldMd5.isEmpty()
+            && qVariantMapValue(oldMeta, QStringLiteral("url")).toString() == url
             && oldMd5 != r.md5Hex) {
         r.note = QStringLiteral("（远端内容已变化，已覆盖安装）");
     }
@@ -4221,8 +4249,8 @@ void StickerStore::finalizeInstall(DownloadTask* task, const InstallResult& r)
         meta.insert("url", url);
         meta.insert("name", r.message);
         meta.insert("total", r.total);
-        meta.insert("version", hint.value("version", QStringLiteral("未知")));
-        meta.insert("versionRaw", hint.value("versionRaw"));
+        meta.insert("version", qVariantMapValue(hint, QStringLiteral("version"), QStringLiteral("未知")));
+        meta.insert("versionRaw", qVariantMapValue(hint, QStringLiteral("versionRaw")));
         meta.insert("md5", r.md5Hex);
         meta.insert("dir", r.dir);
         meta.insert("dl_time", qDateTimeEpochSecs());
@@ -4269,7 +4297,7 @@ bool StickerStore::uninstallPack(const QString& packId, bool removeFiles)
     }
     QString dir;
     if (removeFiles) {
-        dir = packMeta(packId).value("dir").toString();
+        dir = qVariantMapValue(packMeta(packId), QStringLiteral("dir")).toString();
     }
     const bool ok = stickerDb().delete_pack(qUtf8Printable(packId));
     if (ok) {
@@ -4364,7 +4392,7 @@ QString normalizeSourceUrl(const QString& url)
 bool StickerStore::isBuiltinSourcePack(const QString& packId,
                                        const QString& title) const
 {
-    const QString url = packMeta(packId).value(QStringLiteral("url")).toString();
+    const QString url = qVariantMapValue(packMeta(packId), QStringLiteral("url")).toString();
     const QString urlNorm = normalizeSourceUrl(url);
     for (unsigned i = 0; i < kBuiltinSourceCount; ++i) {
         // 保持现有：下载安装写入的 url 元数据
@@ -4390,7 +4418,7 @@ QString StickerStore::builtinSourceDiag(const QString& packId,
         return set;
     }();
 
-    const QString url = packMeta(packId).value(QStringLiteral("url")).toString();
+    const QString url = qVariantMapValue(packMeta(packId), QStringLiteral("url")).toString();
     const QString urlNorm = normalizeSourceUrl(url);
     const bool urlHit = !url.isEmpty() && s_builtinUrls.contains(urlNorm);
 

@@ -1,6 +1,14 @@
 #include "imageaiutil.h"
 #include "davobfus.h"
 
+// ⚠ 本头必须在下面的 QT3_BUILD 分支**之外**include：本文件有一批
+//   QT3/Qt6 共用的代码（如 parseChoices/parseHorde/redirect 解析），
+//   里面调用 qTrimmed()。只放在 QT3_BUILD 分支里的话，Qt6 编译会报
+//   "'qTrimmed' was not declared in this scope"（Qt6 构建实证）。
+//   qTrimmed 自身跨版本可用：Qt3 → QString::stripWhiteSpace()，
+//   Qt4+ → 原生 QString::trimmed()（qstring_shim.h:563-567）。
+#include "qstring_shim.h"
+
 #ifdef QT3_BUILD
 #include <qurl.h>
 #include <qfile.h>
@@ -10,7 +18,6 @@
 #include "qjson_shim.h"
 #include "qnam_shim.h"
 #include "qconnect_slots.h"
-#include "qstring_shim.h"
 #include "qurl_shim.h"
 #include "qimagereader_shim.h"
 #include "qbytearray_shim.h"
@@ -591,15 +598,14 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
                     const QJsonArray choices =
                         body.value(QStringLiteral("choices")).toArray();
                     if (!choices.isEmpty()) {
-                        desc = choices.at(0).toObject()
+                        desc = qTrimmed(choices.at(0).toObject()
                                    .value(QStringLiteral("message")).toObject()
-                                   .value(QStringLiteral("content")).toString()
-                                   .trimmed();
+                                   .value(QStringLiteral("content")).toString());
                     }
                 }
                 const QString apiErr =
-                    body.value(QStringLiteral("error")).toObject()
-                        .value(QStringLiteral("message")).toString().trimmed();
+                    qTrimmed(body.value(QStringLiteral("error")).toObject()
+                        .value(QStringLiteral("message")).toString());
 
                 qInfo().noquote() << QStringLiteral(
                     "[ImageAiUtil] req=%1 backend=%2 finished "
@@ -908,7 +914,7 @@ void ImageAiUtil::startAiHorde()
                     QJsonDocument::fromJson(data).object();
                 const QString jobId = body.value(QStringLiteral("id")).toString();
                 const QString apiErr =
-                    body.value(QStringLiteral("message")).toString().trimmed();
+                    qTrimmed(body.value(QStringLiteral("message")).toString());
 
                 qInfo().noquote() << QStringLiteral(
                     "[ImageAiUtil] req=%1 backend=AI Horde submitted "
@@ -990,10 +996,9 @@ void ImageAiUtil::pollAiHorde()
                 const QJsonArray forms =
                     body.value(QStringLiteral("forms")).toArray();
                 if (!forms.isEmpty()) {
-                    caption = forms.at(0).toObject()
+                    caption = qTrimmed(forms.at(0).toObject()
                                   .value(QStringLiteral("result")).toObject()
-                                  .value(QStringLiteral("caption")).toString()
-                                  .trimmed();
+                                  .value(QStringLiteral("caption")).toString());
                 }
 
                 if (reply->error() != QNetworkReply::NoError) {
@@ -1080,12 +1085,12 @@ void ImageAiUtil::issueGet(const QUrl& url)
                         target = reply->url().resolved(target);
                     }
 #endif
-                    if (isDescription(QUrlQuery(target).queryItemValue(
-                            QStringLiteral("q")).trimmed())) {
+                    if (isDescription(qTrimmed(QUrlQuery(target).queryItemValue(
+                            QStringLiteral("q"))))) {
                         m_reply = nullptr;
                         emit descriptionReady(done.requestId, done.imageUrl,
-                            QUrlQuery(target).queryItemValue(
-                                QStringLiteral("q")).trimmed());
+                            qTrimmed(QUrlQuery(target).queryItemValue(
+                                QStringLiteral("q"))));
                         finishActive();
                         return;
                     }
@@ -1132,8 +1137,8 @@ void ImageAiUtil::handleRedirect(QNetworkReply* reply, const QUrl& target)
 #else
     if (!resolved.isEmpty()) {
 #endif
-        desc = QUrlQuery(resolved).queryItemValue(
-            QStringLiteral("q")).trimmed();
+        desc = qTrimmed(QUrlQuery(resolved).queryItemValue(
+            QStringLiteral("q")));
     }
     logHop(done.requestId, m_hopCount, "redirect-parse",
            resolved, QStringLiteral("q=%1 desc=%2")

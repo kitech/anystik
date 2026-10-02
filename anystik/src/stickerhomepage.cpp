@@ -1,4 +1,7 @@
 #include "stickerhomepage.h"
+
+// 公共代码里用到 qTrimmed()（QT3/Qt6 都要编），故放在版本守卫之外。
+#include "qstring_shim.h"
 #include "stickerlist.h"
 #include "stickerpreviewoverlay.h"
 #include "imagetmpuploader.h"
@@ -194,7 +197,7 @@ public:
                 if (requestId != m_autoReqId) {
                     return;
                 }
-                const QString text = desc.trimmed().left(140);
+                const QString text = qTrimmed(desc).left(140);
                 m_editInput->setText(text);
                 m_editCount->setText(tr("%1/%2").arg(text.size()).arg(140));
                 resetAutoBusy();
@@ -281,7 +284,7 @@ public:
     // 保存取值：主输入内容（空 → 空串 → 清除 desc）
     QString validText() const
     {
-        return m_editInput ? m_editInput->text().trimmed() : QString();
+        return m_editInput ? qTrimmed(m_editInput->text()) : QString();
     }
 
 protected:
@@ -440,9 +443,9 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
         }
         const QSettings dav;
         trace_settings("home-dav-read");
-        QString davUrl  = dav.value("davUrl").toString().trimmed();
-        QString davUser = dav.value("davUser").toString().trimmed();
-        QString davPass = dav.value("davPass").toString().trimmed();
+        QString davUrl  = qTrimmed(dav.value("davUrl").toString());
+        QString davUser = qTrimmed(dav.value("davUser").toString());
+        QString davPass = qTrimmed(dav.value("davPass").toString());
 
         auto validDav = [](const QString& u) {
             const QUrl url(u);
@@ -528,7 +531,7 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
     connect(m_searchLine, &MySearchLine::textChanged, this,
         [this]() { m_searchDebounce.start(350); });
     connect(&m_searchDebounce, &QTimer::timeout, this,
-        [this]() { doSearch(m_searchLine->text().trimmed()); });
+        [this]() { doSearch(qTrimmed(m_searchLine->text())); });
 
     // ── 分组 Tab ──
     auto* tabBarBox = new QskLinearBox(Qt::Horizontal, layout);
@@ -694,7 +697,7 @@ void StickerHomePage::refreshTabBar()
 
 void StickerHomePage::onTabChanged(int index)
 {
-    if (!m_searchLine->text().trimmed().isEmpty()) {
+    if (!qTrimmed(m_searchLine->text()).isEmpty()) {
         return; // 搜索状态优先
     }
 
@@ -712,7 +715,7 @@ void StickerHomePage::onTabChanged(int index)
 
 void StickerHomePage::onPackComboChanged(int index)
 {
-    if (!m_searchLine->text().trimmed().isEmpty()) {
+    if (!qTrimmed(m_searchLine->text()).isEmpty()) {
         return; // 搜索状态优先
     }
     if (index < 0 || index >= m_comboPacks.size()) {

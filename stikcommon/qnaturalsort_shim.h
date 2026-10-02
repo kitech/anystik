@@ -61,6 +61,45 @@ inline QChar qNatSortNextChar(const QString& s, int location)
     return (location < s.length()) ? s.at(location) : QChar();
 }
 
+// ⚠【不能用 localeAwareCompare】Qt3 的 QString::localeAwareCompare() 查
+//   当前 LC_COLLATE，而 QApplication 构造会 setlocale(LC_ALL, "") 把
+//   locale 从 "C" 换成用户 locale（实测 /opt/qt338sh + en_US.UTF-8）：
+//     localeAwareCompare(QChar('A'), QChar('a'))
+//       C locale      → -32   （'A' < 'a'，码位序）
+//       en_US.UTF-8   → +5    （'A' > 'a'，glibc collation 小写在前）
+//   后果是 naturalCompare 的结果**取决于进程是否建过 QApplication**，
+//   同一批贴纸在 GUI 里和命令行/测试里的排序不同 —— 顺序不稳定且难复现。
+//   vendor（Qt5/6）也用 localeAwareCompare，故 Qt6 侧同样有此性质；本垫片
+//   改用码位比较，让结果与 locale 无关、与 Qt3 的 QString::compare 同源。
+//   对 ASCII 名称两种排序一致；差异只出现在 locale collation 与码位序
+//   不符的字符上（如大写/小写、CJK 之外的符号）。
+inline int qNatSortCompareCaseSensitive(const QString& a, const QString& b)
+{
+    const int n = (a.length() < b.length()) ? a.length() : b.length();
+    for (int i = 0; i < n; ++i) {
+        const uint ua = a.at(i).unicode();
+        const uint ub = b.at(i).unicode();
+        if (ua != ub) return (ua < ub) ? -1 : 1;
+    }
+    if (a.length() == b.length()) return 0;
+    return (a.length() < b.length()) ? -1 : 1;
+}
+
+// 单字符比较：cs=false 时先 lower()，然后按码位比。
+// 返回 -1/0/1（调用方 normalize 后直接 return）。
+inline int qNatSortCompareChars(QChar a, QChar b, bool cs)
+{
+    if (!cs) {
+        a = a.lower();      // Qt3 只有 lower()，无 toLower()/isLower()
+        b = b.lower();
+    }
+    const uint ua = a.unicode();
+    const uint ub = b.unicode();
+    if (ua < ub) return -1;
+    if (ua > ub) return 1;
+    return 0;
+}
+
 inline int QNaturalSort::naturalCompare(const QString& s1, const QString& s2,
                                         bool cs)
 {
@@ -108,21 +147,37 @@ inline int QNaturalSort::naturalCompare(const QString& s1, const QString& s2,
                 return currentReturnValue;
         }
 
-        if (!cs) {
-            c1 = c1.lower();       // Qt3 只有 lower()，无 isLower()/toLower()
-            c2 = c2.lower();
-        }
-        // Qt3 的 localeAwareCompare 无 (QChar,QChar) 重载（qstring.h:686），
-        // 用 QString 包裹单字符是等价路径。
-        int r = QString(c1).localeAwareCompare(QString(c2));
-        if (r < 0)
-            return -1;
-        if (r > 0)
-            return 1;
+        // ⚠ 按码位比，不走 localeAwareCompare —— 原因见
+        //   qNatSortCompareChars 上方的注释（locale 会让结果不稳定）。
+        const int r = qNatSortCompareChars(c1, c2, cs);
+        if (r != 0)
+            return r;
     }
-    // The two strings are the same (02 == 2) so fall back to the normal sort
+    // ⚠ vendor 源码此处原注释写的是 "The two strings are the same
+    //   (02 == 2) so fall back to the normal sort"，**实测与该说法不符**，
+    //   已按实测更正（2026-10，Qt3.5 /opt/qt338sh 隔离探针）：
+    //     naturalCompare("02","2")   = -2
+    //     naturalCompare("002","2")  = -2
+    //     naturalCompare("a02","a2") = -2
+    //   数字段比较确实跳过了前导 0（currentReturnValue 保持 0），但逐字符
+    //   循环此时已到末尾，于是落到下面这行；而 **Qt3 的 QString::compare
+    //   不归一化到 -1/0/1**，返回首个差异字符的码位差（'0'=0x30 vs
+    //   '2'=0x32 → -2）。所以最终定序是 "02" < "2"，并非相等。
+    //   这对调用方无影响：stickerstore 把它交给 std::stable_sort，排序只
+    //   关心 <0/==0/>0，-2 与 -1 等价。但**返回值可能超出 [-1,1]**，
+    //   使用方不可写 CHECK_EQ(result, -1) 之类断言。
+    //   回归用例见 test_qnaturalsort_shim.cpp 的「数字段跳过前导 0」。
+    //
+    // ⚠ cs=true 必须走 qNatSortCompareCaseSensitive，**不能**写
+    //   QString::compare(s1, s2)：vendor（Qt5/6）用的是
+    //     return QString::compare(s1, s2, cs);      // 3 参数，带标志
+    //   而 **Qt3 的 QString::compare 只有两参版本**（qstring.h:682-683：
+    //     static int compare(const QString&, const QString&) { return s1.compare(s2); }
+    //   ）—— 3 参数重载是 Qt4 才加的，且 Qt3 的两参版**永远不区分大小写**。
+    //   照抄 vendor 会让 cs=true 静默退化成不区分大小写：
+    //   实测 cs=true 时 "ABC" 与 "abc" 走到这里会返回 0（视为相等）。
     if (cs)
-        return QString::compare(s1, s2);
+        return qNatSortCompareCaseSensitive(s1, s2);
     return QString::compare(s1.lower(), s2.lower());
 }
 

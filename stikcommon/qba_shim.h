@@ -115,6 +115,13 @@ inline const char* qbaConstData(const QByteArray& ba) { return ba.constData(); }
 // 非 const 版取可写指针。Qt3/Qt4+ 的 QMemArray/QByteArray 都有 char* data()。
 inline char*       qbaData(QByteArray& ba)             { return ba.data(); }
 
+// ASCII 空白判定：QChar::isSpace 的 ASCII 部分（QByteArray 是字节序列，
+// 不存在码点概念，故只认这 6 个）。**不含 0** —— 内嵌 NUL 不是空白。
+inline bool qbaIsAsciiSpace(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
+}
+
 // indexOf：Qt3 用 QMemArray::find(const T&, uint)——返回索引、找不到 -1，
 // 与 Qt4+ QByteArray::indexOf 语义一致。
 #if QT_VERSION < 0x040000
@@ -561,6 +568,31 @@ inline QSet<QByteArray> qByteArraySetBuildAscii(const char* const* items, int co
     for (int i = 0; i < count; ++i)
         s.insert(QByteArray(qbaFromRaw(items[i], (int)strlen(items[i]))));
     return s;
+}
+
+// ── qTrimmed(const QByteArray&) ────────────────────────────────────────
+// 与 qstring_shim.h 里的 qTrimmed(const QString&) 构成重载对，共用同一个
+// 调用点名字（36 处 QString/QByteArray 混用，不必先判断类型）。
+// 取代原先 qbytearray_shim.h 里的 `#define trimmed() stripWhiteSpace()` ——
+// 那个宏会把整个 TU 的 `.trimmed()` 无差别替换（含第三方头与注释里的
+// 字样），改写调用点语法而非补 API，理由详见 qstring_shim.h 同名函数处。
+//
+// ⚠⚠ Qt3 的 QByteArray **没有** stripWhiteSpace()，也不能用 trimmed()：
+//   它就是裸的 `typedef QMemArray<char> QByteArray`（qcstring.h:105），
+//   全部公开构造只有 QByteArray() 与 QByteArray(int)（:101/:102），
+//   一个字符串方法都没有（QCString 才有 latin1/ascii/utf8）。
+//   故只能自己按字节切。空白集与 Qt 的 ASCII 空白一致：
+//   空格 / \t / \n / \v / \f / \r（QChar::isSpace 的 ASCII 部分）。
+//   内嵌 0 字节不是空白，会被保留 —— 与 Qt4+ QByteArray::trimmed() 一致。
+inline QByteArray qTrimmed(const QByteArray& b)
+{
+    int begin = 0;
+    int end = b.size();
+    while (begin < end && qbaIsAsciiSpace(b.at(begin))) ++begin;
+    while (end > begin && qbaIsAsciiSpace(b.at(end - 1))) --end;
+    if (begin == 0 && end == b.size())
+        return b;                       // 无需裁剪，直接返回（QMemArray 无隐式共享）
+    return qbaMid(b, begin, end - begin);
 }
 
 #endif // QLSTIK_QBA_SHIM_H

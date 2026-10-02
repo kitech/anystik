@@ -1,5 +1,8 @@
 #include "phoneqpage.h"
 #include "phonedb.h"
+
+// 公共代码里用到 qTrimmed()（QT3/Qt6 都要编），故放在版本守卫之外。
+#include "qstring_shim.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
@@ -103,7 +106,7 @@ void PhoneQPage::doQuery()
         return;
     }
 
-    const QString raw = m_numberEdit->text().trimmed();
+    const QString raw = qTrimmed(m_numberEdit->text());
     QString digits = raw;
     digits.remove(QRegularExpression(QString::fromUtf8("\\D")));
     if (digits.size() != 11) {

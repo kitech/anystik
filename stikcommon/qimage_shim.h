@@ -33,6 +33,9 @@
 #include <qimage.h>
 #include <qcstring.h>
 #include <qsize.h>
+#include <qpainter.h>
+#include <qcolor.h>
+#include "qglobaltype_shim.h"
 #include <string.h>
 
 // Qt3 32 位 QImage 内存是 BGBA（见文件头实测），转成 RGBA 字节序。
@@ -124,9 +127,24 @@ inline QImage qImageNew32(int w, int h)
 // 填全透明。Qt3 无 Qt::transparent（随 Qt4.6 的 QColor alpha 引入），也无
 // QColor::setAlpha（qcolor.h 只有三参构造 82 行与 qAlpha 60 行），
 // 只能靠 qRgba 的 alpha 字节写 0。
+//
+// ⚠ Qt3 的 QImage::fill(QRgb) **会丢弃 alpha 字节** —— 实测 /opt/qt338sh：
+//     im.setAlphaBuffer(true);
+//     im.fill(qRgba(0x11,0x22,0x33,0xFF));
+//     im.bits() 得 `33 22 11 00`（alpha 字节为 0），qAlpha(pixel(0,0)) 也为 0；
+//     而同一颜色经 setPixel 写入得 `33 22 11 FF`（alpha 保留）。
+//   qRgba 本身没问题（实测 qRgba(...,0xFF) == 0xFF112233，alpha 在位），
+//   是 fill() 内部对 32 位带 alpha 图按 QRgb（无 alpha 语义）处理。
+//   本函数填的 4 个分量全为 0，故 fill 丢 alpha **恰好**得出正确结果 ——
+//   但这是巧合，若将来改成填非零 alpha 必须改用逐像素 setPixel。
+//   故此处显式走 setPixel 循环，与上面的已知行为一致而不依赖巧合。
 inline void qImageFillTransparent(QImage& im)
 {
-    im.fill(qRgba(0, 0, 0, 0));
+    if (im.isNull()) return;
+    const int w = im.width(), h = im.height();
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            im.setPixel(x, y, qRgba(0, 0, 0, 0));
 }
 
 // 两个图是否像素完全一致（替代 memcmp(constBits()) 判重）。
@@ -198,6 +216,8 @@ inline int qImageFormatTag(const QImage& im)
 #else
 
 #include <QImage>
+#include <QColor>
+#include <QPainter>
 
 inline QByteArray qImageRgbaBytes(const QImage& im)
 {
@@ -251,6 +271,42 @@ inline QImage qImageConvertToFormat(const QImage& im, qImageFormat fmt)
 inline int qImageFormatTag(const QImage& im)
 {
     return im.isNull() ? -1 : int(im.format());
+}
+
+// ── 以下四个在 Qt3 段有手写实现，Qt6 段须同样提供 ──────────────────────
+// 否则调用点（makeTgsPlaceholder、stickerstore 的贴纸抠图路径）会报
+// "was not declared in this scope" —— 它们是共用代码，不按版本分叉。
+
+// Qt3 无 alpha 通道（qcolor.h 只有 QColor(r,g,b)），实现里 Q_UNUSED(a) 丢弃；
+// Qt6 原生就是 RGBA，alpha 照传。
+inline QColor qColorRgba(int r, int g, int b, int a)
+{
+    return QColor(r, g, b, a);
+}
+
+// Qt3 无 RenderHint，实现是 no-op；Qt6 原生开抗锯齿。
+inline void qPainterSetAntialiasing(QPainter& p)
+{
+    p.setRenderHint(QPainter::Antialiasing, true);
+}
+
+// ⚠ 半径单位不同，别照抄：Qt6 的 drawRoundedRect 收的是**半径** qreal，
+//   而 Qt3 的 drawRoundRect(const QRect&, int, int)（qpainter.h:203）第二个
+//   参数是「**直径**」像素。故 Qt3 侧实现是 int(rx*2)。Qt6 直接透传。
+inline void qPainterDrawRoundedRect(QPainter& p, const QRect& r,
+                                     qreal rx, qreal ry)
+{
+    p.drawRoundedRect(r, rx, ry);
+}
+
+// 取第 y 行扫描线（RGBA8888 序）。Qt6 有原生 bytesPerLine()/scanLine()，
+// 不用像 Qt3 那样先整图取字节再 memcpy 切片。
+inline QByteArray qImageScanlineRgba(const QImage& im, int y)
+{
+    if (im.isNull() || y < 0 || y >= im.height()) return QByteArray();
+    const QImage c = im.convertToFormat(QImage::Format_RGBA8888);
+    return QByteArray(reinterpret_cast<const char*>(c.constScanLine(y)),
+                      int(c.bytesPerLine()));
 }
 
 #endif // QT_VERSION < 0x040000

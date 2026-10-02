@@ -19,6 +19,8 @@
 //
 // 只在 QT3_BUILD 编译单元 include；此时 Qt 原生头已预处理完毕，宏替换不影响它们。
 
+#ifdef QT3_BUILD
+
 #include <qvaluelist.h>
 #include <qptrlist.h>  // 仅为占住 include guard，防止后续 Qt 头再次 #define QList
 
@@ -132,11 +134,23 @@ T qListTakeFirst(QList<T>& list)
 template <class T>
 void qListReserve(QList<T>& list, int n)
 {
-#if QT_VERSION < 0x040000
     (void)list; (void)n;     // Qt3：no-op，保持 size 不变
-#else
-    list.reserve(n);
-#endif
 }
+
+#else
+
+// Qt4+ 用原生 QList。本头仍需引入它，否则依赖方在本头加守卫后就再也拿不到
+// QList 定义。守卫放在头文件内部而非各调用点，是为了杜绝「某个 unguarded 的
+// include 点把 Qt6 原生 QList 顶掉」这种静默破坏（qclipboard_shim.h /
+// davbisync.h / qnam_shim.h / qzipreader_shim.h 目前都是无守卫 include）。
+#include <QList>
+
+template <class T>
+void qListReserve(QList<T>& list, int n)
+{
+    list.reserve(n);
+}
+
+#endif // QT3_BUILD
 
 #endif // QLSTIK_QLIST_SHIM_H

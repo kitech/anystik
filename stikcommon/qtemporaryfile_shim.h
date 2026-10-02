@@ -8,6 +8,11 @@
 //     的唯一文件名；open() 才真正创建文件；fileName() 返回该路径；
 //   * 默认 autoRemove=true，即 QFile 析构时删掉自己创建的文件；
 //     setAutoRemove(false) 关掉该行为。
+//   * **只有本对象挑出来的名字**才算「自己创建的」：调用方用 setFileName()
+//     指定的名字（Qt3 QFile 的改名适配，原生 QTemporaryFile 无此方法）
+//     归调用方所有，析构绝不删 —— 锁定该行为的是 m_ownsName 标志，
+//     用例见 test_qtemporaryfile_shim.cpp:「setFileName 后 open，析构不删
+//     调用方的文件」。
 //
 // Qt3 侧实现：手工在模板的 XXXXXX 段填入「pid + 时间戳 + 重试序号 + 随机数」，
 // 用 QFile::exists() 逐个探测直到挑到不存在的名字，再交 QFile::open() 创建。
@@ -41,6 +46,7 @@ public:
         m_templateName = templateName;
         m_autoRemove = true;
         m_created = false;
+        m_ownsName = false;
     }
 
     QTemporaryFile(const QString& templateName, bool autoRemoveUnused)
@@ -48,6 +54,7 @@ public:
         m_templateName = templateName;
         m_autoRemove = autoRemoveUnused;
         m_created = false;
+        m_ownsName = false;
     }
 
     ~QTemporaryFile()
@@ -82,7 +89,10 @@ public:
         if (!QFile::open(mode)) {
             return false;
         }
-        m_created = true;
+        // 只认「名字是本对象挑出来的」那份文件。setFileName() 指定的名字属于
+        // 调用方，析构不得删 —— Qt 原生 QTemporaryFile 根本没有 setFileName，
+        // 不会有这种歧义，是 Qt3 QFile 改名适配带进来的（见成员说明）。
+        m_created = m_ownsName;
         return true;
     }
 
@@ -98,6 +108,7 @@ public:
             const QString candidate = fillTemplate(xPos, attempt);
             if (!QFile::exists(candidate)) {
                 setName(candidate);
+                m_ownsName = true;          // 从此刻起这个名字归本对象管
                 return true;
             }
         }
@@ -129,7 +140,12 @@ public:
     QByteArray readAll() { return QIODevice::readAll(); }
 
     QString fileName() const { return name(); }
-    void setFileName(const QString& n) { setName(n); }
+
+    // Qt3 QFile 的改名适配（Qt4+ 用 fileName/setFileName）。⚠ 注意：Qt 原生
+    // QTemporaryFile **没有** setFileName（只有 setFileTemplate）。故这里显式
+    // 把所有权标记清掉 —— 否则「setFileName 到调用方自己的文件 → open() →
+    // 析构」会把那个文件删掉，而本对象从未创建过它。
+    void setFileName(const QString& n) { setName(n); m_ownsName = false; }
 
 private:
     QString fillTemplate(int xPos, int attempt) const
@@ -156,7 +172,8 @@ private:
 
     QString m_templateName;
     bool m_autoRemove;
-    bool m_created;
+    bool m_created;         // 本对象创建了当前名字那份文件 → 析构可删
+    bool m_ownsName;        // 当前名字是 createUniqueFileName() 挑出来的（未经 setFileName）
 };
 
 #endif // QT_VERSION < 0x040300

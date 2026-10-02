@@ -1,4 +1,11 @@
 #include "ipinfopage.h"
+
+// 公共代码里用到 qTrimmed()（此处是 QByteArray 重载：qTrimmed(reply->readAll())），
+// QT3/Qt6 都要编，故 qba_shim.h 必须放在版本守卫之外。qba_shim.h 自带
+// QByteArrayLiteral 等 Qt3 侧 typedef，会一并引入 qbytearray_shim.h。
+#include "qba_shim.h"
+#include "qstring_shim.h"
+
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
@@ -160,7 +167,7 @@ void IPInfoPage::fetchExits()
         m_replies.push_back(reply);
         connect(reply, &QNetworkReply::finished, this, [this, reply, i]() {
             const bool ok = reply->error() == QNetworkReply::NoError;
-            const QByteArray body = ok ? reply->readAll().trimmed() : QByteArray();
+            const QByteArray body = ok ? qTrimmed(reply->readAll()) : QByteArray();
             const QString ip = body.isEmpty()
                 ? tr("获取失败")
                 : QString::fromLatin1(body);

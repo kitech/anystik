@@ -1,4 +1,7 @@
 #include "shareintentreceiver.h"
+
+// 公共代码里用到 qTrimmed()（QT3/Qt6 都要编），故放在版本守卫之外。
+#include "qstring_shim.h"
 #include "stickerstore.h"
 #include "androidutils.h"
 #include "dialogpopup.h"
@@ -86,7 +89,7 @@ void importPendingShares(const PendingShareMeta& meta)
     //   无落盘 + 非图片意图 → 纯文本分享（暂不支持文本导入）
     //   无落盘 + 图片意图   → 有图但读取失败（分享内容未能读取）
     if (meta.files.isEmpty()) {
-        const QString m = meta.mime.trimmed().toLower();
+        const QString m = qTrimmed(meta.mime).toLower();
         const bool imageIntent = m.startsWith("image/")
             || m.startsWith("application/")
             || m == "text/gif"

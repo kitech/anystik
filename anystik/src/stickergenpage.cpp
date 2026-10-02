@@ -1,4 +1,7 @@
 #include "stickergenpage.h"
+
+// 公共代码里用到 qTrimmed()（QT3/Qt6 都要编），故放在版本守卫之外。
+#include "qstring_shim.h"
 #include "toastpopup.h"
 #include "menuoverlay.h"
 #include "myscrollarea.h"
@@ -333,7 +336,7 @@ void StickerGenPage::startGenerate()
         return;
     }
 
-    const QString prompt = m_promptInput->text().trimmed();
+    const QString prompt = qTrimmed(m_promptInput->text());
     if (prompt.isEmpty()) {
         m_statusRow->setText(tr("请输入提示词"));
         return;
@@ -709,7 +712,7 @@ void StickerGenPage::saveResultAs()
 
 void StickerGenPage::pushHistory(const QString& prompt, quint64 seed)
 {
-    const QString p = prompt.trimmed();
+    const QString p = qTrimmed(prompt);
     if (p.isEmpty())
         return;
     QSet<QString> seen;

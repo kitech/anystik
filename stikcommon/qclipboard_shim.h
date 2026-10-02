@@ -121,13 +121,30 @@ public:
     {
         m_urls = urls;
         // 同时也发布为 text/uri-list（标准之一行一个 URI；本地文件写成 file:// 绝对路径）。
+        //
+        // ⚠ 这里必须走 utf8()，不能图省事用 latin1() + QString::length()。
+        //   两个错叠在一起（实测 /opt/qt338sh，见 test_qclipboard_shim.cpp
+        //   「setUrls: 非 ASCII 路径必须写成合法 UTF-8」）：
+        //     ① QString::latin1() 把非 Latin1 码点压成低字节 —— 中文路径
+        //        /tmp/贴纸.png 被写成 file:///tmp/??.png，路径直接丢失；
+        //     ② QString::length() 是 **UTF-16 码元数**，不是字节数，
+        //        拿它当拷贝长度对非 ASCII 必然错位。
+        //   本进程内读写都走 latin1 时错误「自洽」（往返看着正常），但
+        //   text/uri-list 是跨进程契约（RFC 2483），别的程序/文件管理器按
+        //   UTF-8 解析，拿到的就是坏路径 —— 中文文件名在本应用是常态。
         QByteArray list;
         for (int i = 0; i < urls.count(); ++i) {
             const QUrl& u = urls.at((uint)i);
             QString s = u.isLocalFile()
                     ? (QString("file://") + qUrlToLocalFile(u))
                     : u.toString();
-            qBaAppendBytes(list, s.latin1(), s.length());
+            // Qt3 的 QString::utf8() 返回 QCString：length() 是字节数，
+            // 而 size() 是 length()+1（**含尾 NUL**，实测 /opt/qt338sh：
+            // QCString("abc").size()==4），拿 size() 拷贝会把那个 NUL
+            // 一起写进 text/uri-list，在 CRLF 前多出一个 0x00。
+            // latin1() 返回的则是裸 const char*，既丢高位字节又无从取长度。
+            const QCString utf8Bytes = s.utf8();
+            qBaAppendBytes(list, utf8Bytes, (int)utf8Bytes.length());
             qBaAppendBytes(list, "\r\n", 2);
         }
         setData(QString("text/uri-list"), list);
@@ -145,7 +162,14 @@ public:
             const bool eol = (i == n) || p[i] == '\n' || p[i] == '\r';
             if (!eol) continue;
             if (i > start) {
-                QString line = QString::fromLatin1(p + start, i - start);
+                // ⚠ 必须 fromUtf8：text/uri-list 是跨进程契约（RFC 2483），
+                //   别的程序（文件管理器、Qt5/6 应用）按 UTF-8 写 URI，
+                //   用 fromLatin1 解会把多字节序列拆成单字节码点 —— 中文
+                //   文件名直接变乱码。本进程写入侧已统一走 utf8()，
+                //   这里对称解码，往返才一致。
+                //   按字节切行是安全的：UTF-8 多字节序列的每个字节都 ≥ 0x80，
+                //   不可能等于 '\r'/'\n'，故不会切在序列中间。
+                QString line = QString::fromUtf8(p + start, i - start);
                 line = line.stripWhiteSpace();
                 if (!line.isEmpty() && !line.startsWith(QString("#")))
                     out.append(QUrl(line));
@@ -177,6 +201,9 @@ public:
     void clear() { m_data.clear(); m_urls.clear(); m_image = QImage(); m_hasImage = false; m_keysDirty = true; }
 
     // ── QMimeSource 接口 ──
+    // ⚠ 下面三处与 mimeData() 里都用 fromUtf8/fromUtf8 字节，不碰 fromLatin1：
+    //   MIME 名按约定是 ASCII（fromUtf8 与 latin1 等价），但本仓规范禁止
+    //   用 latin1 类函数做文本转换（AGENTS.md），统一走 UTF-8 一条路。
     const char* format(int n = 0) const
     {
         rebuildKeys();
@@ -185,11 +212,11 @@ public:
     }
     bool provides(const char* mimeType) const
     {
-        return m_data.contains(QString::fromLatin1(mimeType));
+        return m_data.contains(QString::fromUtf8(mimeType));
     }
     QByteArray encodedData(const char* mimeType) const
     {
-        return data(QString::fromLatin1(mimeType));
+        return data(QString::fromUtf8(mimeType));
     }
 
 private:
@@ -199,7 +226,12 @@ private:
         m_keys.clear();
         for (QMap<QString, QByteArray>::ConstIterator it = m_data.begin();
              it != m_data.end(); ++it)
-            m_keys.append(QCString(it.key().latin1()));
+        {
+            // ⚠ 用 utf8() 而非 latin1()：Qt3 的 latin1() 返回裸 const char*
+            //   （见 AGENTS.md），既丢高位字节也拿不到长度；QMimeSource::format()
+            //   要的是 const char*，故必须存成 QCString 再取 .data()。
+            m_keys.append(QCString(it.key().utf8()));
+        }
         m_keysDirty = false;
     }
 
@@ -226,7 +258,9 @@ public:
         if (src) {
             for (int i = 0; src->format(i); ++i) {
                 const char* f = src->format(i);
-                m_read.setData(QString::fromLatin1(f), src->encodedData(f));
+                // ⚠ fromUtf8 而非 fromLatin1：本仓规范禁止 latin1 转换
+                //   （AGENTS.md），MIME 名按约定 ASCII 时两者等价。
+                m_read.setData(QString::fromUtf8(f), src->encodedData(f));
             }
         }
         // 若源未直接给出 text/uri-list 但存在 URL 语义，交由调用方的 image() 兜底即可。
