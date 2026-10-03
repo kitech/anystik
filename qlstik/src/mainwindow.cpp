@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 
 #include "buildinfo.h"
+#include "version_config.h"
 #include "config.h"
 #include "CustomTitleBar.h"
 #include "FramelessHelper.h"
@@ -36,33 +37,24 @@ static const char* const kTopMenuKeys[4] = {
 // 三套语言代码，与 titlebar 语言下拉索引一一对应
 static const char* const kLangCodes[3] = { "zh-CN", "zh-TW", "en-US" };
 
-// ═══════════════ Qt3/Qt4+ 组合框差异 ═══════════════
-// Qt3: insertItem(text, index) / setCurrentItem / currentItem
-// Qt4+: insertItem(index, text) / setCurrentIndex / currentIndex
-static void comboAddItem(QComboBox* cb, const QString& text)
+// ═══════════════ 标题栏下拉按钮（语言 / 外观 / 深色）═══════════════
+// 三个 QPushButton，30×30 与 CustomTitleBar 的 ─ □ ✕ 控制按钮同尺寸；只显示符号，
+// 点击弹菜单；tooltip 由 updateAppearanceTooltips() 填「功能 + 当前值」。
+// 用 QPushButton 而非 QToolButton：双端都能挂菜单（Qt3 setPopup / Qt4+ setMenu），
+// 且与右侧控制按钮同类，尺寸/外观天然一致（Qt3 QToolButton 的 popup 不响应单击）。
+static QPushButton* makeTitleMenuButton(QWidget* parent, const QString& glyph)
 {
-#ifdef QT3_BUILD
-    cb->insertItem(text, cb->count());
-#else
-    cb->insertItem(cb->count(), text);
-#endif
+    QPushButton* b = new QPushButton(glyph, parent);
+    b->setFixedSize(30, 30);
+    return b;
 }
 
-static void comboSetCurrent(QComboBox* cb, int index)
+static void attachTitleMenu(QPushButton* btn, MenuWidget34* menu)
 {
 #ifdef QT3_BUILD
-    cb->setCurrentItem(index);
+    btn->setPopup(menu);
 #else
-    cb->setCurrentIndex(index);
-#endif
-}
-
-static int comboCurrent(const QComboBox* cb)
-{
-#ifdef QT3_BUILD
-    return cb->currentItem();
-#else
-    return cb->currentIndex();
+    btn->setMenu(menu);
 #endif
 }
 
@@ -97,9 +89,12 @@ MainWindow::MainWindow(QWidget* parent)
     , pageStack(0)
     , pageMgr(0)
     , statusLabel(0)
-    , langCombo(0)
-    , styleCombo(0)
-    , darkCheck(0)
+    , m_langBtn(0)
+    , m_styleBtn(0)
+    , m_darkBtn(0)
+    , m_langMenu(0)
+    , m_styleMenu(0)
+    , m_darkMenu(0)
     , demoLeftLabel(0)
     , demoLeftBtn(0)
     , demoRightBtn(0)
@@ -124,6 +119,7 @@ MainWindow::MainWindow(QWidget* parent)
     buildCentralWidget();
     buildAppearancePanel();
     buildMenus();
+    buildAppearanceMenus();
     buildTray();
 
     // 首帧门：捕获本窗口后代的首个 Paint（见 eventFilter；门命中后即移除）。
@@ -251,25 +247,14 @@ void MainWindow::buildAppearancePanel()
     QWidget* panel = new QWidget(titleBar);
     QBoxLayout* lay = qNewBoxLayout(panel, QBoxLayout::LeftToRight, 2, 0);
 
-    langCombo = new QComboBox(panel);
-    langCombo->setFixedHeight(30);
-    fillLangCombo();
-    lay->addWidget(langCombo, 0);
+    m_langBtn = makeTitleMenuButton(panel, qFromUtf8("文"));
+    lay->addWidget(m_langBtn, 0);
+    m_styleBtn = makeTitleMenuButton(panel, qFromUtf8("饰"));
+    lay->addWidget(m_styleBtn, 0);
+    m_darkBtn = makeTitleMenuButton(panel, qFromUtf8("☾"));
+    lay->addWidget(m_darkBtn, 0);
 
-    styleCombo = new QComboBox(panel);
-    styleCombo->setFixedHeight(30);
-    fillStyleCombo();
-    lay->addWidget(styleCombo, 0);
-
-    darkCheck = new QCheckBox(_("theme_dark"), panel);
-    darkCheck->setFixedHeight(30);
-    qSetChecked(darkCheck, ThemeManager::isDarkMode());
-    lay->addWidget(darkCheck, 0);
-
-    QObject::connect(langCombo, SIGNAL(activated(int)), this, SLOT(onTitleUilang(int)));
-    QObject::connect(styleCombo, SIGNAL(activated(int)), this, SLOT(onTitleStyle(int)));
-    QObject::connect(darkCheck, SIGNAL(toggled(bool)), this, SLOT(onTitleDark(bool)));
-
+    // 弹出菜单在 buildAppearanceMenus() 里建并挂上（那里必须在 buildMenus() 之后）
     titleBar->addTitleWidget(panel, 0);
 }
 
@@ -288,27 +273,6 @@ int MainWindow::styleIndexOf(const QString& styleId)
         if (styleId == qFromUtf8(styles[i].id)) { return i; }
     }
     return 0;
-}
-
-void MainWindow::fillLangCombo()
-{
-    if (!langCombo) { return; }
-    langCombo->clear();
-    comboAddItem(langCombo, _("lang.zh_CN"));
-    comboAddItem(langCombo, _("lang.zh_TW"));
-    comboAddItem(langCombo, _("lang.en_US"));
-    comboSetCurrent(langCombo, langIndexOf(Translator::instance().currentLang()));
-}
-
-void MainWindow::fillStyleCombo()
-{
-    if (!styleCombo) { return; }
-    styleCombo->clear();
-    const std::vector<StyleParams::Definition>& styles = StyleParams::registeredStyles();
-    for (int i = 0; i < (int)styles.size(); i++) {
-        comboAddItem(styleCombo, _(qFromUtf8(styles[i].displayKey)));
-    }
-    comboSetCurrent(styleCombo, styleIndexOf(QString(ThemeManager::styleId())));
 }
 
 // ═══════════════ 菜单栏（文件 / 演示 / 外观 / 帮助）═══════════════
@@ -481,6 +445,44 @@ void MainWindow::buildMenus()
     mb->finalize();
 }
 
+// 标题栏三按钮的弹出菜单。⚠ 必须在 buildMenus() 之后调用：buildMenus 开头会
+// menuItemRefs.clear()，这里的语言/外观项要留档给 refreshMenuTexts() 翻译。
+void MainWindow::buildAppearanceMenus()
+{
+    // ── 语言 ──
+    static const char* const kLangItemKeys[3] = {
+        "lang.zh_CN", "lang.zh_TW", "lang.en_US"
+    };
+    m_langMenu = new MenuWidget34(this);
+    static_cast<MenuWidget34*>(m_langMenu)->setMinimumWidth(150);
+    for (int i = 0; i < 3; i++) {
+        LambdaSlot* slot = new LambdaSlot(this, [this, i]() { onTitleUilang(i); });
+        addMenuItem(m_langMenu, slot, SLOT(call()), kLangItemKeys[i]);
+    }
+    attachTitleMenu(m_langBtn, static_cast<MenuWidget34*>(m_langMenu));
+
+    // ── 外观 ──
+    m_styleMenu = new MenuWidget34(this);
+    static_cast<MenuWidget34*>(m_styleMenu)->setMinimumWidth(150);
+    const std::vector<StyleParams::Definition>& styles = StyleParams::registeredStyles();
+    for (int i = 0; i < (int)styles.size(); i++) {
+        LambdaSlot* slot = new LambdaSlot(this, [this, i]() { onTitleStyle(i); });
+        addMenuItem(m_styleMenu, slot, SLOT(call()), styles[i].displayKey);
+    }
+    attachTitleMenu(m_styleBtn, static_cast<MenuWidget34*>(m_styleMenu));
+
+    // ── 深色：两项（开/关）。不设 darkToggle：按钮自身不显示文字，无需随状态换词 ──
+    m_darkMenu = new MenuWidget34(this);
+    static_cast<MenuWidget34*>(m_darkMenu)->setMinimumWidth(150);
+    LambdaSlot* darkOn = new LambdaSlot(this, [this]() { onTitleDark(true); });
+    addMenuItem(m_darkMenu, darkOn, SLOT(call()), "theme_dark");
+    LambdaSlot* darkOff = new LambdaSlot(this, [this]() { onTitleDark(false); });
+    addMenuItem(m_darkMenu, darkOff, SLOT(call()), "theme_light");
+    attachTitleMenu(m_darkBtn, static_cast<MenuWidget34*>(m_darkMenu));
+
+    updateAppearanceTooltips();
+}
+
 // ═══════════════ 系统托盘 ═══════════════
 // 移植 qltox mainwindow.cpp:784-800 + 1563-1600
 
@@ -588,7 +590,7 @@ void MainWindow::onTitleUilang(int index)
     // loadLanguage 内部发 languageChanged → retranslateUi()
     Translator::instance().loadLanguage(langCode);
     QtappSetup::installQtTranslations(langCode);
-    if (langCombo) { comboSetCurrent(langCombo, index); }
+    updateAppearanceTooltips();
 }
 
 void MainWindow::onTitleStyle(int index)
@@ -597,7 +599,7 @@ void MainWindow::onTitleStyle(int index)
     if (index < 0 || index >= (int)styles.size()) { return; }
     ThemeManager::setStyle(styles[index].id, ThemeManager::isDarkMode());
     Config::setValue("style", qFromUtf8(styles[index].id));
-    if (styleCombo) { comboSetCurrent(styleCombo, index); }
+    updateAppearanceTooltips();
 }
 
 void MainWindow::onTitleDark(bool on)
@@ -605,20 +607,36 @@ void MainWindow::onTitleDark(bool on)
     if (on == ThemeManager::isDarkMode()) { return; }
     ThemeManager::applyTheme(on);
     Config::setValue("dark", on ? "true" : "false");
-    if (darkCheck) { qSetChecked(darkCheck, on); }
+    updateAppearanceTooltips();
     refreshMenuTexts();   // 深色开关项文案随状态变
 }
 
 void MainWindow::onDarkMenuItem()
 {
-    // 走 checkbox 的 toggled 信号统一入口，避免主题/持久化两处实现
-    if (darkCheck) {
-        qSetChecked(darkCheck, !ThemeManager::isDarkMode());
-    } else {
-        bool on = !ThemeManager::isDarkMode();
-        ThemeManager::applyTheme(on);
-        Config::setValue("dark", on ? "true" : "false");
-        refreshMenuTexts();
+    onTitleDark(!ThemeManager::isDarkMode());
+}
+
+// tooltip = 功能 + 当前值（语言切换、皮肤/深色变化时刷新）
+void MainWindow::updateAppearanceTooltips()
+{
+    static const char* const kLangLabelKeys[3] = {
+        "lang.zh_CN", "lang.zh_TW", "lang.en_US"
+    };
+    int li = langIndexOf(Translator::instance().currentLang());
+    if (li < 0 || li > 2) { li = 0; }
+    if (m_langBtn) {
+        qSetToolTip(m_langBtn, _("title.tip_lang") + ": " + _(kLangLabelKeys[li]));
+    }
+    if (m_styleBtn) {
+        const std::vector<StyleParams::Definition>& styles = StyleParams::registeredStyles();
+        int si = styleIndexOf(QString(ThemeManager::styleId()));
+        QString label = (si >= 0 && si < (int)styles.size())
+                            ? _(qFromUtf8(styles[si].displayKey)) : QString();
+        qSetToolTip(m_styleBtn, _("title.tip_style") + ": " + label);
+    }
+    if (m_darkBtn) {
+        qSetToolTip(m_darkBtn, _("title.tip_dark") + ": "
+                    + (ThemeManager::isDarkMode() ? _("title.dark_on") : _("title.dark_off")));
     }
 }
 
@@ -630,10 +648,7 @@ void MainWindow::retranslateUi()
     qSetWindowTitle(this, title);
     if (titleBar) { titleBar->setLabel(title); }
     if (tray) { tray->setToolTip(title); }
-    if (darkCheck) { darkCheck->setText(_("theme_dark")); }
-
-    fillLangCombo();
-    fillStyleCombo();
+    updateAppearanceTooltips();
     refreshMenuTexts();
 }
 
@@ -688,8 +703,9 @@ void MainWindow::onDemoTrayBubble()
 void MainWindow::onAboutApp()
 {
     QString text = QString(
-        "<h3>qlstik</h3>"
+        "<h3>qlstik " APP_VERSION_NAME " (%1)</h3>"
         "<p>Anystik desktop shell (Qt Widgets).</p>"
-        "<p>Qt: %1 | Build: %2</p>").arg(qVersion()).arg(QLSTIK_GIT_COMMIT_STR);
+        "<p>Qt: %2 | Build: %3</p>")
+        .arg(APP_VERSION_CODE).arg(qVersion()).arg(QLSTIK_GIT_COMMIT_STR);
     QMessageBox::about(this, _("menu.about_qlstik"), text);
 }

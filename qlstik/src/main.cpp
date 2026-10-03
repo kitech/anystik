@@ -76,8 +76,11 @@ int main(int argc, char* argv[])
     QByteArray styleId = qToUtf8(Config::styleId());
     ThemeManager::setStyle(styleId.data(), Config::darkMode());
 
-    // 语言：先注册 lang/ 搜索路径再加载；Translator 构造时已按
-    // <exe目录>/lang → ./lang → <exe上级>/qltox/lang → <项目根>/lang 找
+    // 语言：先注册 lang/ 搜索路径再加载。Translator 构造时已按
+    // <exe目录>/lang → ./lang → <exe上级>/qltox/lang → <项目根>/lang 找；
+    // 但本程序 exe 在 build-qt3/，语言文件在 <exe上级>/lang（即 qlstik/lang），
+    // 与 qltox 的 <项目根>/lang 组织一致，故补注册这一条，运行目录不再影响加载。
+    Translator::instance().addTranslationPath(app.applicationDirPath() + "/../lang");
     Translator::instance().addTranslationPath(app.applicationDirPath() + "/lang");
     QString savedLang = Config::uiLang();
     Translator::instance().loadLanguage(savedLang);

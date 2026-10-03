@@ -1,33 +1,53 @@
 {
   "app_title": "qlstik",
   "theme_dark": "深色主題",
-  "style.fusion": "Qt 融合",
-  "style.macos": "macOS",
-  "style.windows": "Windows 11",
-  "style.material": "Material You",
-  "style.github": "GitHub",
-  "menu.file": "文件(&F)",
-  "menu.demo": "演示(&D)",
-  "menu.appearance": "外觀(&V)",
-  "menu.help": "說明(&H)",
-  "menu.skins": "面板",
-  "menu.languages": "語言",
-  "menu.about_qlstik": "關於 qlstik",
-  "action.new": "新增",
-  "action.quit": "結束",
-  "action.dark_on": "開啟深色模式",
-  "action.dark_off": "關閉深色模式",
-  "demo.status_info": "示範：一般狀態列訊息",
-  "demo.status_warning": "示範：警告狀態列訊息",
-  "demo.status_error": "示範：錯誤狀態列訊息",
-  "demo.status_clear": "示範：清空狀態列",
-  "demo.tray_bubble": "示範：系統匣氣泡通知",
-  "demo.status_widgets": "示範：狀態列左右端控制項",
-  "demo.ready": "示範：狀態列左右端控制項已重設",
-  "tray.open": "開啟主視窗",
-  "tray.quit": "結束",
-  "lang.zh_CN": "简体中文",
-  "lang.zh_TW": "繁體中文",
-  "lang.en_US": "English",
-  "menu.aboutqt": "關於 Qt"
+  "theme_light": "淺色主題",
+  "style": {
+    "fusion": "Qt 融合",
+    "macos": "macOS",
+    "windows": "Windows 11",
+    "material": "Material You",
+    "github": "GitHub"
+  },
+  "menu": {
+    "file": "文件(&F)",
+    "demo": "演示(&D)",
+    "appearance": "外觀(&V)",
+    "help": "說明(&H)",
+    "skins": "面板",
+    "languages": "語言",
+    "about_qlstik": "關於 qlstik",
+    "aboutqt": "關於 Qt"
+  },
+  "action": {
+    "new": "新增",
+    "quit": "結束",
+    "dark_on": "開啟深色模式",
+    "dark_off": "關閉深色模式"
+  },
+  "title": {
+    "tip_lang": "語言",
+    "tip_style": "外觀",
+    "tip_dark": "深色模式",
+    "dark_on": "開",
+    "dark_off": "關"
+  },
+  "demo": {
+    "status_info": "示範：一般狀態列訊息",
+    "status_warning": "示範：警告狀態列訊息",
+    "status_error": "示範：錯誤狀態列訊息",
+    "status_clear": "示範：清空狀態列",
+    "tray_bubble": "示範：系統匣氣泡通知",
+    "status_widgets": "示範：狀態列左右端控制項",
+    "ready": "示範：狀態列左右端控制項已重設"
+  },
+  "tray": {
+    "open": "開啟主視窗",
+    "quit": "結束"
+  },
+  "lang": {
+    "zh_CN": "简体中文",
+    "zh_TW": "繁體中文",
+    "en_US": "English"
+  }
 }

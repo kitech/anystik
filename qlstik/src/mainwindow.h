@@ -23,8 +23,6 @@
 #include <qmainwindow.h>
 #include <qwidget.h>
 #include <qlabel.h>
-#include <qcheckbox.h>
-#include <qcombobox.h>
 #include <qpushbutton.h>
 #include <qlineedit.h>
 
@@ -99,6 +97,7 @@ private:
     void buildCentralWidget();
     void buildAppearancePanel();
     void buildMenus();
+    void buildAppearanceMenus();   // ⚠ 必须在 buildMenus() 之后调用
     void buildTray();
 
     // 菜单构建辅助（menu 用 void* 以避免头文件依赖 Qt3/Qt4 菜单 typedef）
@@ -116,11 +115,11 @@ private:
     void removeDemoWidgets();
     bool hasDemoWidgets() const;
 
-    // 语言/皮肤下拉内容（构造与 retranslateUi 共用）
-    void fillLangCombo();
-    void fillStyleCombo();
+    // 语言/皮肤当前值索引（tooltip 显示用）
     static int langIndexOf(const QString& langCode);
     static int styleIndexOf(const QString& styleId);
+    // 三按钮 tooltip：功能 + 当前值（语言/外观/深色变化时刷新）
+    void updateAppearanceTooltips();
 
     FramelessHelper* framelessHelper;
     CustomTitleBar* titleBar;
@@ -130,9 +129,14 @@ private:
     StackedWidget* pageStack;
     PageManager* pageMgr;
     QLabel* statusLabel;
-    QComboBox* langCombo;
-    QComboBox* styleCombo;
-    QCheckBox* darkCheck;
+    // 三个下拉菜单按钮：QPushButton 双端都支持挂菜单（Qt3 setPopup / Qt4+ setMenu），
+    // 且与 CustomTitleBar 右侧 ─ □ ✕ 同为 QPushButton，尺寸/外观天然一致。
+    QPushButton* m_langBtn;
+    QPushButton* m_styleBtn;
+    QPushButton* m_darkBtn;
+    void* m_langMenu;
+    void* m_styleMenu;
+    void* m_darkMenu;
 
     QLabel* demoLeftLabel;
     QPushButton* demoLeftBtn;
