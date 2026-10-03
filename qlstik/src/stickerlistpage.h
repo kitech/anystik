@@ -115,6 +115,7 @@ enum {
 };
 
 enum { kSearchDebounceMs = 350 };   // anysk stickerhomepage.cpp:530-534
+enum { kGridDeferMs = 1 };          // count label 先于首屏解码上屏的延后阈值（Qt 方案）
 
 // ── 贴纸元数据 ──
 // ⚠ 字段对齐 anystik/src/stickerstore.h 的 StickerBrief，但**不复用**那个结构体
@@ -221,6 +222,7 @@ protected:
 private slots:
     void onSearchTextChanged(const QString& text);
     void onSearchTimeout();
+    void applyPendingStickers();   // 延后一回合把 m_pendingItems 交给 grid 绘制
     void onTabChanged(int id);
     void onPackComboChanged(int index);
     void onStickerClicked(const QString& filePath);
@@ -243,6 +245,7 @@ private:
     void loadPackStickers(const QString& packId);
     void applySearch(const QString& keyword);
     void updateCountLabel();
+    void updateCountLabelFor(const std::vector<StickerItem>& items);
 
     enum LoaderKind { LoaderAll, LoaderRecent, LoaderPack, LoaderSearch };
 
@@ -277,6 +280,9 @@ private:
     LoaderKind m_currentLoader;
     int        m_countStickers;
     int        m_countPacks;
+    // ⚠ 延后绘制：loader 先更新计数 label，再把本批 items 留到下一回合的
+    //   applyPendingStickers() 才交给 grid（避免 label 被首屏解码拖到同帧）
+    std::vector<StickerItem> m_pendingItems;
     // refreshTabBar 里把「粘贴板」从普通包中摘出（:657-671）
     QStringList m_packIds;
     QStringList m_packTitles;
@@ -298,6 +304,7 @@ private:
     bool m_initialLoaded;
 
     QTimer* m_searchTimer;
+    QTimer* m_gridDeferTimer;
 };
 
 #endif

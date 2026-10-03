@@ -669,6 +669,7 @@ StickerListPage::StickerListPage(QWidget* parent)
     , m_refreshingCombo(false)
     , m_initialLoaded(false)        // ⚠ 初始化顺序与头文件声明一致
     , m_searchTimer(0)
+    , m_gridDeferTimer(0)
 {
     for (int i = 0; i < 3; i++) {
         m_tabButtons[i] = 0;
@@ -680,6 +681,14 @@ StickerListPage::StickerListPage(QWidget* parent)
     m_searchTimer->setSingleShot(true);
 #endif
     connect(m_searchTimer, SIGNAL(timeout()), this, SLOT(onSearchTimeout()));
+
+    // ⚠ 延后一回合再让 grid 绘制：loader 先更新计数 label，本回合 XPending
+    //   先把 label flush 上屏，下一次 timeout 才 setStickers（纯 Qt，无 flushX）
+    m_gridDeferTimer = new QTimer(this);
+#ifndef QT3_BUILD
+    m_gridDeferTimer->setSingleShot(true);
+#endif
+    connect(m_gridDeferTimer, SIGNAL(timeout()), this, SLOT(applyPendingStickers()));
 
     buildUi();
 }
@@ -780,7 +789,7 @@ void StickerListPage::buildSearchRow(QBoxLayout* parent)
     m_countLabel = new QLabel(row);
     m_countLabel->setText(QString::fromUtf8("0 个 · 0 包"));
     m_countLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
-    m_countLabel->setFixedWidth(72);        // :527
+    m_countLabel->setMinimumWidth(72);      // :527 优选宽度（非固定，随文本增长不裁字）
     h->addWidget(m_countLabel, 0);
 
     parent->addWidget(row, 0);
@@ -925,8 +934,13 @@ void StickerListPage::loadAllStickers()
     }
     // ⚠ 这里**不**设 m_countPacks：包数由 updateCountLabel() 按当前这批
     //   贴纸的 packId 去重现算（anysk 同），loadAll 只是包总数会被覆盖
-    m_grid->setStickers(all);
-    updateCountLabel();
+    updateCountLabelFor(all);
+    m_pendingItems = all;
+#ifdef QT3_BUILD
+    m_gridDeferTimer->start(kGridDeferMs, true);
+#else
+    m_gridDeferTimer->start(kGridDeferMs);
+#endif
 }
 
 void StickerListPage::loadRecentStickers()
@@ -941,8 +955,13 @@ void StickerListPage::loadRecentStickers()
     for (size_t i = 0; i < rows.size(); i++) {
         items.push_back(makeStickerItem(rows[i]));
     }
-    m_grid->setStickers(items);
-    updateCountLabel();
+    updateCountLabelFor(items);
+    m_pendingItems = items;
+#ifdef QT3_BUILD
+    m_gridDeferTimer->start(kGridDeferMs, true);
+#else
+    m_gridDeferTimer->start(kGridDeferMs);
+#endif
 }
 
 // ── 按包加载（基准 loadPackStickers，stickerhomepage.cpp:765-769）──
@@ -961,8 +980,13 @@ void StickerListPage::loadPackStickers(const QString& packId)
     for (size_t i = 0; i < rows.size(); i++) {
         items.push_back(makeStickerItem(rows[i]));
     }
-    m_grid->setStickers(items);
-    updateCountLabel();
+    updateCountLabelFor(items);
+    m_pendingItems = items;
+#ifdef QT3_BUILD
+    m_gridDeferTimer->start(kGridDeferMs, true);
+#else
+    m_gridDeferTimer->start(kGridDeferMs);
+#endif
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1096,16 +1120,32 @@ void StickerListPage::applySearch(const QString& keyword)
             items.push_back(makeStickerItem(rows[i]));
         }
     }
-    m_grid->setStickers(items);
-    updateCountLabel();
+    updateCountLabelFor(items);
+    m_pendingItems = items;
+#ifdef QT3_BUILD
+    m_gridDeferTimer->start(kGridDeferMs, true);
+#else
+    m_gridDeferTimer->start(kGridDeferMs);
+#endif
+}
+
+void StickerListPage::applyPendingStickers()
+{
+    // 延后一回合后真正交给 grid 绘制（此时 label 已在本回合 XPending 时上屏）
+    m_grid->setStickers(m_pendingItems);
 }
 
 void StickerListPage::updateCountLabel()
 {
+    // 供 retranslateUi（:1229）复用：按当前网格内容刷新
+    updateCountLabelFor(m_grid->stickers());
+}
+
+void StickerListPage::updateCountLabelFor(const std::vector<StickerItem>& items)
+{
     // ── 照搬 anysk stickerhomepage.cpp:781-791 ──
     //   「%2 包」统计的是**当前这批贴纸归属的去重包数**，不是包总数。
     //   所以「最近」/ 搜索结果横跨的包天然少于全部包总数。
-    const std::vector<StickerItem>& items = m_grid->stickers();
     m_countStickers = int(items.size());
     // ⚠ std::set<QString> 而非 QSet：QSet 在 Qt3/4+ 都是容器类但无 Qt3
     //   实测结论，这里保守用标准容器（qltox 同款 std 容器风格）
