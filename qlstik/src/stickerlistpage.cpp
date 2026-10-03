@@ -551,6 +551,7 @@ StickerListPage::StickerListPage(QWidget* parent)
     , m_countStickers(0)
     , m_countPacks(0)
     , m_refreshingCombo(false)
+    , m_initialLoaded(false)        // ⚠ 初始化顺序与头文件声明一致
     , m_searchTimer(0)
 {
     for (int i = 0; i < 3; i++) {
@@ -770,11 +771,22 @@ void StickerListPage::onCreate(const QVariantMap& launchArgs,
         return;
     }
     // ⚠ 照搬 anysk :626-631 的启动顺序：先刷 tab 栏拿到包列表，
-    //   再落到第 0 个 tab 并手动调一次 onTabChanged（m_currentTab 初值即 0，
-    //   但 QButtonGroup 首次 setChecked 不发信号，所以这里必须显式调）。
+    //   再落到第 0 个 tab。⚠ 手动 onTabChanged(0) 已**延后**到首帧门之后
+    //   （用户 2026-10-04：首帧须含除数据/图片外的全部框架；全量列表加载延后）。
     refreshTabBar();
     m_currentTab = 0;
     qSetChecked(m_tabButtons[0], true);
+}
+
+// ── 首帧门回调（由 MainWindow → PageManager::notifyFirstFrame 触发）──
+//   此刻外壳 + 本页框架（顶栏/搜索/分类栏/网格底/底栏）已绘制且事件排干，
+//   才执行全量列表查询 + 缩略图解码绘制。
+void StickerListPage::onFirstFrame()
+{
+    if (m_initialLoaded) { return; }
+    m_initialLoaded = true;
+    // m_currentTab 初值 0 且 tab0 已 setChecked；首次 setChecked 不发信号，
+    // 故这里显式调一次，语义与延后前的 onCreate 一致。
     onTabChanged(0);
 }
 

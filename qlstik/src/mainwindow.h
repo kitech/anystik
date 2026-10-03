@@ -45,6 +45,9 @@ public:
 protected:
     // 托盘可用时关闭改为隐藏到托盘；真正退出走 quitApp()（forceQuit 绕过本拦截）
     virtual void closeEvent(QCloseEvent* event);
+    // 首帧门：观测窗口内首个 Paint。⚠ 顶层 QMainWindow 被中央控件完全覆盖，
+    // 自身收不到 Paint（实测），故用 app 事件过滤器捕获「本窗口后代」的 Paint。
+    virtual bool eventFilter(QObject* watched, QEvent* event);
 
 private slots:
     // 外观三件套（titlebar）：语言 / 皮肤 / 深色
@@ -67,6 +70,9 @@ private slots:
     void onDemoTrayBubble();
     void onDemoToggleStatusWidgets();
     void onAboutApp();
+    // 首帧门命中 → processEvents → 延迟 150ms 加载
+    void onFirstPaintComplete();
+    void onDeferredLoad();
 
 private:
     // 菜单项句柄：Qt3 记 id（changeItem 只认 id，且需要所属菜单），Qt4+ 记 QAction*
@@ -137,6 +143,11 @@ private:
     std::vector<MenuItemRef> menuItemRefs;   // 叶子项 + 子菜单标题
     std::vector<MenuItemRef> topMenuRefs;    // 顶级菜单标题（顺序 = kTopMenuKeys）
     bool forceQuit;
+
+    // ── 首帧门状态（照搬 qltox mainwindow.h:145-146）──
+    bool m_firstPaintLogged;   // 门是否已触发（一次性）
+    int  m_paintCounter;       // 已观测 Paint 次数（>5 兜底防饥饿）
+    bool m_initialLoadDone;    // 延迟加载是否已执行（一次性，含 2s 兜底）
 };
 
 #endif // MAINWINDOW_H

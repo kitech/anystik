@@ -419,6 +419,7 @@ PageManager::PageManager(StackedWidget* stackBox, QObject* parent)
     , m_stackBox(stackBox)
     , m_cacheMaxSize(5)
     , m_busy(false)
+    , m_firstFrameNotified(false)
 {
 }
 
@@ -644,6 +645,14 @@ QString PageManager::currentPageId() const
 Page* PageManager::findPage(const QString& id) const
 {
     return pmMapGet(m_pages, id, (Page*)0);
+}
+
+void PageManager::notifyFirstFrame()
+{
+    if (m_firstFrameNotified) { return; }
+    m_firstFrameNotified = true;
+    Page* p = currentPage();
+    if (p) { p->onFirstFrame(); }
 }
 
 // ── 导航: open ──

@@ -198,6 +198,8 @@ public:
 protected:
     virtual void onCreate(const QVariantMap& launchArgs,
                           const QVariantMap& savedState);
+    // 首帧门回调：onCreate 只建框架，全量列表加载延后到这里（见 .cpp onFirstFrame）
+    virtual void onFirstFrame();
     virtual void retranslateUi();
     virtual void onSaveInstanceState(QVariantMap& outState);
     virtual void onRestoreInstanceState(const QVariantMap& savedState);
@@ -278,6 +280,8 @@ private:
     //   就会触发信号（stickerhomepage.cpp:687-694 靠 Qsk 的 -1 占位态天然规避，
     //   本实现用占位项替代，见 refreshTabBar 注释）
     bool m_refreshingCombo;
+    // onFirstFrame 只执行一次（首帧门可能因兜底定时器重复到达）
+    bool m_initialLoaded;
 
     QTimer* m_searchTimer;
 };

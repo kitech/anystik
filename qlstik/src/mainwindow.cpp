@@ -17,6 +17,7 @@
 
 #include <qpixmap.h>
 #include <qevent.h>
+#include <qtimer.h>
 
 #ifdef QT3_BUILD
 #include <qmessagebox.h>
@@ -65,6 +66,18 @@ static int comboCurrent(const QComboBox* cb)
 #endif
 }
 
+// qHasPendingEvents 的双端垫片：qltox 用 Qt 自带 qHasPendingEvents()；
+// Qt3 的 QApplication 有 hasPendingEvents()（/opt/qt338sh/include/qapplication.h:153），
+// Qt5/6 已移除 → 非 Qt3 返回 false，靠 m_paintCounter>5 兜底（见 event()）。
+static bool qlstikHasPendingEvents()
+{
+#ifdef QT3_BUILD
+    return qApp->hasPendingEvents();
+#else
+    return false;
+#endif
+}
+
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent
 #ifdef QT3_BUILD
@@ -93,6 +106,9 @@ MainWindow::MainWindow(QWidget* parent)
     , demoRightLabel(0)
     , demoEdit(0)
     , forceQuit(false)
+    , m_firstPaintLogged(false)
+    , m_paintCounter(0)
+    , m_initialLoadDone(false)
 {
     // 窗口尺寸对齐 anystik/src/main.cpp:404 的 setPreferredSize({420, 680})。
     // ⚠ setPreferredSize 是 QSkinny 概念，Qt3 无等价 API，resize() 是语义最接近的映射
@@ -109,6 +125,13 @@ MainWindow::MainWindow(QWidget* parent)
     buildAppearancePanel();
     buildMenus();
     buildTray();
+
+    // 首帧门：捕获本窗口后代的首个 Paint（见 eventFilter；门命中后即移除）。
+    qApp->installEventFilter(this);
+
+    // 兜底：离屏/无 Paint 场景下，2s 后无论如何也执行延迟加载（onDeferredLoad
+    // 内有一次性格守卫，与首帧门命中路径互斥）。
+    QTimer::singleShot(2000, this, SLOT(onDeferredLoad()));
 
     QObject::connect(&Translator::instance(), SIGNAL(languageChanged()),
                      this, SLOT(retranslateUi()));
@@ -509,6 +532,50 @@ void MainWindow::closeEvent(QCloseEvent* event)
         return;
     }
     event->accept();
+}
+
+// ═══════════════ 首帧门 ═══════════════
+// 目的：等「窗口首批绘制已发出且事件队列排干」后再做重活（贴纸列表全量查询 +
+// 缩略图解码），避免同步加载阻塞首帧导致界面残缺（用户 2026-10-04 需求）。
+// 机制逐条照搬 qltox/mainwindow.cpp:1533-1560（只读参考，不改 qltox）。
+//   * Qt 无「绘制完成/已上屏」公开信号；Qt3 无 QEvent::Expose（qevent.h 只有
+//     Paint=12/Show=17），只能观测 Paint。
+//   * hasPendingEvents() 为真说明该轮事件尚未排干，先不触发。
+//   * m_paintCounter>5 兜底：光标闪烁等持续事件会让队列永不排干。
+// ⚠ 实测：顶层 QMainWindow 被中央控件完全覆盖，自身**收不到 Paint**，故不能像
+//   qltox 那样直接在 MainWindow::event() 里观测。改用 qApp 事件过滤器，捕获
+//   「本窗口后代」的 Paint（用 topLevelWidget()==this 排除托盘/弹窗等其它顶层）。
+bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+{
+    if (!m_firstPaintLogged && event->type() == QEvent::Paint) {
+        QWidget* w = dynamic_cast<QWidget*>(watched);
+        if (w && w->topLevelWidget() == this) {
+            m_paintCounter++;
+            if (!qlstikHasPendingEvents() || m_paintCounter > 5) {
+                m_firstPaintLogged = true;
+                qApp->removeEventFilter(this);
+                QTimer::singleShot(0, this, SLOT(onFirstPaintComplete()));
+            }
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::onFirstPaintComplete()
+{
+    if (m_initialLoadDone) { return; }
+    // 排干 show/paint 一轮，再留 150ms 给窗口系统异步上屏。
+    // 依据：X11 绘制异步；QObject::processEvents 文档；SO #44396099 指出
+    // QTest::qWaitForWindowExposed 内部亦为循环 processEvents。
+    qApp->processEvents();
+    QTimer::singleShot(150, this, SLOT(onDeferredLoad()));
+}
+
+void MainWindow::onDeferredLoad()
+{
+    if (m_initialLoadDone) { return; }
+    m_initialLoadDone = true;
+    if (pageMgr) { pageMgr->notifyFirstFrame(); }
 }
 
 // ═══════════════ 外观：语言 / 皮肤 / 深色 ═══════════════

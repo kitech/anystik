@@ -100,6 +100,9 @@ public:
     // 查找页面（活跃+缓存，不包括已销毁的）
     Page*   findPage(const QString& id) const;
 
+    // 首帧门：主窗首批绘制后调用一次，把 onFirstFrame 转发给当前页。
+    void notifyFirstFrame();
+
     // ── 状态保存/恢复（进程死亡） ──
     // 遍历所有存活页面，调用 onSaveInstanceState 并写入 Config
     void saveAllStates();
@@ -171,6 +174,7 @@ private:
 
     // 防止重入
     bool m_busy;
+    bool m_firstFrameNotified;   // notifyFirstFrame 只生效一次
 };
 
 #endif

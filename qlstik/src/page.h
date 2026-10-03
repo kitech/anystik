@@ -149,6 +149,11 @@ public:
     virtual void onSaveInstanceState(QVariantMap& outState);
     virtual void onRestoreInstanceState(const QVariantMap& savedState);
 
+    // 首帧门回调：窗口首批绘制完成、事件排干后，由 PageManager 调一次。
+    // 默认空实现；页面可把「首帧后才该做」的重活（如列表全量加载）放这里。
+    // ⚠ 不加 Q_INVOKABLE：Qt3.5 无此宏（page.h 陷阱 #8）。
+    virtual void onFirstFrame() {}
+
     // ── 语言切换 ──
     // 语言切换时由 Lang 广播、PageManager 遍历存活页调用（见 pagemanager.cpp 的
     // retranslateAll）。⚠ 不加 Q_INVOKABLE：Qt3.5 无此宏（Qt4 才引入）；本方法靠
