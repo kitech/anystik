@@ -11,7 +11,7 @@
 #     同版本串。过滤用 doctest 内置命令行选项，不自写解析层。
 #   * 旧脚本未给 test_main.cpp 任何 -I，说明当年 doctest.h 就与 test_*.cpp 同目录、
 #     靠 `#include "..."` 的相对查找命中；本脚本改放 anystik/vendor（集中管理），
-#     故需显式 -I../anystik/vendor。
+#     故需显式 -I../vendor。
 #   * 旧脚本 -std=c++11；沿用。
 set -e
 cd "$(dirname "$0")"
@@ -23,8 +23,8 @@ mkdir -p "$OUTDIR"
 CXX="g++ -std=c++11 -g -O0 -w"
 # 测试与被测产品代码同在 stikcommon/，故 -I. ；doctest 在 anystik/vendor
 FLAGS="-DQT3_BUILD -DQT_NO_DEBUG -DQT_SHARED -DQT_THREAD_SUPPORT \
-  -I. -I../anystik/vendor -I../anystik/vendor/libnsgif \
-  -I../anystik/vendor/uc_apng_loader -I$QTDIR/include -I../qldox -I../qlcomp"
+  -I. -I../vendor -I../vendor/libnsgif \
+  -I../vendor/uc_apng_loader -I$QTDIR/include -I../qldox -I../qlcomp"
 
 # ── 测试文件（新增一个就在这里加一行）────────────────────────────────
 TESTS="
@@ -84,7 +84,7 @@ qjson_shim.cpp
 qstandardpaths_shim.cpp
 qzipreader_shim.cpp
 qimagereader_shim.cpp
-../anystik/vendor/pugixml/pugixml.cpp
+../vendor/pugixml/pugixml.cpp
 "
 
 echo "=== moc ==="
@@ -111,7 +111,7 @@ OBJS="$OBJS $OUTDIR/prod_cJSON.o"
 # 避免 g++ 把 C 代码按 C++ 解析时对旧式构造/隐式转换报错。
 # qlcomp/md5.c 与 sha1.c 是 QCryptographicHash 垫片的摘要实现（C 源），
 # 不编进来会在链接期报 MD5_Init/SHA1_* 未定义。
-for csrc in ../anystik/vendor/libnsgif/gif.c ../anystik/vendor/libnsgif/lzw.c \
+for csrc in ../vendor/libnsgif/gif.c ../vendor/libnsgif/lzw.c \
             ../qlcomp/md5.c sha1.c; do
     o="$OUTDIR/prod_$(basename "${csrc%.c}").o"
     gcc -std=gnu99 -g -O0 -w $FLAGS -c "$csrc" -o "$o"

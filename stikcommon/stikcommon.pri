@@ -50,6 +50,7 @@ STIKCOMMON_INCLUDES += $$MYVENDOR_INCLUDES $$QLDOX_INCLUDES
 # 函数体里尚无 Qt3 分支，剩余的 Qt4 QByteArray 方法（constData/indexOf/
 # reserve/append 等 8 处）由编译实测决定是否还需补垫，不预先下结论。
 ANYSTIK_SRC_DIR = $$STIKCOMMON_DIR/../anystik/src
+STIK_VENDOR_DIR = $$STIKCOMMON_DIR/../vendor
 
 # myi18n：L0 引用 anystik/src（Qt3 侧靠 stikcommon/*_shim.h 兜类级缺口）
 STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/myi18n.cpp
@@ -240,9 +241,9 @@ STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/davbisync.h
 # 路径才能让 "pugixml/pugixml.hpp" 解析（vendor/include 已在下面登记，但 pugixml
 # 不在其下）。
 STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/dav207pugi.cpp \
-                      $$ANYSTIK_SRC_DIR/../vendor/pugixml/pugixml.cpp
+                      $$STIK_VENDOR_DIR/pugixml/pugixml.cpp
 STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/dav207iface.h
-STIKCOMMON_INCLUDES += $$ANYSTIK_SRC_DIR/../vendor
+STIKCOMMON_INCLUDES += $$STIK_VENDOR_DIR
 
 # qdatetime_shim：qwebdavlite 的 put() 要发 RFC1123 Date 头（qDateTimeToUtc +
 # qFormatDateTime）。该 .cpp 通篇是 Qt3 专用写法（QChar::upper / QString::lower /
@@ -496,10 +497,10 @@ STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qimage_shim.h \
 isEmpty(QT_VERSION) {
     STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qimagereader_shim.cpp
     # libnsgif 需以 C99 单独编译：其源用 // 注释与 stdint，且 gif.c/lzw.c 互调
-    STIKCOMMON_SOURCES += $$ANYSTIK_SRC_DIR/../vendor/libnsgif/gif.c \
-                          $$ANYSTIK_SRC_DIR/../vendor/libnsgif/lzw.c
-    STIKCOMMON_INCLUDES += $$ANYSTIK_SRC_DIR/../vendor/libnsgif \
-                           $$ANYSTIK_SRC_DIR/../vendor/uc_apng_loader
+    STIKCOMMON_SOURCES += $$STIK_VENDOR_DIR/libnsgif/gif.c \
+                          $$STIK_VENDOR_DIR/libnsgif/lzw.c
+    STIKCOMMON_INCLUDES += $$STIK_VENDOR_DIR/libnsgif \
+                           $$STIK_VENDOR_DIR/uc_apng_loader
     # WebP 动画解码需要 demux；mux 留给后续 WebP 重编码（stickerstore.cpp:1154
     # 旧的 webp→apng 转换路径改造时会用到）
     LIBS += -lwebp -lwebpdemux -lwebpmux -lm
@@ -507,6 +508,6 @@ isEmpty(QT_VERSION) {
 
 # myi18n 的 settings_trace.h 在 anystik 侧；davobfus 的 libobfuscate 在 vendor
 STIKCOMMON_INCLUDES += $$ANYSTIK_SRC_DIR \
-                       $$ANYSTIK_SRC_DIR/../vendor/include
+                       $$STIK_VENDOR_DIR/include
 
 STIKCOMMON_CFLAGS = $$MYVENDOR_CFLAGS

@@ -173,7 +173,7 @@
 // 而非 RGBA。qimage_shim.h 把这些差异收进自由函数，Qt6 分支转调原生 API，
 // 故下面所有调用点写法两端一致、Qt6 行为不变。
 #include "qimage_shim.h"
-#include "../vendor/tangora_gif.h"
+#include "../../vendor/tangora_gif.h"
 #include <zlib.h>
 #include <string>
 

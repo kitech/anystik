@@ -112,10 +112,10 @@ qt_add_executable(anystik
     src/davbisync_baseline.cpp
     src/syncprogresspopup.h
     src/syncprogresspopup.cpp
-    vendor/qwebdav/qnaturalsort.cpp
-    vendor/qwebdav/qwebdav.cpp
-    vendor/qwebdav/qwebdavdirparser.cpp
-    vendor/qwebdav/qwebdavitem.cpp
+    ../vendor/qwebdav/qnaturalsort.cpp
+    ../vendor/qwebdav/qwebdav.cpp
+    ../vendor/qwebdav/qwebdavdirparser.cpp
+    ../vendor/qwebdav/qwebdavitem.cpp
     ${MYVENDOR_SOURCES}
     ${QLAPP_SOURCES}
     ${QLCOMP_SOURCES}
@@ -137,9 +137,9 @@ endif()
 
 # ── vendor: cJSON header ──
 target_include_directories(anystik PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/vendor
-    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/qwebdav
-    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../vendor
+    ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/qwebdav
+    ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/include
     ${MYVENDOR_INCLUDE_DIRS}
     ${QLAPP_INCLUDE_DIRS}
     ${QLCOMP_INCLUDE_DIRS}
@@ -217,17 +217,17 @@ target_link_libraries(anystik PRIVATE goso cso)
 if(ANDROID)
     add_library(libcurl SHARED IMPORTED GLOBAL)
     set_target_properties(libcurl PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/vendor/lib/${ANDROID_ABI}/libcurl.so
+        IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/lib/${ANDROID_ABI}/libcurl.so
         IMPORTED_NO_SONAME TRUE)
 
     add_library(libssl SHARED IMPORTED GLOBAL)
     set_target_properties(libssl PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/vendor/lib/${ANDROID_ABI}/libssl.so
+        IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/lib/${ANDROID_ABI}/libssl.so
         IMPORTED_NO_SONAME TRUE)
 
     add_library(libcrypto SHARED IMPORTED GLOBAL)
     set_target_properties(libcrypto PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/vendor/lib/${ANDROID_ABI}/libcrypto.so
+        IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/lib/${ANDROID_ABI}/libcrypto.so
         IMPORTED_NO_SONAME TRUE)
 
     target_link_libraries(anystik PRIVATE libcurl libssl libcrypto)
@@ -243,7 +243,7 @@ endif()
 if(ANDROID)
     add_library(sqlite3 SHARED IMPORTED GLOBAL)
     set_target_properties(sqlite3 PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/vendor/lib/${ANDROID_ABI}/libsqlite3.so
+        IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/lib/${ANDROID_ABI}/libsqlite3.so
         IMPORTED_NO_SONAME TRUE
     )
     target_link_libraries(anystik PRIVATE sqlite3)

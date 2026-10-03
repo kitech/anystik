@@ -29,7 +29,7 @@ CXX="g++ -std=c++11 -g -O0 -w"
 # -I../anystik/vendor : doctest
 FLAGS="-DQT3_BUILD -DQT_NO_DEBUG -DQT_SHARED -DQT_THREAD_SUPPORT \
   -I. -Itest -Isrc -I../stikcommon -I../qldox -I../qlcomp \
-  -I../anystik/vendor -I$QTDIR/include"
+  -I../vendor -I$QTDIR/include"
 
 # ── 测试文件（新增一个就在这里加一行）────────────────────────────────
 TESTS="
