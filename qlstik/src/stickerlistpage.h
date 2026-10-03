@@ -34,8 +34,10 @@
 //  5. **无 `QPixmap::fromImage()`**（Qt4 才有），只有 `convertFromImage()`；
 //     **QPainter 也画不到 QImage 上**（Qt3 构造只收 QPaintDevice*）。
 //
-//  6. **qimagereader_shim 无 `setScaledSize()`** → 改成 `read()` 后
-//     `QImage::smoothScale(152,152)`（实测返回**新副本**，不原地改）。
+//  6. **qimagereader_shim 已提供 `setScaledSize()`**（2026-10-04 惰性解码改造时
+//     补上，对齐 Qt6 的不支持原生 ScaledSize 时的回退缩放）→ 缩略图改用
+//     `setScaledSize(152,152)` + 单次 `read()`，shim/插件内部平滑缩放当前帧，
+//     动画不再预解全部帧。
 //
 //  7. **QFontMetrics 无 `elidedText()` / `horizontalAdvance()`**，**无 `qBound`**。
 //     → 宽度用 qlcomp 的 `qFontWidth()`，裁剪用 `qElideChars()`，clamp 手写。

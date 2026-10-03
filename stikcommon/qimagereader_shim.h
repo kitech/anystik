@@ -5,8 +5,8 @@
 //
 // ── 需求来源（anystik/src/stickerstore.cpp）────────────────────────────────
 //   构造：QImageReader(QIODevice*) ×7 / QImageReader(QString) ×2
-//   接口：setAutoTransform / setFormat / canRead / format / size / read /
-//         imageCount / jumpToNextImage / nextImageDelay /
+//   接口：setAutoTransform / setFormat / setScaledSize / scaledSize / canRead /
+//         format / size / read / imageCount / jumpToNextImage / nextImageDelay /
 //         supportsOption(QImageIOHandler::Animation) /
 //         error / errorString / ImageReaderError
 //   静态：imageFormat(QIODevice*) / supportedImageFormats()
@@ -19,13 +19,20 @@
 //   webp                            → 系统 libwebp WebPAnimDecoder
 //
 // ── 控制流对齐 Qt6 的两条铁律（实测 Qt6 6.7.3，见文件末实测记录）──────────
-//   1) read() **只在 supportsOption(Animation) 为真时自推进**。Qt6 的 gif/webp
-//      插件 read() 自动吐下一帧；png/apng（Qt6 PNG 插件把 APNG 拍平）/tiff 不
-//      推进，必须靠 jumpToNextImage()。stickerstore 的 decodeAllFrames /
-//      tiffFrameCount / fullDecodeScaledFrames 全靠这个区分来写循环
-//      （stickerstore.cpp:1396-1408 有明确注释）。
-//   2) jumpToNextImage() 永远推进一帧并返回是否还有下一帧。
+//   1) read() **无条件推进游标**，读尽返回 null（Qt6 实测静态 JPEG 第 2 次
+//      read() 即 null；gif/webp 动画每次吐下一帧）。早期误写成「仅动画自推进」
+//      会让静态图 while(!isNull()) 死循环，已由代码与测试钉死。
+//   2) jumpToNextImage() 永远推进一帧并返回是否还有下一帧；失败时游标推到末尾
+//      之外，使随后 read() 返回 null。
 //   插帧读取顺序必须与 Qt6 一致，否则动画帧会重复/漏读。
+//
+// ── 惰性解码模型（B-1.2，2026-10-04）：对齐 Qt6 的「结构扫描 / 按需解码」分离 ──
+//   prepareDecoder() 只做结构扫描（GIF nsgif_data_scan、WebP GetInfo、
+//   APNG num_frames），拿到尺寸/帧数/动画标志而**不解任何像素**；read() 才按需
+//   解出目标帧。imageCount()/supportsOption() 因此同 Qt6 一样基于扫描结果，
+//   而非解码全帧。列表页缩略图只读第 0 帧，120 帧 GIF 不再被整段解出。
+//   ★ 本类跨调用持有后端句柄（nsgif/WebPAnimDecoder/apng loader），故**不可
+//     拷贝**（裸指针独占），与 Qt6 QImageReader 的 Q_DISABLE_COPY 一致。
 //
 // ── ⚠ APNG 的平台差异（有意为之，须知悉）─────────────────────────────────
 //   Qt6 的 PNG 插件不识别 APNG 动画：format()="png"、imageCount()=1、
@@ -57,6 +64,10 @@
 #include <qstring.h>
 #include <qvaluelist.h>
 #include <vector>
+
+// 后端解码器状态：完整定义在 .cpp（pimpl 惯例，避免头文件引入 nsgif/webp/apng 头）。
+// 必须先于 class QImageReader 前置声明，因为类内以指针成员引用它。
+struct QImageReaderDecoderState;
 
 // ── QImageIOHandler 极简替身 ───────────────────────────────────────────────
 // Qt3 整个 qimageio.h 都不存在，但调用点只用到 Animation 这一个枚举值。
@@ -92,9 +103,15 @@ public:
 
     explicit QImageReader(QIODevice* device);
     explicit QImageReader(const QString& fileName);
+    ~QImageReader();
+
+    QImageReader(const QImageReader&) = delete;              // 对齐 Qt6 Q_DISABLE_COPY
+    QImageReader& operator=(const QImageReader&) = delete;
 
     void setFormat(const QByteArray& format) { m_forcedFmt = format; }
     void setAutoTransform(bool on)           { m_autoTransform = on; }
+    void setScaledSize(const QSize& s)       { m_scaledSize = s; }
+    QSize scaledSize() const                 { return m_scaledSize; }
 
     bool     canRead();
     QByteArray format() const                { return m_fmt; }
@@ -115,25 +132,25 @@ public:
     static QValueList<QByteArray> supportedImageFormats();
 
 private:
-    void     ensureDecoded();
+    void     prepareDecoder();          // 结构扫描：建后端句柄 + 尺寸/帧数/动画标志
     bool     detectFormat();
-    bool     decodeGif();
-    bool     decodeApng();
-    bool     decodeWebp();
-    bool     decodeStatic();
+    int      decodeMoreFrames(int want);   // 按需把帧缓存补到 want 帧，返回已缓存数
 
     QByteArray            m_bytes;
     QByteArray            m_fmt;
     QByteArray            m_forcedFmt;
     QString               m_fileName;
     QSize                 m_canvasSize;
+    QSize                 m_scaledSize;    // setScaledSize()；无效则原尺寸
     bool                  m_sizeParsed;    // 头部是否已解析（不能靠 isNull 判断）
     bool                  m_autoTransform;
-    bool                  m_decoded;
-    bool                  m_animated;      // read() 是否自推进（对齐 Qt6 插件行为）
+    bool                  m_prepared;      // prepareDecoder() 是否已跑
+    bool                  m_animated;      // 格式是否多帧动画（对齐 Qt6 语义）
+    int                   m_imageCount;    // 结构扫描得到的帧数（非解出的）
     int                   m_index;         // 下一帧下标
     int                   m_lastDelayMs;   // 上一 read() 帧的延迟(ms)
-    std::vector<QImage>   m_frames;
+    QImageReaderDecoderState* m_dec;       // 后端句柄（裸指针，析构里释放）
+    std::vector<QImage>   m_frames;        // 已解帧**缓存**（按需增长）
     std::vector<int>      m_delaysMs;
     ImageReaderError      m_error;
     QString               m_errorStr;

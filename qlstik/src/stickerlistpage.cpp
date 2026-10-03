@@ -48,10 +48,11 @@
 // ═══════════════════════════════════════════════════════════════════
 // 缩略图懒解码 + 缓存（照搬 anysk stickerlist.cpp:121-138）
 // ═══════════════════════════════════════════════════════════════════
-// ⚠ 与 anysk 的两处**有意**差异（原因见头文件「Qt3 绘图/图像层实测结论」）：
-//   1. shim 无 setScaledSize()，改成 read() 后 QImage::smoothScale(152,152)
-//   2. 缓存 QPixmap 而非 QImage：anysk 是 QQuickItem 走 scene graph，本页是
-//      QWidget::paintEvent，QPixmap 才是 Qt3 的自然选择
+// ⚠ 与 anysk 的唯一**有意**差异（原因见头文件「Qt3 绘图/图像层实测结论」）：
+//   缓存 QPixmap 而非 QImage：anysk 是 QQuickItem 走 scene graph，本页是
+//   QWidget::paintEvent，QPixmap 才是 Qt3 的自然选择。
+// 缩放语义与 anysk 对齐：shim 已提供 setScaledSize()，read() 直接返回 152px 缩略
+// 图；动画只解当前帧（见 qimagereader_shim.cpp）。
 // 缓存策略（上限 400、超限整体 clear、setStickers 先清）与 anysk 逐条一致。
 //
 // ⚠⚠ 缓存**不能**是本文件的 static：Qt3 的 QMapPrivate 构造时会默认构造一个
@@ -61,7 +62,8 @@
 //   QPaintDevice」并 SIGABRT。
 //   故缓存在 StickerGridWidget::m_tileImageCache（头文件有完整说明）。
 
-// 缩略图缩放：Qt3 是 smoothScale（返回**新副本**），Qt4+ 是 scaled(SmoothTransformation)
+// 缩略图缩放：Qt3 是 smoothScale（返回**新副本**），Qt4+ 是 scaled(SmoothTransformation)。
+// 只在 decodedTileImage 里对每张贴纸调用一次，不在 paintEvent 热路径上。
 static QImage scaleThumb(const QImage& src, int px)
 {
 #ifdef QT3_BUILD
@@ -84,11 +86,19 @@ static QPixmap decodedTileImage(const QString& filePath,
     QPixmap result;
     if (!filePath.isEmpty() && QFile::exists(filePath)) {
         QImageReader reader(filePath);
-        reader.setAutoTransform(true);                     // stickerlist.cpp:129
-        const QImage full = reader.read();
-        if (!full.isNull()) {
-            // ⚠ Qt3 的 smoothScale 返回新副本（qimage.h:158 const 成员）
-            const QImage scaled = scaleThumb(full, kThumbPx);
+        reader.setAutoTransform(true);                     // stickerlist.cpp:130
+        // 与 anystik 对齐（stickerlist.cpp:131）：让 shim 只解当前帧并缩到 152px
+        // （= TILE_SIZE*2），不再先 read() 全尺寸再缩放。
+        reader.setScaledSize(QSize(kThumbPx, kThumbPx));
+        const QImage thumb = reader.read();
+        if (!thumb.isNull()) {
+            // ⚠⚠ 把 152px 缩略图**一次性**缩到最终显示尺寸 kImgInner 再缓存。
+            //   旧实现缓存 152px 成品，然后在 drawTile 里 drawPixmap 缩到 62 ——
+            //   Qt3 的 QPainter::drawPixmap(QRect,pm) 会**每帧**走 QImage::smoothScale
+            //   （gdb 实测热点），滚动时每瓦片每帧重算。缓存成品后 paint 只做 1:1 blit。
+            //  两步缩放（源→152→62）与 anystik 的「QImageReader 缩到 152、QSG 再
+            //  缩到 62」逐像素一致。
+            const QImage scaled = scaleThumb(thumb, kImgInner);
             if (!scaled.isNull()) {
                 // ⚠ Qt3 无 QPixmap::fromImage()（Qt4 才有）
                 result = QPixmap(scaled.size());
@@ -98,7 +108,7 @@ static QPixmap decodedTileImage(const QString& filePath,
             }
         }
     }
-    // ⚠ 插入之后再判上限（与 stickerlist.cpp:133-136 先后顺序一致）
+    // ⚠ 插入之后再判上限（与 stickerlist.cpp:135-136 先后顺序一致）
     if (cache.size() > kCacheMax) {
         cache.clear();       // 超限整体清，不是 LRU
     }
@@ -460,20 +470,13 @@ void StickerGridWidget::drawTile(QPainter& painter, int index, int x, int y)
         return;
     }
 
-    // ── 图片 contain 缩放（stickerlist.cpp:66-78）──
-    // ⚠ Qt3 无抗锯齿 hint，用整数运算保证不越界（anysk 是 qreal + AA）
-    const int iw = pm.width();
-    const int ih = pm.height();
-    if (iw > 0 && ih > 0) {
-        int dw = (iw * kImgInner) / ih;
-        int dh = kImgInner;
-        if (dw > kImgInner) {                 // contain：宽是瓶颈时改按宽缩
-            dw = kImgInner;
-            dh = (ih * kImgInner) / iw;
-        }
-        dw = std::max(1, dw);
-        dh = std::max(1, dh);
-        painter.drawPixmap(QRect((kTileSize - dw) / 2, (kTileSize - dh) / 2, dw, dh), pm);
+    // ── 图片：缓存里已是最终显示尺寸（decodedTileImage 缩到 kImgInner）──
+    // 这里只做居中 1:1 blit。**不能**再用 drawPixmap(QRect, pm) 缩放：Qt3 会
+    // 每帧走 QImage::smoothScale（gdb 实测热点，滚动时每瓦片每帧重算）。
+    // 与 anystik 的 dst 居中算法（stickerlist.cpp:71）结果一致：都是 62 居中。
+    if (pm.width() > 0 && pm.height() > 0) {
+        painter.drawPixmap((kTileSize - pm.width()) / 2,
+                           (kTileSize - pm.height()) / 2, pm);
     }
 
     // ── 边框（stickerlist.cpp:80-86）──

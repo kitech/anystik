@@ -175,12 +175,26 @@ void gifCbModified(nsgif_bitmap_t*) {}
 
 } // namespace
 
+// 后端解码器状态：跨 read() 调用持有，故堆分配、由 ~QImageReader() 释放。
+// QImageReaderDecoderState 在头文件仅前置声明，这里给出完整定义（pimpl 惯例）。
+struct QImageReaderDecoderState
+{
+    enum Kind { None, Gif, Webp, Apng };
+    Kind  kind;
+    nsgif_t*          gif;        // Gif
+    WebPAnimDecoder*  webp;       // Webp
+    int               webpPrevTs;
+    uc::apng::loader<std::istringstream>* apng;   // Apng（move-only，只能堆持有）
+    QImageReaderDecoderState()
+        : kind(None), gif(0), webp(0), webpPrevTs(0), apng(0) {}
+};
+
 // ── 构造 / 生命周期 ───────────────────────────────────────────────────────
 
 QImageReader::QImageReader(QIODevice* device)
-    : m_sizeParsed(false), m_autoTransform(false), m_decoded(false),
-      m_animated(false), m_index(0),
-      m_lastDelayMs(0), m_error(UnknownError)
+    : m_sizeParsed(false), m_autoTransform(false), m_prepared(false),
+      m_animated(false), m_imageCount(0), m_index(0),
+      m_lastDelayMs(0), m_dec(0), m_error(UnknownError)
 {
     if (!device) {
         m_error = DeviceError;
@@ -196,8 +210,9 @@ QImageReader::QImageReader(QIODevice* device)
 
 QImageReader::QImageReader(const QString& fileName)
     : m_fileName(fileName), m_sizeParsed(false), m_autoTransform(false),
-      m_decoded(false),
-      m_animated(false), m_index(0), m_lastDelayMs(0), m_error(UnknownError)
+      m_prepared(false),
+      m_animated(false), m_imageCount(0), m_index(0), m_lastDelayMs(0),
+      m_dec(0), m_error(UnknownError)
 {
     QFile f(fileName);
     if (!f.open(IO_ReadOnly)) {
@@ -208,6 +223,26 @@ QImageReader::QImageReader(const QString& fileName)
     m_bytes = f.readAll();
     f.close();
     detectFormat();
+}
+
+QImageReader::~QImageReader()
+{
+    if (!m_dec) return;
+    switch (m_dec->kind) {
+    case QImageReaderDecoderState::Gif:
+        if (m_dec->gif) nsgif_destroy(m_dec->gif);
+        break;
+    case QImageReaderDecoderState::Webp:
+        if (m_dec->webp) WebPAnimDecoderDelete(m_dec->webp);
+        break;
+    case QImageReaderDecoderState::Apng:
+        delete m_dec->apng;
+        break;
+    default:
+        break;
+    }
+    delete m_dec;
+    m_dec = 0;
 }
 
 bool QImageReader::detectFormat()
@@ -244,170 +279,16 @@ bool QImageReader::detectFormat()
     return !m_fmt.isEmpty();
 }
 
-// ── 格式解码 ───────────────────────────────────────────────────────────────
+// ── 结构扫描：建后端句柄 + 尺寸/帧数/动画标志（不解析任何像素）─────────────
 
-bool QImageReader::decodeGif()
+void QImageReader::prepareDecoder()
 {
-    nsgif_bitmap_cb_vt vt;
-    ::memset(&vt, 0, sizeof(vt));
-    vt.create = gifCbCreate;
-    vt.destroy = gifCbDestroy;
-    vt.get_buffer = gifCbBuffer;
-    vt.set_opaque = gifCbSetOpaque;
-    vt.test_opaque = gifCbTestOpaque;
-    vt.modified = gifCbModified;
-    // get_rowspan 故意留 NULL：库内部用 info.width×4 作为行跨度，这是 32bpp
-    // 下的正确值。若填一个返回 0 的回调，所有行会重叠成错误画面（已实测）。
+    if (m_prepared) return;
+    m_prepared = true;
 
-    nsgif_t* gif = 0;
-    if (nsgif_create(&vt, NSGIF_BITMAP_FMT_R8G8B8A8, &gif) != NSGIF_OK || !gif) {
-        m_error = UnsupportedFormatError;
-        m_errorStr = "nsgif_create failed";
-        return false;
-    }
-    if (nsgif_data_scan(gif, (size_t)m_bytes.size(),
-                        (const uint8_t*)m_bytes.data()) != NSGIF_OK) {
-        nsgif_destroy(gif);
-        m_error = InvalidDataError;
-        m_errorStr = "nsgif_data_scan failed";
-        return false;
-    }
-    nsgif_data_complete(gif);
-    const nsgif_info_t* info = nsgif_get_info(gif);
-    if (!info || info->width == 0 || info->height == 0 || info->frame_count == 0) {
-        nsgif_destroy(gif);
-        m_error = InvalidDataError;
-        m_errorStr = "no gif info";
-        return false;
-    }
-    m_canvasSize = QSize((int)info->width, (int)info->height);
-    // loop_max==0 表示无限循环，必须以 frame_count 截断
-    for (uint32_t i = 0; i < info->frame_count; ++i) {
-        nsgif_rect_t area;
-        uint32_t delay = 0, frameNum = 0;
-        if (nsgif_frame_prepare(gif, &area, &delay, &frameNum) != NSGIF_OK) break;
-        nsgif_bitmap_t* bmp = 0;
-        if (nsgif_frame_decode(gif, frameNum, &bmp) != NSGIF_OK || !bmp) break;
-        m_frames.push_back(imageFromRgba((const uint8_t*)bmp,
-                                         (int)info->width, (int)info->height));
-        m_delaysMs.push_back((int)delay * 10);   // 厘秒 → 毫秒
-    }
-    nsgif_destroy(gif);
-    if (m_frames.empty()) {
-        m_error = DecodeError;
-        m_errorStr = "gif decode produced no frame";
-        return false;
-    }
-    // 与 Qt6 gif 插件一致：多帧即动画，read() 自推进
-    m_animated = m_frames.size() > 1;
-    return true;
-}
+    // 构造期打开失败（文件不存在/设备无效）时不得覆盖既有错误码
+    if (m_error == FileNotFoundError || m_error == DeviceError) return;
 
-bool QImageReader::decodeApng()
-{
-try {
-        // create_memory_loader 收 const char* 并按值返回 loader<std::istringstream>
-        const char* ptr = m_bytes.isEmpty() ? "" : m_bytes.data();
-        uc::apng::loader<std::istringstream> l =
-            uc::apng::create_memory_loader(ptr, (size_t)m_bytes.size());
-        m_canvasSize = QSize((int)l.width(), (int)l.height());
-        while (l.has_frame()) {
-            auto fr = l.next_frame();
-            const uint8_t* d = fr.image.data();
-            m_frames.push_back(imageFromRgba(d, (int)fr.image.width(), (int)fr.image.height()));
-            const uint32_t den = fr.delay_den ? fr.delay_den : 100;
-            m_delaysMs.push_back((int)(fr.delay_num * 1000 / den));
-        }
-    } catch (std::exception& e) {
-        m_error = InvalidDataError;
-        m_errorStr = QString("apng: %1").arg(e.what());
-        return false;
-    }
-    if (m_frames.empty()) {
-        m_error = DecodeError;
-        m_errorStr = "apng decode produced no frame";
-        return false;
-    }
-    // 刻意与 Qt6 对齐：APNG 报 supportsOption(Animation)==false，
-    // 靠 jumpToNextImage() 推进（详见 qimagereader_shim.h 头部说明）
-    m_animated = false;
-    return true;
-}
-
-bool QImageReader::decodeWebp()
-{
-    WebPData wd;
-    wd.bytes = (const uint8_t*)m_bytes.data();
-    wd.size = (size_t)m_bytes.size();
-    WebPAnimDecoderOptions opts;
-    if (!WebPAnimDecoderOptionsInit(&opts)) {
-        m_error = UnsupportedFormatError;
-        m_errorStr = "webp options failed";
-        return false;
-    }
-    opts.color_mode = MODE_RGBA;
-    opts.use_threads = 0;
-    WebPAnimDecoder* dec = WebPAnimDecoderNew(&wd, &opts);
-    if (!dec) {
-        m_error = InvalidDataError;
-        m_errorStr = "webp decode new failed";
-        return false;
-    }
-    WebPAnimInfo info;
-    if (!WebPAnimDecoderGetInfo(dec, &info)) {
-        WebPAnimDecoderDelete(dec);
-        m_error = InvalidDataError;
-        m_errorStr = "webp get info failed";
-        return false;
-    }
-    m_canvasSize = QSize((int)info.canvas_width, (int)info.canvas_height);
-    int prevTs = 0;
-    uint8_t* buf = 0;
-    int ts = 0;
-    while (WebPAnimDecoderHasMoreFrames(dec)) {
-        if (!WebPAnimDecoderGetNext(dec, &buf, &ts)) break;
-        m_frames.push_back(imageFromRgba(buf, (int)info.canvas_width, (int)info.canvas_height));
-        int d = ts - prevTs;
-        m_delaysMs.push_back(d > 0 ? d : 0);
-        prevTs = ts;
-    }
-    WebPAnimDecoderDelete(dec);
-    if (m_frames.empty()) {
-        m_error = DecodeError;
-        m_errorStr = "webp decode produced no frame";
-        return false;
-    }
-    m_animated = m_frames.size() > 1;
-    return true;
-}
-
-bool QImageReader::decodeStatic()
-{
-    // ⚠ 必须传 0（自动嗅探），不能传 m_fmt.data()。两个实测坑：
-    //  (1) Qt3 QByteArray 底层 QMemArray<char>，data() 不以 '\0' 结尾，直接当
-    //      const char* 会读到越界垃圾；
-    //  (2) 就算补了终止符，Qt3 各 handler 注册的 format 名大小写不统一且敏感：
-    //      bmp 只认 "BMP"、jpeg 只认 "JPEG"、png 两者都认、其余全不认
-    //      （/tmp/qim/st4.cpp 对 t.bmp/t.jpg/t.png 各 7 种参数实测）。
-    // 传 0 时三种样本均 ok=1 且尺寸正确，故一律自动嗅探。
-    QImage im;
-    im.loadFromData(m_bytes);
-    if (im.isNull()) {
-        m_error = UnsupportedFormatError;
-        m_errorStr = QString("loadFromData failed for %1").arg(m_fmt.data());
-        return false;
-    }
-    m_frames.push_back(im);
-    m_delaysMs.push_back(0);
-    if (m_canvasSize.isNull()) m_canvasSize = im.size();
-    m_animated = false;
-    return true;
-}
-
-void QImageReader::ensureDecoded()
-{
-    if (m_decoded) return;
-    m_decoded = true;
     if (m_bytes.isEmpty()) {
         m_error = InvalidDataError;
         m_errorStr = "empty data";
@@ -418,10 +299,169 @@ void QImageReader::ensureDecoded()
         m_errorStr = "unknown image format";
         return;
     }
-    if (m_fmt == qba("gif"))       decodeGif();
-    else if (m_fmt == qba("webp")) decodeWebp();
-    else if (m_fmt == qba("png") && pngIsApng(m_bytes)) decodeApng();
-    else                           decodeStatic();
+
+    m_dec = new QImageReaderDecoderState;
+
+    // ── GIF：libnsgif 的 scan 只扫结构、不解位图，frame_count 即帧数 ──
+    if (m_fmt == qba("gif")) {
+        nsgif_bitmap_cb_vt vt;
+        ::memset(&vt, 0, sizeof(vt));
+        vt.create = gifCbCreate;
+        vt.destroy = gifCbDestroy;
+        vt.get_buffer = gifCbBuffer;
+        vt.set_opaque = gifCbSetOpaque;
+        vt.test_opaque = gifCbTestOpaque;
+        vt.modified = gifCbModified;
+        // get_rowspan 故意留 NULL：库内部用 info.width×4 作为行跨度，这是 32bpp
+        // 下的正确值。若填一个返回 0 的回调，所有行会重叠成错误画面（已实测）。
+
+        nsgif_t* gif = 0;
+        if (nsgif_create(&vt, NSGIF_BITMAP_FMT_R8G8B8A8, &gif) != NSGIF_OK || !gif) {
+            m_error = UnsupportedFormatError;
+            m_errorStr = "nsgif_create failed";
+            return;
+        }
+        if (nsgif_data_scan(gif, (size_t)m_bytes.size(),
+                            (const uint8_t*)m_bytes.data()) != NSGIF_OK) {
+            nsgif_destroy(gif);
+            m_error = InvalidDataError;
+            m_errorStr = "nsgif_data_scan failed";
+            return;
+        }
+        nsgif_data_complete(gif);
+        const nsgif_info_t* info = nsgif_get_info(gif);
+        if (!info || info->width == 0 || info->height == 0 || info->frame_count == 0) {
+            nsgif_destroy(gif);
+            m_error = InvalidDataError;
+            m_errorStr = "no gif info";
+            return;
+        }
+        m_dec->kind = QImageReaderDecoderState::Gif;
+        m_dec->gif = gif;
+        m_canvasSize = QSize((int)info->width, (int)info->height);
+        m_imageCount = (int)info->frame_count;
+        m_animated = m_imageCount > 1;
+        return;
+    }
+
+    // ── WebP：AnimatedDecoderNew 建解复用器（不全解像素），GetInfo 取帧数 ──
+    if (m_fmt == qba("webp")) {
+        WebPData wd;
+        wd.bytes = (const uint8_t*)m_bytes.data();
+        wd.size = (size_t)m_bytes.size();
+        WebPAnimDecoderOptions opts;
+        if (!WebPAnimDecoderOptionsInit(&opts)) {
+            m_error = UnsupportedFormatError;
+            m_errorStr = "webp options failed";
+            return;
+        }
+        opts.color_mode = MODE_RGBA;
+        opts.use_threads = 0;
+        WebPAnimDecoder* dec = WebPAnimDecoderNew(&wd, &opts);
+        if (!dec) {
+            m_error = InvalidDataError;
+            m_errorStr = "webp decode new failed";
+            return;
+        }
+        WebPAnimInfo info;
+        if (!WebPAnimDecoderGetInfo(dec, &info)) {
+            WebPAnimDecoderDelete(dec);
+            m_error = InvalidDataError;
+            m_errorStr = "webp get info failed";
+            return;
+        }
+        m_dec->kind = QImageReaderDecoderState::Webp;
+        m_dec->webp = dec;
+        m_canvasSize = QSize((int)info.canvas_width, (int)info.canvas_height);
+        m_imageCount = (int)info.frame_count;
+        m_animated = m_imageCount > 1;
+        return;
+    }
+
+    // ── APNG：loader 构造即解析块结构，num_frames() 取帧数 ──
+    if (m_fmt == qba("png") && pngIsApng(m_bytes)) {
+        try {
+            // create_memory_loader 收 const char* 并按值返回 loader<std::istringstream>
+            const char* ptr = m_bytes.isEmpty() ? "" : m_bytes.data();
+            m_dec->apng = new uc::apng::loader<std::istringstream>(
+                uc::apng::create_memory_loader(ptr, (size_t)m_bytes.size()));
+        } catch (std::exception& e) {
+            m_error = InvalidDataError;
+            m_errorStr = QString("apng: %1").arg(e.what());
+            return;
+        }
+        m_dec->kind = QImageReaderDecoderState::Apng;
+        m_canvasSize = QSize((int)m_dec->apng->width(), (int)m_dec->apng->height());
+        m_imageCount = (int)m_dec->apng->num_frames();
+        // 刻意与 Qt6 对齐：APNG 报 supportsOption(Animation)==false，
+        // 靠 jumpToNextImage() 推进（详见 qimagereader_shim.h 头部说明）
+        m_animated = false;
+        return;
+    }
+
+    // ── 其余静态格式：一帧，首帧在 decodeMoreFrames() 里 loadFromData ──
+    m_imageCount = 1;
+    m_animated = false;
+}
+
+// ── 按需解码：把帧缓存补到 want 帧，返回已缓存帧数 ────────────────────────
+
+int QImageReader::decodeMoreFrames(int want)
+{
+    prepareDecoder();
+    if (!m_dec) return (int)m_frames.size();
+
+    while ((int)m_frames.size() < want && (int)m_frames.size() < m_imageCount) {
+        if (m_dec->kind == QImageReaderDecoderState::Gif) {
+            nsgif_rect_t area;
+            uint32_t delay = 0, frameNum = 0;
+            if (nsgif_frame_prepare(m_dec->gif, &area, &delay, &frameNum) != NSGIF_OK) break;
+            nsgif_bitmap_t* bmp = 0;
+            if (nsgif_frame_decode(m_dec->gif, frameNum, &bmp) != NSGIF_OK || !bmp) break;
+            m_frames.push_back(imageFromRgba((const uint8_t*)bmp,
+                                             m_canvasSize.width(), m_canvasSize.height()));
+            m_delaysMs.push_back((int)delay * 10);   // 厘秒 → 毫秒
+        } else if (m_dec->kind == QImageReaderDecoderState::Webp) {
+            if (!WebPAnimDecoderHasMoreFrames(m_dec->webp)) break;
+            uint8_t* buf = 0;
+            int ts = 0;
+            if (!WebPAnimDecoderGetNext(m_dec->webp, &buf, &ts)) break;
+            m_frames.push_back(imageFromRgba(buf, m_canvasSize.width(), m_canvasSize.height()));
+            const int d = ts - m_dec->webpPrevTs;
+            m_delaysMs.push_back(d > 0 ? d : 0);
+            m_dec->webpPrevTs = ts;
+        } else if (m_dec->kind == QImageReaderDecoderState::Apng) {
+            if (!m_dec->apng->has_frame()) break;
+            try {
+                auto fr = m_dec->apng->next_frame();
+                const uint8_t* d = fr.image.data();
+                m_frames.push_back(imageFromRgba(d, (int)fr.image.width(), (int)fr.image.height()));
+                const uint32_t den = fr.delay_den ? fr.delay_den : 100;
+                m_delaysMs.push_back((int)(fr.delay_num * 1000 / den));
+            } catch (std::exception& e) {
+                m_error = InvalidDataError;
+                m_errorStr = QString("apng: %1").arg(e.what());
+                break;
+            }
+        } else {
+            QImage im;
+            im.loadFromData(m_bytes);
+            if (im.isNull()) {
+                m_error = UnsupportedFormatError;
+                m_errorStr = QString("loadFromData failed for %1").arg(m_fmt.data());
+                m_imageCount = 0;
+                break;
+            }
+            if (m_canvasSize.isNull()) m_canvasSize = im.size();
+            m_frames.push_back(im);
+            m_delaysMs.push_back(0);
+        }
+    }
+
+    // 结构扫描帧数 > 实际可解帧数（损坏文件）：收敛到实际，避免 read() 死循环
+    if ((int)m_frames.size() < m_imageCount && (int)m_frames.size() < want)
+        m_imageCount = (int)m_frames.size();
+    return (int)m_frames.size();
 }
 
 // ── 查询接口 ───────────────────────────────────────────────────────────────
@@ -432,36 +472,48 @@ bool QImageReader::canRead()
     return !m_fmt.isEmpty();
 }
 
+// 结构扫描即得帧数，不触发任何像素解码（对齐 Qt6 QGIFFormat::scan/QWebP ensureScanned）
 int QImageReader::imageCount()
 {
-    ensureDecoded();
-    return (int)m_frames.size();
+    prepareDecoder();
+    return m_imageCount;
 }
 
 bool QImageReader::supportsOption(QImageIOHandler::ImageOption option)
 {
     if (option != QImageIOHandler::Animation) return false;
-    // m_animated 是解码后才定的（多帧才算动画），故必须先解一次；
-    // Qt6 插件在 handler 构造期就填好该标志，但对外表现一致。
-    ensureDecoded();
+    // m_animated 由结构扫描即定（多帧才算动画），无需解码像素；
+    // Qt6 插件在 handler 构造期就填好该标志，对外表现一致。
+    prepareDecoder();
     return m_animated;
 }
 
 QImage QImageReader::read()
 {
-    ensureDecoded();
-    // ⚠ 越界时必须直接返回 null。Qt6 对照实测（/tmp/qim/q6jump.cpp）：
-    //   非动画格式 jumpToNextImage() 返回 false 后，read() 给的是 null
-    //   （t3.apng/t.png exhausted isNull=1）；动画格式跳完则是最后一次 read() 给 null。
-    // 若这里回退成「返回最后一帧」，上层 decodeAllFrames 的 while 循环会永远不退出。
-    if (m_index < 0 || m_index >= (int)m_frames.size()) {
-        m_error = InvalidDataError;
-        m_errorStr = "no more frames";
+    // 按需把帧缓存补到当前帧（m_index 是「下一帧下标」，故需 m_index+1 帧）。
+    // 静态图只需解 1 帧、动画也只解到当前帧 —— 这是列表缩略图不再为 120 帧
+    // GIF 付出 120 倍解码的关键。
+    if (decodeMoreFrames(m_index + 1) <= m_index) {
+        // ⚠ 越界时必须直接返回 null。Qt6 对照实测（/tmp/qim/q6jump.cpp）：
+        //   非动画格式 jumpToNextImage() 返回 false 后，read() 给的是 null
+        //   （t3.apng/t.png exhausted isNull=1）；动画格式跳完则是最后一次 read() 给 null。
+        // 若这里回退成「返回最后一帧」，上层 decodeAllFrames 的 while 循环会永远不退出。
+        // 只在尚无错误码时才补 InvalidDataError，避免覆盖文件不存在/设备/格式错误。
+        if (m_error == UnknownError) {
+            m_error = InvalidDataError;
+            m_errorStr = "no more frames";
+        }
         m_lastDelayMs = 0;   // 耗尽后不残留上一帧的延迟
         return QImage();
     }
     m_lastDelayMs = m_delaysMs[m_index];
-    const QImage im = m_frames[m_index];
+    QImage im = m_frames[m_index];
+    // 缩放语义对齐 Qt6：GIF/WebP/APNG/静态多数插件不支持原生 ScaledSize，Qt6 走
+    // image->scaled(scaledSize, IgnoreAspectRatio, Smooth) 回退；Qt3 侧用
+    // smoothScale（默认 ScaleFree ≡ IgnoreAspectRatio）复刻同一结果，且只缩放
+    // 当前这一帧。size()/scaledSize() 的返回值不受影响。
+    if (m_scaledSize.isValid() && !im.isNull())
+        im = im.smoothScale(m_scaledSize);
     // ⚠⚠ 必须**无条件**推进游标，不能只在 m_animated 时推进。
     //   Qt6 对照实测（/tmp/opencode/probe/zk6.cpp，6.7.3，静态 JPEG）：
     //     read#0 isNull=0 → read#1 isNull=1 → read#2 isNull=1
@@ -475,15 +527,16 @@ QImage QImageReader::read()
 
 bool QImageReader::jumpToNextImage()
 {
-    ensureDecoded();
-    if (m_index + 1 < (int)m_frames.size()) {
+    prepareDecoder();
+    // 用结构扫描帧数判断，不必先解出所有帧；m_index 仍是「下一帧下标」。
+    if (m_index + 1 < m_imageCount) {
         ++m_index;
         return true;
     }
     // 失败时必须把游标推到末尾之外：否则非动画格式（如 png/apng/tiff）会一直
     // 返回最后一帧，上层 decodeAllFrames 的 while(!im.isNull()) 循环不退出。
     // Qt6 对照实测：jump 返回 false 后紧接着 read() 给 null。
-    m_index = (int)m_frames.size();
+    m_index = m_imageCount;
     return false;
 }
 

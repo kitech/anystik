@@ -6,7 +6,7 @@
 // 覆盖策略：
 //   · 静态解码走**真实 JPEG 往返**：Qt3 环境已确认 libqjpeg 插件可用
 //     （探针：QImage.save("JPEG") + loadFromData 均成功，8x6 保真），
-//     故本测试现场生成 JPEG 再读回，真正走通 decodeStatic()。
+//     故本测试现场生成 JPEG 再读回，真正走通静态解码路径。
 //   · 错误路径（文件不存在 / 非图像数据 / 空数据）逐个覆盖 —— 产品对下载
 //     失败的贴纸图就靠这些分支来拒绝并打日志。
 //   · GIF/APNG/WebP 动画路径需要二进制样本，本仓不放样本，故不在此覆盖；
@@ -19,6 +19,7 @@
 #include <qfile.h>
 #include <qcstring.h>
 #include <qiodevice.h>
+#include <qsize.h>
 #include <qvaluelist.h>
 #include <unistd.h>
 
@@ -60,7 +61,7 @@ private:
 
 // 生成一张纯色 JPEG 到 path；返回是否成功。
 // ⚠ JPEG 有损，故只断言**尺寸**严格相等，不逐像素比（那是 JPEG 编解码的
-//   范畴，不是本垫片要保证的）。尺寸错位才是本垫片 decodeStatic 的回归信号。
+//   范畴，不是本垫片要保证的）。尺寸错位才是本垫片静态解码的回归信号。
 bool makeJpeg(const QString& path, int w, int h)
 {
     QImage im(w, h, 32);          // Qt3 构造：(w, h, depth)
@@ -152,6 +153,38 @@ TEST_CASE("QImageReader: JPEG 往返——canRead/format/size/read 全链路")
     CHECK_EQ(im.height(), 9);
 }
 
+// ⚠ setScaledSize 对齐 Qt6 回退缩放：read() 返回缩放后的帧，但 size()（画布尺寸）
+//   仍报原图 12×9。列表缩略图正是靠这个把 1657 张贴纸统一缩到 152px。
+TEST_CASE("QImageReader: setScaledSize 后 read 返回缩放帧且 size 不变")
+{
+    TempDir td;
+    REQUIRE(makeJpeg(td.file("t.jpg"), 12, 9));
+    QImageReader zr(td.file("t.jpg"));
+    zr.setScaledSize(QSize(6, 6));
+    CHECK_EQ(zr.scaledSize().width(), 6);
+    CHECK_EQ(zr.scaledSize().height(), 6);
+    const QImage im = zr.read();
+    CHECK(!im.isNull());
+    CHECK_EQ(im.width(), 6);
+    CHECK_EQ(im.height(), 6);
+    const QSize sz = zr.size();
+    CHECK_EQ(sz.width(), 12);     // 画布尺寸不受 setScaledSize 影响
+    CHECK_EQ(sz.height(), 9);
+}
+
+// ⚠ 未设置 scaledSize 时按原尺寸返回（默认行为，不能误缩放）。
+TEST_CASE("QImageReader: 未设置 scaledSize 时按原尺寸返回")
+{
+    TempDir td;
+    REQUIRE(makeJpeg(td.file("t.jpg"), 12, 9));
+    QImageReader zr(td.file("t.jpg"));
+    CHECK(!zr.scaledSize().isValid());
+    const QImage im = zr.read();
+    CHECK(!im.isNull());
+    CHECK_EQ(im.width(), 12);
+    CHECK_EQ(im.height(), 9);
+}
+
 // ⚠ 静态图不是动画：supportsOption(Animation) 必须为 false，否则上层
 //   decodeAllFrames 会按动画循环读、多取一帧空图。
 TEST_CASE("QImageReader: 静态 JPEG 的 supportsOption(Animation) 为 false")
@@ -164,7 +197,7 @@ TEST_CASE("QImageReader: 静态 JPEG 的 supportsOption(Animation) 为 false")
 }
 
 // ⚠ 读完一帧后再 read() 必须给 null（不能回退成「重复最后一帧」），否则
-//   上层 while(!im.isNull()) 循环永不退出。这是 qimagereader_shim.cpp:453-461
+//   上层 while(!im.isNull()) 循环永不退出。这是 QImageReader::read() 里
 //   明确钉住的 Qt6 对齐行为。
 TEST_CASE("QImageReader: 静态图读尽后再 read 返回 null")
 {
@@ -176,7 +209,7 @@ TEST_CASE("QImageReader: 静态图读尽后再 read 返回 null")
 }
 
 // ⚠ jumpToNextImage 对单帧静态图返回 false，且**推进游标到末尾之外**，使随后
-//   read() 返回 null（qimagereader_shim.cpp:470-482）。
+//   read() 返回 null（QImageReader::jumpToNextImage()）。
 TEST_CASE("QImageReader: 单帧图 jumpToNextImage 返回 false 且随后 read 为 null")
 {
     TempDir td;
@@ -212,8 +245,8 @@ TEST_CASE("QImageReader: 存在但非图像 → canRead 为 false，解不出帧
     CHECK(zr.read().isNull());
 }
 
-// ⚠ 空文件（0 字节）：ensureDecoded 走 InvalidDataError 分支
-//   （qimagereader_shim.cpp:411-414）。产品对下载到 0 字节的贴纸必须能拒绝。
+// ⚠ 空文件（0 字节）：prepareDecoder 走 InvalidDataError 分支。
+//   产品对下载到 0 字节的贴纸必须能拒绝。
 TEST_CASE("QImageReader: 空文件 → 解不出帧且 read 为 null")
 {
     TempDir td;
