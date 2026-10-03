@@ -7,6 +7,8 @@
 #include "qimagereader_shim.h"
 #include "placeholderlineedit.h"   // Qt3 QLineEdit 无 placeholder → qlcomp 的替代
 #include "toastwidget.h"           // 单击复制的提示（anysk stickerhomepage.cpp:578）
+#include "StyleParams.h"           // g_activeParams：圆钮取当前主题调色板
+#include "ThemeManager.h"          // ThemeManager::isDarkMode()
 
 #include <algorithm>
 
@@ -41,9 +43,70 @@
 #include <QFile>
 #include <QDir>
 #include <QEvent>
+#include <QEnterEvent>
 #include <QApplication>
 #include <QClipboard>
 #endif
+
+// ═════════ anystik 悬浮圆钮：QLimeStyle 无法按控件强制 18px 圆角 ═════════
+// anystik 的 QskPushButton 用 QskBoxShapeMetrics(18) 画正圆（stickerlist.cpp:217）。
+// qlstik 的 LimeStyle 半径随主题（Flat 6 / Border 4 / Capsule=height/2），且
+// LimeStyle.cpp 与 doxhttpd/qlcomp 是同一 inode 硬链接，不能改 buttonRadiusFor。
+// 故此处自绘圆钮：无 Q_OBJECT（只用 QPushButton 继承来的 clicked()，无需 moc）。
+namespace {
+class CircleFloatButton : public QPushButton {
+public:
+    CircleFloatButton(const QString& text, QWidget* parent)
+        : QPushButton(text, parent)
+    {
+        setFixedSize(36, 36);   // anystik stickerlist.cpp:219
+    }
+protected:
+    virtual void paintEvent(QPaintEvent*)
+    {
+        QPainter p(this);
+#ifndef QT3_BUILD
+        p.setRenderHint(QPainter::Antialiasing, true);   // Qt3 无抗锯齿，与全 UI 一致
+#endif
+#ifdef QT3_BUILD
+        const bool hovered = hasMouse();     // Qt3 无 underMouse()
+#else
+        const bool hovered = underMouse();
+#endif
+        QColor bg, fg, bd;
+        const StyleParams* sp = g_activeParams;
+        if (sp) {
+            const StyleParams::Palette& pal =
+                ThemeManager::isDarkMode() ? sp->dark : sp->light;
+            bd = pal.border;
+            fg = pal.textPrimary;
+            if (isDown())       bg = pal.activeBg;
+            else if (hovered)   bg = pal.hoverBg;
+            else                bg = pal.surfaceBg;
+        } else {   // 主题未初始化：用贴合本页深色网格底(0x1e1e34)的固定色
+            bd = QColor(0x50, 0x50, 0x70);
+            fg = QColor(0xdc, 0xdc, 0xdc);
+            if (isDown())       bg = QColor(0x48, 0x48, 0x60);
+            else if (hovered)   bg = QColor(0x40, 0x40, 0x58);
+            else                bg = QColor(0x2a, 0x2a, 0x44);
+        }
+        QRect r = rect();
+        r.setWidth(r.width() - 1);    // Qt3 QRect 无 adjusted()
+        r.setHeight(r.height() - 1);
+        p.setPen(bd);
+        p.setBrush(bg);
+        p.drawEllipse(r);
+        p.setPen(fg);
+        p.drawText(rect(), Qt::AlignCenter, text());
+    }
+#ifdef QT3_BUILD
+    virtual void enterEvent(QEvent*) { update(); }
+#else
+    virtual void enterEvent(QEnterEvent*) { update(); }
+#endif
+    virtual void leaveEvent(QEvent*) { update(); }
+};
+} // namespace
 
 // ═══════════════════════════════════════════════════════════════════
 // 缩略图懒解码 + 缓存（照搬 anysk stickerlist.cpp:121-138）
@@ -260,6 +323,8 @@ StickerGridWidget::StickerGridWidget(QWidget* parent)
     , m_scrollPos(0)
     , m_scrollDelta(0)
     , m_vBar(0)
+    , m_toTopBtn(0)
+    , m_toBottomBtn(0)
 {
     // ⚠ 装配逐行照搬 qltox/qldox/chatview.cpp:2310-2322
     m_vBar = new LimeScrollBar(Qt::Vertical, this);
@@ -277,6 +342,16 @@ StickerGridWidget::StickerGridWidget(QWidget* parent)
     setFocusPolicy(Qt::StrongFocus);
 #endif
     setMouseTracking(true);
+
+    // ── 照搬 anystik stickerlist.cpp:212-226：滚动到顶/底的悬浮圆钮 ──
+    m_toTopBtn    = new CircleFloatButton(QString(QChar(0x2191)), this);   // ↑
+    m_toBottomBtn = new CircleFloatButton(QString(QChar(0x2193)), this);   // ↓
+    m_toTopBtn->raise();
+    m_toBottomBtn->raise();
+    m_toTopBtn->hide();
+    m_toBottomBtn->hide();
+    connect(m_toTopBtn,    SIGNAL(clicked()), this, SLOT(onScrollToTop()));
+    connect(m_toBottomBtn, SIGNAL(clicked()), this, SLOT(onScrollToBottom()));
 }
 
 StickerGridWidget::~StickerGridWidget()
@@ -319,6 +394,7 @@ void StickerGridWidget::relayout()
     m_vBar->setRange(0, maxScroll);
     m_vBar->setPageStep(vpH);
     m_vBar->setValue(m_scrollPos);   // 让滚动条位置跟着钳制后的值走
+    layoutScrollButtons();           // m_rows 变了 → 圆钮位置/显隐跟着变
 }
 
 void StickerGridWidget::resizeEvent(QResizeEvent* event)
@@ -328,6 +404,46 @@ void StickerGridWidget::resizeEvent(QResizeEvent* event)
     const int sbw = m_vBar->sizeHint().width();
     m_vBar->setGeometry(width() - sbw, 0, sbw, height());
     relayout();
+}
+
+// ── 照搬 anystik stickerlist.cpp:386-404 ──
+void StickerGridWidget::layoutScrollButtons()
+{
+    if (!m_toTopBtn || !m_toBottomBtn) {
+        return;
+    }
+    const int MARGIN = 12;               // stickerlist.cpp:393
+    const int SPACING = 6;               // stickerlist.cpp:394
+    const int BTN = 36;                  // stickerlist.cpp:395
+    const int w = width();
+    const int h = height();
+    m_toTopBtn->setGeometry(w - MARGIN - BTN,
+                            h - MARGIN - BTN * 2 - SPACING, BTN, BTN);
+    m_toBottomBtn->setGeometry(w - MARGIN - BTN,
+                               h - MARGIN - BTN, BTN, BTN);
+    const bool show = (m_rows > 1);      // stickerlist.cpp:399/403
+#ifdef QT3_BUILD
+    m_toTopBtn->setShown(show);          // Qt3 无 setVisible()
+    m_toBottomBtn->setShown(show);
+#else
+    m_toTopBtn->setVisible(show);
+    m_toBottomBtn->setVisible(show);
+#endif
+}
+
+// anystik scrollToY(0) / scrollToY(scrollableSize().height())
+void StickerGridWidget::onScrollToTop()
+{
+    m_vBar->setValue(0);                 // → valueChanged → onScrollChanged → update()
+}
+
+void StickerGridWidget::onScrollToBottom()
+{
+#ifdef QT3_BUILD
+    m_vBar->setValue(m_vBar->maxValue());    // 同本文件 :358 写法
+#else
+    m_vBar->setValue(m_vBar->maximum());     // 同本文件 :361 写法
+#endif
 }
 
 void StickerGridWidget::onScrollChanged(int value)

@@ -164,11 +164,15 @@ protected:
 
 private slots:
     void onScrollChanged(int value);
+    void onScrollToTop();
+    void onScrollToBottom();
 
 private:
     void relayout();
     void drawTile(QPainter& p, int index, int x, int y);
     int  indexAt(const QPoint& contentPos) const;
+    // anystik stickerlist.cpp:386-404：右下角两悬浮圆钮的重定位/显隐
+    void layoutScrollButtons();
 
     std::vector<StickerItem> m_items;
     // ⚠ 缩略图缓存必须是**类成员**，不能是文件作用域 static：
@@ -186,6 +190,8 @@ private:
     int m_scrollPos;              // = qltox m_scrollPos
     int m_scrollDelta;            // 滚轮 delta 累加（chatview.cpp:3167）
     LimeScrollBar* m_vBar;        // = qltox m_vScrollBar
+    QPushButton* m_toTopBtn;      // anystik stickerlist.cpp:213（CircleFloatButton，见 cpp）
+    QPushButton* m_toBottomBtn;   // anystik stickerlist.cpp:214
 };
 
 // ═════════ StickerListPage：贴纸家页面 ═════════
