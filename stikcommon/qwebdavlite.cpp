@@ -41,12 +41,11 @@ void QWebdavLite::provideAuthentication(QNetworkReply*, QAuthenticator* auth)
         return;
     }
     auth->setPassword(m_password);
-    // Qt6 把 setUserName 改名成 setUser（userName() 同理，Qt6 弃用）。
-#if !defined(QT_VERSION) || QT_VERSION < 0x060000
-    auth->setUserName(m_username);
-#else
+    // 无需版本分支：Qt4.8/5.15/6 官方都是 setUser()，Qt3 走 qnam_shim 的
+    // QAuthenticator，而 shim 已补上同名的 user()/setUser()（qnam_shim.h:212-213）。
+    // 早前这里按 QT_VERSION 二选一，门槛写成 < 0x060000 → Qt4/Qt5 走 setUserName，
+    // 而那两版根本没这个函数，Qt5 构建直接报错。
     auth->setUser(m_username);
-#endif
     if (auth->realm().isEmpty()) {
         auth->setRealm(m_hostname);
     }

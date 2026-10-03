@@ -203,10 +203,25 @@ private:
 };
 
 // QWebdav::provideAuthenication(QNetworkReply*, QAuthenticator*) 用
+//
+// ⚠ 命名对齐官方 Qt：官方 Qt4.8 / Qt5.15 / Qt6 的 QAuthenticator 只有
+//   `user()` / `setUser()`，**没有** userName/setUserName（Qt 5.15 与 Qt 4.8
+//   官方文档的完整成员表里都查不到这两个名字）。
+//   历史上 Qt3 才有 userName/setUserName，本 shim 早先只抄了 Qt3 那套名字，
+//   导致同一个调用点要在 QAuthenticator 上按版本二选一 —— 而版本门槛很容易
+//   抄错（曾把门槛写成 QT_VERSION < 0x060000，把 Qt4/Qt5 全发配给
+//   setUserName，而那两版根本没有该函数）。
+//   → 通用解法：本 shim **补上官方名字** user()/setUser()，调用处一律用
+//     官方 API，**不再需要任何版本分支**。Qt3 时代的旧名保留给既有调用者
+//     （qnam_shim.cpp 的 Basic 认证拼接、test_qnam_shim.cpp）。
 class QAuthenticator
 {
 public:
     QAuthenticator() {}
+    // 官方 Qt4.8/5.15/6 名字 —— 新代码用这两个
+    QString user() const { return m_user; }
+    void setUser(const QString& u) { m_user = u; }
+    // Qt3 时代旧名，保留兼容（勿在新代码里用）
     QString userName() const { return m_user; }
     void setUserName(const QString& u) { m_user = u; }
     QString password() const { return m_pass; }

@@ -53,12 +53,18 @@ SOURCES += \
     src/main.cpp \
     src/mainwindow.cpp \
     src/config.cpp \
+    src/page.cpp \
+    src/pagemanager.cpp \
+    src/stickerlistpage.cpp \
     $$STIKCOMMON_SOURCES
 
 HEADERS += \
     src/mainwindow.h \
     src/config.h \
     src/buildinfo.h \
+    src/page.h \
+    src/pagemanager.h \
+    src/stickerlistpage.h \
     $$STIKCOMMON_HEADERS
 
 # src/main.cpp 与 src/mainwindow.cpp 都 #include "app_icon.xpm"（内嵌 XPM，

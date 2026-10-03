@@ -11,6 +11,12 @@
 #include "eventpoller.h"
 #include "qwebdavtransport.h"
 
+#ifdef QT3_BUILD
+#include "qcoreapplication_shim.h"   // Qt3 下补 QCoreApplication::setOrganizationName
+#else
+#include <QCoreApplication>
+#endif
+
 #include <stdio.h>
 #include <string.h>
 
@@ -45,15 +51,16 @@ int main(int argc, char* argv[])
 #ifndef QT3_BUILD
     app.setApplicationVersion("0.6.0");
 #endif
-    // 应用名必须显式固定：QStandardPaths::AppLocalDataLocation 在应用名为空时
-    // 会回退到"可执行文件名"，于是 Qt3/Qt4 与 Qt5/6 会因可执行名不同（qlstik /
-    // q3stik / q4stik / q6stik）而落到不同的数据目录。固定后各版本统一为
-    // ~/.local/share/qlstik。QlStik 不设组织名，故路径无 org 一层。
-#ifdef QT3_BUILD
-    app.setName("qlstik");
-#else
-    app.setApplicationName("qlstik");
-#endif
+    // 组织名/应用名必须与 anystik 完全一致（anystik/src/main.cpp:163-164）：
+    // 贴纸库是 StickerStore::ensureInit 按 QStandardPaths::AppLocalDataLocation
+    // 建的，只有 org=fedlet app=anystik 才落到 ~/.local/share/fedlet/anystik，
+    // 两个版本才能共享读写同一份数据（message.db / cache.db / packs / pastes）。
+    // 应用名若留空还会回退到可执行名（qlstik / q3stik / q4stik / q6stik），
+    // 使各 Qt 版本分叉，故必须显式固定。
+    // Qt3 无 QCoreApplication，用 stikcommon 垫片补齐静态 org/app API；
+    // Qt4+ 用原生静态 API。两侧调用形式一致。
+    QCoreApplication::setOrganizationName(QString::fromUtf8("fedlet"));
+    QCoreApplication::setApplicationName(QString::fromUtf8("anystik"));
 
     if (showVersion) {
         printf("qlstik 0.6.0 (GIT_COMMIT=%s)\n", QLSTIK_GIT_COMMIT_STR);

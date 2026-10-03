@@ -12,6 +12,8 @@
 #include "ThemeManager.h"
 #include "StyleParams.h"
 #include "appsetup.h"
+#include "pagemanager.h"
+#include "stickerlistpage.h"
 
 #include <qpixmap.h>
 #include <qevent.h>
@@ -79,6 +81,8 @@ MainWindow::MainWindow(QWidget* parent)
     , framelessHelper(0)
     , titleBar(0)
     , tray(0)
+    , pageStack(0)
+    , pageMgr(0)
     , statusLabel(0)
     , langCombo(0)
     , styleCombo(0)
@@ -90,7 +94,15 @@ MainWindow::MainWindow(QWidget* parent)
     , demoEdit(0)
     , forceQuit(false)
 {
-    setGeometry(100, 50, 1100, 680);
+    // 窗口尺寸对齐 anystik/src/main.cpp:404 的 setPreferredSize({420, 680})。
+    // ⚠ setPreferredSize 是 QSkinny 概念，Qt3 无等价 API，resize() 是语义最接近的映射
+    //   （一次性设初始尺寸，后续用户可自由拉伸）。同 anystik 一样**不设**最小/最大尺寸
+    //   —— 加了反而偏离基准。见移植计划 §6.3l L.1。
+    // ⚠ 实测：本页 pageStack 的 minimumSizeHint 只有 362×194，但整个壳的最小宽度
+    //   由 CustomTitleBar（EmbeddedMenuBar + 语言/皮肤 combo）撑到 996，故首帧仍
+    //   是 996×680。这是外壳问题，不是贴纸页问题；要真正 420 宽需改 qlcomp 的
+    //   CustomTitleBar（影响所有 qltox 派生程序），未在本次改动范围内。
+    resize(420, 680);
 
     buildStatusBar();
     buildCentralWidget();
@@ -180,7 +192,22 @@ void MainWindow::buildCentralWidget()
         "ui: qlcomp/qlite.pri (CustomTitleBar / EmbeddedMenuBar / SharedStatusBar /\n"
         "    SystemTrayIcon / LimeStyle / ThemeManager / Translator)\n"
         "next: batch 1 (myi18n / eifreader / davobfus) -> batch 2 (QNAM shim on EventPoller)"));
-    lay->addWidget(statusLabel, 1);
+    statusLabel->hide();      // 已被页面栈取代，仅留给演示菜单的 setText 用
+
+    // ── 页面栈：业务页统一由 PageManager 管理生命周期与导航 ──
+    pageStack = new StackedWidget(central);
+    lay->addWidget(pageStack, 1);
+    // ⚠ 不设背景角色：Qt3 的 QWidgetStack 无 setBackgroundRole，QPalette 也没有
+    //   Base 角色（那是 Qt4+）。贴纸网格在 paintEvent 里自填底色，不需要壳刷底。
+
+    pageMgr = new PageManager(pageStack, this);
+    // 贴纸家：CachePolicy::LRU（page.h:108-109）—— 切走进缓存池、回来不重解码
+    PageRegistration reg;
+    reg.policy = CachePolicy::LRU;
+    pageMgr->registerPage(QString::fromUtf8("stickerList"),
+                          []() -> Page* { return new StickerListPage(); },
+                          reg);
+    pageMgr->open(QString::fromUtf8("stickerList"));
 
     setCentralWidget(central);
 

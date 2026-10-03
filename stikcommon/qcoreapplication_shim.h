@@ -36,8 +36,13 @@ public:
     static QApplication* instance() { return qApp; }
 
     // 应用名/组织名：Qt4 才把它们做成 QString 静态 API。Qt3 下应用名存于
-    // QObject::name()（const char* 形态），且没有"组织名"概念——org 恒为空，
-    // 这与 qlstik 的现状一致（不设 org，故 AppLocalDataLocation 少一层目录）。
+    // QObject::name()（const char* 形态）；组织名 Qt3 本无，这里用一个进程内
+    // 静态量补齐 set/get，语义与 Qt4+ 的静态 API 对齐。
+    //
+    // ⚠ 组织名必须真正保存：QStandardPaths 垫片按 org/app 拼 AppLocalDataLocation
+    //   （qstandardpaths_shim.h 黄金基准：org=fedlet app=anystik →
+    //   $HOME/.local/share/fedlet/anystik）。之前恒空会让 Qt3 少一层 fedlet，
+    //   与 Qt6/anystik 的数据目录分叉，两边读不到同一份贴纸库。
     static QString applicationName() {
         return qApp ? QString::fromUtf8(qApp->name()) : QString();
     }
@@ -50,8 +55,15 @@ public:
 #endif
         }
     }
-    static QString organizationName() { return QString(); }
-    static void setOrganizationName(const QString&) { }
+    // 进程内静态存储：不依赖 qApp 是否存在，与 Qt4+ 静态 set/get 行为一致。
+    static QString& orgNameStorage() {
+        static QString s;
+        return s;
+    }
+    static QString organizationName() { return orgNameStorage(); }
+    static void setOrganizationName(const QString& name) {
+        orgNameStorage() = name;
+    }
 };
 
 #endif // QLSTIK_QCOREAPPLICATION_SHIM_H

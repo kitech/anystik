@@ -33,6 +33,8 @@
 class FramelessHelper;
 class CustomTitleBar;
 class SystemTrayIcon;
+class PageManager;
+// ⚠ StackedWidget 是 compat34.h 里的 typedef（Qt3 = QWidgetStack），**不能**前向声明
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -117,6 +119,10 @@ private:
     FramelessHelper* framelessHelper;
     CustomTitleBar* titleBar;
     SystemTrayIcon* tray;
+
+    // 页面栈（贴纸家等业务页都挂这里，替掉原先的占位 statusLabel）
+    StackedWidget* pageStack;
+    PageManager* pageMgr;
     QLabel* statusLabel;
     QComboBox* langCombo;
     QComboBox* styleCombo;

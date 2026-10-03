@@ -79,10 +79,21 @@ TEST_CASE("QCoreApplication::translate: 中英混排整串 UTF-8 正确")
     CHECK(got.at(5) == QChar('k'));
 }
 
-// ⚠ Qt3 无「组织名」概念，organizationName() 必须恒空 —— qlstik 不设 org，
-//   AppLocalDataLocation 因此少一层目录。把它钉住，防止有人「顺手实现」成
-//   返回应用名或别的值而与 Qt6 路径分叉。
-TEST_CASE("QCoreApplication::organizationName: 恒为空串（Qt3 无此概念）")
+// ⚠ Qt3 本无「组织名」概念，垫片补了一个进程内静态量。默认必须为空，
+//   且 set 之后必须能读回 —— 这是 qlstik 与 anystik 共用数据目录的关键：
+//   org=fedlet app=anystik 才能拼出 $HOME/.local/share/fedlet/anystik。
+//   若 set/get 不是同一份存储，QStandardPaths 会少一层 org，两边读不到同一库。
+TEST_CASE("QCoreApplication::organizationName: 默认空串")
 {
-    CHECK(QCoreApplication::organizationName().isEmpty());   // 不用 CHECK_EQ(..., QString())：null QString 打印会 SIGSEGV
+    // 不用 CHECK_EQ(..., QString())：null QString 打印会 SIGSEGV
+    CHECK(QCoreApplication::organizationName().isEmpty());
+}
+
+TEST_CASE("QCoreApplication::organizationName: set 后能原样读回")
+{
+    QCoreApplication::setOrganizationName(QString::fromUtf8("fedlet"));
+    CHECK(QCoreApplication::organizationName()
+          == QString::fromUtf8("fedlet"));
+    // 复位，避免污染后续用例（QStandardPaths 拼路径要用 current org）
+    QCoreApplication::setOrganizationName(QString());
 }
