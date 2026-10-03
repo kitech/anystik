@@ -195,6 +195,14 @@ public:
     explicit StickerListPage(QWidget* parent = 0);
     virtual ~StickerListPage();
 
+    // 搜索栏右侧计数标签（“N 个 · M 包”）+ 贴纸数，供托盘表头/徽标读取
+    QString countLabelText() const;
+    int     stickerCount() const;
+
+signals:
+    // 计数标签变化（tab/包/搜索切换时），携带标签原文与贴纸数
+    void countsChanged(const QString& labelText, int stickers);
+
 protected:
     virtual void onCreate(const QVariantMap& launchArgs,
                           const QVariantMap& savedState);

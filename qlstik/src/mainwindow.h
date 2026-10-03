@@ -59,6 +59,7 @@ private slots:
     void trayActivated(int reason);
     void trayShowMainWindow();
     void quitApp();
+    void onStickerCountsChanged(const QString& labelText, int stickers);
     // 演示菜单
     void onMenu1Stub();
     void onDemoStatusInfo();
@@ -120,6 +121,8 @@ private:
     static int styleIndexOf(const QString& styleId);
     // 三按钮 tooltip：功能 + 当前值（语言/外观/深色变化时刷新）
     void updateAppearanceTooltips();
+    // 托盘右键菜单禁用表头：app 名 - 计数标签
+    void updateTrayHeader();
 
     FramelessHelper* framelessHelper;
     CustomTitleBar* titleBar;
@@ -147,6 +150,8 @@ private:
     std::vector<MenuItemRef> menuItemRefs;   // 叶子项 + 子菜单标题
     std::vector<MenuItemRef> topMenuRefs;    // 顶级菜单标题（顺序 = kTopMenuKeys）
     bool forceQuit;
+    MenuItemRef trayHeaderRef;               // 托盘表头项（动态文案，不入 refreshMenuTexts）
+    QString m_countText;                     // 最近一次计数标签文本
 
     // ── 首帧门状态（照搬 qltox mainwindow.h:145-146）──
     bool m_firstPaintLogged;   // 门是否已触发（一次性）

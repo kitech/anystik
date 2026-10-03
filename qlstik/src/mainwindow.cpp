@@ -228,6 +228,15 @@ void MainWindow::buildCentralWidget()
                           reg);
     pageMgr->open(QString::fromUtf8("stickerList"));
 
+    // 托盘表头/徽标跟随贴纸页计数标签（app 名 - N 个 · M 包）
+    StickerListPage* slp = dynamic_cast<StickerListPage*>(
+        pageMgr->findPage(QString::fromUtf8("stickerList")));
+    if (slp) {
+        QObject::connect(slp, SIGNAL(countsChanged(const QString&, int)),
+                         this, SLOT(onStickerCountsChanged(const QString&, int)));
+        onStickerCountsChanged(slp->countLabelText(), slp->stickerCount());
+    }
+
     setCentralWidget(central);
 
     // 无边框窗口：拖动/缩放/贴边/系统菜单
@@ -498,10 +507,24 @@ void MainWindow::buildTray()
     QObject::connect(tray, SIGNAL(messageClicked()), this, SLOT(trayShowMainWindow()));
 
     PopupMenu* trayMenu = new PopupMenu(this);
+
+    // 表头：禁用项，显示「app 名 - 计数标签」，随计数/语言刷新
+    trayHeaderRef.owner = trayMenu;
+#ifdef QT3_BUILD
+    trayHeaderRef.id = trayMenu->insertItem(QString());
+    trayMenu->setItemEnabled(trayHeaderRef.id, false);
+#else
+    trayHeaderRef.action = trayMenu->addAction(QString());
+    trayHeaderRef.action->setEnabled(false);
+#endif
+    addMenuSeparator(trayMenu);
+
     addMenuItem(trayMenu, this, SLOT(trayShowMainWindow()), "tray.open");
     addMenuSeparator(trayMenu);
     addMenuItem(trayMenu, this, SLOT(quitApp()), "tray.quit");
     tray->setContextMenu(trayMenu);
+
+    updateTrayHeader();
 }
 
 void MainWindow::trayActivated(int reason)
@@ -518,6 +541,29 @@ void MainWindow::trayShowMainWindow()
     show();
     raise();
     qActivateWindow(this);
+}
+
+void MainWindow::onStickerCountsChanged(const QString& labelText, int stickers)
+{
+    m_countText = labelText;
+    if (tray) { tray->setBadgeCount(stickers); }
+    updateTrayHeader();
+}
+
+// 托盘右键菜单表头 = app 名 +「 - 」+ 计数标签（无计数时只显 app 名）。
+// 与 refreshMenuTexts 分离：该项无翻译键，需在计数变化与语言切换时各自刷新。
+void MainWindow::updateTrayHeader()
+{
+    if (!trayHeaderRef.owner) { return; }
+    QString text = _("app_title");
+    if (!m_countText.isEmpty()) {
+        text += QString::fromUtf8(" - ") + m_countText;
+    }
+#ifdef QT3_BUILD
+    static_cast<QPopupMenu*>(trayHeaderRef.owner)->changeItem(trayHeaderRef.id, text);
+#else
+    if (trayHeaderRef.action) { trayHeaderRef.action->setText(text); }
+#endif
 }
 
 void MainWindow::quitApp()
@@ -650,6 +696,7 @@ void MainWindow::retranslateUi()
     if (tray) { tray->setToolTip(title); }
     updateAppearanceTooltips();
     refreshMenuTexts();
+    updateTrayHeader();
 }
 
 // ═══════════════ 演示菜单 ═══════════════

@@ -1000,6 +1000,17 @@ void StickerListPage::updateCountLabel()
     m_countPacks = int(packIds.size());
     m_countLabel->setText(QString::fromUtf8("%1 个 · %2 包")
                           .arg(m_countStickers).arg(m_countPacks));
+    emit countsChanged(m_countLabel->text(), m_countStickers);
+}
+
+QString StickerListPage::countLabelText() const
+{
+    return m_countLabel ? m_countLabel->text() : QString();
+}
+
+int StickerListPage::stickerCount() const
+{
+    return m_countStickers;
 }
 
 void StickerListPage::onSearchTextChanged(const QString& text)
