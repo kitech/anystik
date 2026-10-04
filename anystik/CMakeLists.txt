@@ -63,34 +63,34 @@ qt_add_executable(anystik
     src/phonemonitor.cpp
     src/phonesmsstatusbar.h
     src/phonesmsstatusbar.cpp
-    src/phonedb.h
-    src/phonedb.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/phonedb.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/phonedb.cpp
     src/phoneqpage.h
     src/phoneqpage.cpp
     src/stickerstore.h
     src/stickerstore.cpp
-    src/eifreader.h
-    src/eifreader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/eifreader.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/eifreader.cpp
     src/bundledpackspage.h
     src/bundledpackspage.cpp
     src/stickerlist.h
     src/stickerlist.cpp
     src/stickerhomepage.h
     src/stickerhomepage.cpp
-    src/imagetmpuploader.h
-    src/imagetmpuploader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/imagetmpuploader.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/imagetmpuploader.cpp
     src/imagesearchpopup.h
     src/imagesearchpopup.cpp
-    src/imagesearchclient.h
-    src/imagesearchclient.cpp
-    src/sitelistclient.h
-    src/sitelistclient.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/imagesearchclient.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/imagesearchclient.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/sitelistclient.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/sitelistclient.cpp
     src/searchresultgrid.h
     src/searchresultgrid.cpp
     src/stickergenpage.h
     src/stickergenpage.cpp
-    src/imageaiutil.h
-    src/imageaiutil.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/imageaiutil.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/imageaiutil.cpp
     src/onlinepackspage.h
     src/onlinepackspage.cpp
     src/ipinfopage.h
@@ -101,15 +101,15 @@ qt_add_executable(anystik
     src/migrationdialog.cpp
     src/toastpopup.h
     src/toastpopup.cpp
-    src/myi18n.h
-    src/myi18n.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/myi18n.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/myi18n.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/davobfus.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/davobfus.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/settings_trace.cpp
     src/davbisync.h
     src/davbisync.cpp
-    src/davbisync_baseline.h
-    src/davbisync_baseline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/davbisync_baseline.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/davbisync_baseline.cpp
     src/syncprogresspopup.h
     src/syncprogresspopup.cpp
     ../vendor/qwebdav/qnaturalsort.cpp

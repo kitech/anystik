@@ -49,16 +49,15 @@ STIKCOMMON_INCLUDES += $$MYVENDOR_INCLUDES $$QLDOX_INCLUDES
 #   * qlstik.pro 已含 -I../../anystik/vendor/include，include 路径无需新增
 # 函数体里尚无 Qt3 分支，剩余的 Qt4 QByteArray 方法（constData/indexOf/
 # reserve/append 等 8 处）由编译实测决定是否还需补垫，不预先下结论。
-ANYSTIK_SRC_DIR = $$STIKCOMMON_DIR/../anystik/src
 STIK_VENDOR_DIR = $$STIKCOMMON_DIR/../vendor
 
-# myi18n：L0 引用 anystik/src（Qt3 侧靠 stikcommon/*_shim.h 兜类级缺口）
-STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/myi18n.cpp
-STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/myi18n.h
+# myi18n：已物理迁入本目录（L2）；Qt3 侧靠 stikcommon/*_shim.h 兜类级缺口
+STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/myi18n.cpp
+STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/myi18n.h
 
 # eifreader：批次 5 因 StickerStore 的 runInstallEif 依赖而提前解冻（见移植计划 §6.3j）
-STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/eifreader.cpp
-STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/eifreader.h
+STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/eifreader.cpp
+STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/eifreader.h
 
 # davobfus：已拷入本目录（手写源，anystik/src 侧是 .cpp.tmpl 模板 +
 # 真实 key 占位；qlstik 不注入 key，只验证代码可编可链）
@@ -82,8 +81,8 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qcoreapplication_shim.h \
 # 三个类都是 Qt5 才引入：Qt3.5 与 Qt4.8.7 的 QtCore 下均无对应头文件，
 # 故三个垫片对 Qt3 与 Qt4 同时启用（计划原文"QSaveFile 仅 Qt3、Qt4.1+ 原生"
 # 有误，已核实更正为 Qt5.1 才引入）。Qt5+ 走原生，垫片 .cpp 不参与编译。
-STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/davbisync_baseline.cpp
-STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/davbisync_baseline.h
+STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/davbisync_baseline.cpp
+STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/davbisync_baseline.h
 
 # ══ 批次 2b：phonedb（QNAM 消费端：QNetworkRequest/Manager/Reply +
 #     qconnect_slots 新式 connect + cookie jar）══
@@ -98,11 +97,11 @@ STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/davbisync_baseline.h
 #     qt3 moc 处理生成 moc_phonedb.cpp，新式 connect 走 qconnect_slots.h。
 # 注：isEmpty(QT_VERSION)=Qt3；Qt5+/Qt6 也编译（原生 QNAM）。
 isEmpty(QT_VERSION) {
-    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/phonedb.cpp
-    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/phonedb.h
+    STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/phonedb.cpp
+    STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/phonedb.h
 } else:!lessThan(QT_VERSION, 5.0.0) {
-    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/phonedb.cpp
-    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/phonedb.h
+    STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/phonedb.cpp
+    STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/phonedb.h
 }
 
 # ══ 批次 3a：imagetmpuploader（QNAM multipart/raw 上传 + QJson 解析）══
@@ -113,11 +112,11 @@ isEmpty(QT_VERSION) {
 # payload 用 QCString+setNum 拼（QByteArray=QMemArray<char> 无 operator+/number）、
 # using ::connect；QByteArrayLiteral 由 qba_shim.h 归属 Qt3→QCString。
 isEmpty(QT_VERSION) {
-    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/imagetmpuploader.cpp
-    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/imagetmpuploader.h
+    STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/imagetmpuploader.cpp
+    STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/imagetmpuploader.h
 } else:!lessThan(QT_VERSION, 5.0.0) {
-    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/imagetmpuploader.cpp
-    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/imagetmpuploader.h
+    STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/imagetmpuploader.cpp
+    STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/imagetmpuploader.h
 }
 
 # ══ 批次 3b：imageaiutil（QNAM 视觉描述 + QJson + QImageReader 探测 + 轮询）══
@@ -131,11 +130,11 @@ isEmpty(QT_VERSION) {
 #     在源内 QT3_BUILD 收口；startNext/pollAiHorde 在 QT3_BUILD 纳入 slots 分区
 #     （Qt3QMetaObject::invokeMethod 与老式 SIGNAL/SLOT 连接只认槽名）。
 isEmpty(QT_VERSION) {
-    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/imageaiutil.cpp
-    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/imageaiutil.h
+    STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/imageaiutil.cpp
+    STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/imageaiutil.h
 } else:!lessThan(QT_VERSION, 5.0.0) {
-    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/imageaiutil.cpp
-    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/imageaiutil.h
+    STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/imageaiutil.cpp
+    STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/imageaiutil.h
 }
 
 # ══ 批次 2c：sitelistclient / imagesearchclient（QNAM + QRegularExpression）══
@@ -150,15 +149,15 @@ isEmpty(QT_VERSION) {
 # 两个 pimpl 已从 QObject 降为**普通 C++ 类**（Q_OBJECT / moc 在 .cpp 里），
 # 因为 Qt3 qmake 1.07a 不对 .cpp 跑 moc，`connect` 的 context 改用 owner。
 isEmpty(QT_VERSION) {
-    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/sitelistclient.cpp \
-                           $$ANYSTIK_SRC_DIR/imagesearchclient.cpp
-    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/sitelistclient.h \
-                           $$ANYSTIK_SRC_DIR/imagesearchclient.h
+    STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/sitelistclient.cpp \
+                           $$STIKCOMMON_DIR/imagesearchclient.cpp
+    STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/sitelistclient.h \
+                           $$STIKCOMMON_DIR/imagesearchclient.h
 } else:!lessThan(QT_VERSION, 5.0.0) {
-    STIKCOMMON_SOURCES  += $$ANYSTIK_SRC_DIR/sitelistclient.cpp \
-                           $$ANYSTIK_SRC_DIR/imagesearchclient.cpp
-    STIKCOMMON_HEADERS  += $$ANYSTIK_SRC_DIR/sitelistclient.h \
-                           $$ANYSTIK_SRC_DIR/imagesearchclient.h
+    STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/sitelistclient.cpp \
+                           $$STIKCOMMON_DIR/imagesearchclient.cpp
+    STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/sitelistclient.h \
+                           $$STIKCOMMON_DIR/imagesearchclient.h
 }
 
 # ══ 批次 2a 垫片 ══
@@ -506,8 +505,7 @@ isEmpty(QT_VERSION) {
     LIBS += -lwebp -lwebpdemux -lwebpmux -lm
 }
 
-# myi18n 的 settings_trace.h 在 anystik 侧；davobfus 的 libobfuscate 在 vendor
-STIKCOMMON_INCLUDES += $$ANYSTIK_SRC_DIR \
-                       $$STIK_VENDOR_DIR/include
+# davobfus 的 libobfuscate 在 vendor；共享模块已全部物理迁入本目录，不再需要 anystik/src
+STIKCOMMON_INCLUDES += $$STIK_VENDOR_DIR/include
 
 STIKCOMMON_CFLAGS = $$MYVENDOR_CFLAGS
