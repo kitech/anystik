@@ -43,7 +43,9 @@ class QTimer;
  *  17 = ModelScope 国际 qwen3-vl-8b-instruct（modelscope.ai，免费额度以该站为准，需填 kModelScopeIntlApiKey；实测需先在 modelscope.ai › My Settings › Account 绑定阿里云账号才能调用）
  *  18 = Groq qwen3.6-27b（免费 30 RPM/8K TPM/1K RPD，Preview，需填 kGroqApiKey；实测受限地区 IP 返回 403，需海外出口访问）
  *  19 = HuggingFace qwen2.5-vl-7b-instruct（Serverless 免费档额度很少，Router 按量，需填 kHuggingFaceApiKey）
- * 1~8/10~19（9 除外）走 OpenAI 兼容 chat/completions；9 走 AI Horde 异步提交+轮询；
+ *  20 = Groq via Cloudflare AI Gateway（groq-viacf，需 kGroqApiKey + kCloudflareAccountId + kCloudflareGatewayId + kCloudflareGatewayAuthToken）
+ *  21 = Gemini via Cloudflare AI Gateway（gemini-viacf，需 kGeminiApiKey + 同上）
+ * 1~8/10~21（9 除外）走 OpenAI 兼容 chat/completions；9 走 AI Horde 异步提交+轮询；
  * 0 走 Bing 重定向解析。后端失败不回退。
  * - fetchDescription() 每次入队并返回唯一请求令牌；同一时刻仅一个在途，其余排队。
  * - descriptionReady/failed 信号回带 requestId + imageUrl，调用方据此归属结果，
@@ -108,9 +110,12 @@ private:
     void startGemini();
     void startOllama();
     void startZai();
+    void startGroqViaCf();
+    void startGeminiViaCf();
     void startOpenAiVision(const QString& backendTag, const QUrl& url,
                            const QString& model, const QByteArray& apiKey,
-                           int maxTokens, bool allowEmptyKey = false);
+                           int maxTokens, bool allowEmptyKey = false,
+                           const QByteArray& gatewayAuthToken = QByteArray());
     void issueGet(const QUrl& url);
     void handleRedirect(QNetworkReply* reply, const QUrl& target);
 

@@ -56,14 +56,14 @@ cp "$QSK_ANDROID/lib/qskinny/plugins/platforminputcontexts/"*.so "$LIB_DIR/"
 # 复制 extras 共享库到 APK
 cp "$BUILD_DIR/libgoso.so" "$LIB_DIR/"
 cp "$BUILD_DIR/libcso.so" "$LIB_DIR/"
-cp vendor/lib/${ANDROID_ABI:-arm64-v8a}/libsqlite3.so "$LIB_DIR/"
-cp vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcurl.so "$LIB_DIR/"
-cp vendor/lib/${ANDROID_ABI:-arm64-v8a}/libssl.so "$LIB_DIR/"
-cp vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcrypto.so "$LIB_DIR/"
+cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libsqlite3.so "$LIB_DIR/"
+cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcurl.so "$LIB_DIR/"
+cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libssl.so "$LIB_DIR/"
+cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcrypto.so "$LIB_DIR/"
 # Qt 6 Android TLS 后端 dlopen 优先探测带后缀的 libssl_3/libcrypto_3；
 # 裸名 libssl.so/libcrypto.so 保留给 libcurl 的 NEEDED，二者并存不冲突。
-cp vendor/lib/${ANDROID_ABI:-arm64-v8a}/libssl_3.so "$LIB_DIR/"
-cp vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcrypto_3.so "$LIB_DIR/"
+cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libssl_3.so "$LIB_DIR/"
+cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcrypto_3.so "$LIB_DIR/"
 
 "$QT_HOST/bin/androiddeployqt" \
     --input "$BUILD_DIR/android-anystik-deployment-settings.json" \

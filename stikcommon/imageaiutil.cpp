@@ -81,6 +81,8 @@ const int kMaxHops = 8;
 //  17 = ModelScope 国际 qwen3-vl-8b-instruct（modelscope.ai，免费额度以该站为准，需填 kModelScopeIntlApiKey；实测需先在 modelscope.ai › My Settings › Account 绑定阿里云账号才能调用）
 //  18 = Groq qwen3.6-27b（免费 30 RPM/8K TPM/1K RPD，Preview，需填 kGroqApiKey；实测受限地区 IP 返回 403，需海外出口访问）
 //  19 = HuggingFace qwen2.5-vl-7b-instruct（Serverless 免费档额度很少，Router 按量，需填 kHuggingFaceApiKey）
+//  20 = Groq via Cloudflare AI Gateway（groq-viacf，需 kGroqApiKey + kCloudflareAccountId + kCloudflareGatewayId + kCloudflareGatewayAuthToken）
+//  21 = Gemini via Cloudflare AI Gateway（gemini-viacf，需 kGeminiApiKey + 同上）
 // 失败不回退：所选后端失败即 emit failed，不会自动尝试其他后端。
 int g_imageDescBackend = 16;
 
@@ -131,6 +133,21 @@ const char* const kCloudflareApiToken = "";
 const char* const kCloudflareVisionModel =
     "@cf/meta/llama-3.2-11b-vision-instruct";
 const int kCloudflareMaxTokens = 512;
+
+// Cloudflare AI Gateway provider-native 端点的网关 id（省略时默认 default）。
+const char* const kCloudflareGatewayId = "default";
+
+// cf-aig-authorization 头用的网关认证 token。带/不带的影响：
+//   - 网关 Authentication=On（新建网关默认）：不带 → 401 失败；带有效 token → 通过。
+//   - 网关 Authentication=Off：带不带都通过（带上无害）；但任何人拿到 account_id/gateway_id
+//     即可借道灌日志、消耗 BYOK/Unified 额度。
+//   - 账号尚无 default 网关时：首次自动创建要求请求已鉴权，不带则创建失败。
+//   - BYOK / Unified Billing：必须带。
+// 本后端强制带。
+const char* const kCloudflareGatewayAuthToken = "";
+
+// gemini-viacf 走 /compat 统一端点，模型名需带 provider 前缀。
+const char* const kGeminiViaCfModel = "google-ai-studio/gemini-2.5-flash";
 
 // 阿里云百炼 DashScope（申请：https://bailian.console.aliyun.com/ ）
 // qwen3-vl-flash 限时免费，新用户每模型系列 100万 token/90天，中文最佳
@@ -395,6 +412,10 @@ void ImageAiUtil::startNext()
         startGroq();
     } else if (g_imageDescBackend == 19) {
         startHuggingFace();
+    } else if (g_imageDescBackend == 20) {
+        startGroqViaCf();
+    } else if (g_imageDescBackend == 21) {
+        startGeminiViaCf();
     } else {
         startBing();
     }
@@ -419,7 +440,8 @@ void ImageAiUtil::startBing()
 // allowEmptyKey=true 时（如 BlockRun 免 key 后端）跳过 Authorization 头。
 void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
                                     const QString& model, const QByteArray& apiKey,
-                                    int maxTokens, bool allowEmptyKey)
+                                    int maxTokens, bool allowEmptyKey,
+                                    const QByteArray& gatewayAuthToken)
 {
     if (apiKey.isEmpty() && !allowEmptyKey) {
         const Request done = m_active;
@@ -566,6 +588,9 @@ void ImageAiUtil::startOpenAiVision(const QString& backendTag, const QUrl& url,
     req.setRawHeader("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.4");
     if (!apiKey.isEmpty()) {
         req.setRawHeader("Authorization", "Bearer " + apiKey);
+    }
+    if (!gatewayAuthToken.isEmpty()) {
+        req.setRawHeader("cf-aig-authorization", "Bearer " + gatewayAuthToken);
     }
 
     const Request active = m_active;
@@ -732,6 +757,56 @@ void ImageAiUtil::startCloudflare()
                                .arg(QString::fromLatin1(accountId))),
                       QString::fromLatin1(kCloudflareVisionModel),
                       token, kCloudflareMaxTokens);
+}
+
+void ImageAiUtil::startGroqViaCf()
+{
+    const QByteArray accountId = AK(kCloudflareAccountId);
+    const QByteArray gatewayId = AK(kCloudflareGatewayId);
+    const QByteArray gatewayToken = AK(kCloudflareGatewayAuthToken);
+    if (accountId.isEmpty() || gatewayId.isEmpty() || gatewayToken.isEmpty()) {
+        const Request done = m_active;
+        qWarning().noquote() << QStringLiteral(
+            "[ImageAiUtil] req=%1 backend=groq-viacf no account/gateway/token")
+            .arg(done.requestId);
+        emit failed(done.requestId, done.imageUrl,
+                    tr("未配置 Cloudflare 账号/网关/Token"));
+        finishActive();
+        return;
+    }
+    startOpenAiVision(QStringLiteral("groq-viacf"),
+                      QUrl(QStringLiteral(
+                          "https://gateway.ai.cloudflare.com/v1/%1/%2"
+                          "/groq/chat/completions")
+                               .arg(QString::fromLatin1(accountId))
+                               .arg(QString::fromLatin1(gatewayId))),
+                      QString::fromLatin1(kGroqVisionModel),
+                      AK(kGroqApiKey), kGroqMaxTokens, false, gatewayToken);
+}
+
+void ImageAiUtil::startGeminiViaCf()
+{
+    const QByteArray accountId = AK(kCloudflareAccountId);
+    const QByteArray gatewayId = AK(kCloudflareGatewayId);
+    const QByteArray gatewayToken = AK(kCloudflareGatewayAuthToken);
+    if (accountId.isEmpty() || gatewayId.isEmpty() || gatewayToken.isEmpty()) {
+        const Request done = m_active;
+        qWarning().noquote() << QStringLiteral(
+            "[ImageAiUtil] req=%1 backend=gemini-viacf no account/gateway/token")
+            .arg(done.requestId);
+        emit failed(done.requestId, done.imageUrl,
+                    tr("未配置 Cloudflare 账号/网关/Token"));
+        finishActive();
+        return;
+    }
+    startOpenAiVision(QStringLiteral("gemini-viacf"),
+                      QUrl(QStringLiteral(
+                          "https://gateway.ai.cloudflare.com/v1/%1/%2"
+                          "/compat/chat/completions")
+                               .arg(QString::fromLatin1(accountId))
+                               .arg(QString::fromLatin1(gatewayId))),
+                      QString::fromLatin1(kGeminiViaCfModel),
+                      AK(kGeminiApiKey), kGeminiMaxTokens, false, gatewayToken);
 }
 
 void ImageAiUtil::startDashScope()
