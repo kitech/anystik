@@ -57,6 +57,7 @@ SOURCES += \
     src/pagemanager.cpp \
     src/stickerlistpage.cpp \
     src/stickerops.cpp \
+    src/stickerpreviewoverlay.cpp \
     $$STIKCOMMON_SOURCES
 
 HEADERS += \
@@ -67,6 +68,7 @@ HEADERS += \
     src/pagemanager.h \
     src/stickerlistpage.h \
     src/stickerops.h \
+    src/stickerpreviewoverlay.h \
     $$STIKCOMMON_HEADERS
 
 # src/main.cpp 与 src/mainwindow.cpp 都 #include "app_icon.xpm"（内嵌 XPM，

@@ -2,6 +2,7 @@
 #include "compatcore34.h"
 #include "config.h"
 #include "stickerops.h"            // 右键菜单的读图/写 DB 薄封装
+#include "stickerpreviewoverlay.h"  // 「预览」的放大查看层
 #include "storage.h"              // Storage::instance().init() + stickerDb()
 #include "sticker_db.h"           // StickerRow / StickerPackRow / kPacksAll
 #include "qstandardpaths_shim.h"
@@ -32,6 +33,8 @@
 #include <qfile.h>
 #include <qdir.h>
 #include <qcstring.h>
+#include <qobjectlist.h>      // QObjectList/QPtrList：Qt3 无 findChildren，要自己遍历 children()
+#include <string.h>            // strcmp：Qt3 无 qobject_cast，枚举预览层要比 className
 #include <qevent.h>
 #include <qapplication.h>
 #include <qclipboard.h>
@@ -52,6 +55,7 @@
 #include <QFile>
 #include <QDir>
 #include <QEvent>
+#include <QList>
 #include <QEnterEvent>
 #include <QApplication>
 #include <QClipboard>
@@ -185,6 +189,73 @@ static QPixmap decodedTileImage(const QString& filePath,
         cache.clear();       // 超限整体清，不是 LRU
     }
     return result;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 预览层枚举（同 anysk stickerhomepage.cpp:1191 / :1216 的 findChildren）。
+//
+// 为什么不能直接抄 anysk 的 findChildren<StickerPreviewOverlay*>()：
+//   本机 Qt3.8 的 QObject **完全没有 findChild* 任何版本**（模板版是
+//   Qt4 才加的）。已核对：/opt/qt338sh/include/qobject.h 全文零命中，
+//   唯一可用的是 qobject.h:111 `const QObjectList* children() const`。
+//   qlcomp 的 compatcore34.h 也只提供 QString/QByteArray 助手，没有这层封装。
+//
+// 为什么用 POD 数组而不是 QPtrList/QList<StickerPreviewOverlay*>：
+//   两个容器对「元素本身是指针」的引用展开不同 —— Qt3 的 QPtrList<T>::at()
+//   返回 T* const&（即 StickerPreviewOverlay* const&），Qt6 的 QList<T>::at()
+//   返回 T&。写哪种取法都会在另一版报错，故调用处统一用 items[i]。
+//
+// ⚠⚠ Qt3 分支必须每次重新取 children()，且**立刻判空**：Qt3 的 children()
+//   返回成员 childObjects 的裸指针（qobject.h:111），而该列表在最后一个子
+//   对象被销毁后会被**置空**（已用 mini3 探针实测：删掉唯一子控件后
+//   children() 返回 nil，不是空列表）。直接 kids->begin() 会段错误。
+//   这就是「统一闭路返回、每轮重取指针」的必要性。
+//
+// 为什么 Qt3 比 className() 字符串、Qt4+ 用 qobject_cast：
+//   qobject_cast 这个模板是 Qt4 引入的（Qt3 头文件零命中）；
+//   QObject::className() 则是 Qt6 **删除**的（查 qobject.h：Qt3:84 有虚拟
+//   className()，Qt6 无该成员，官方文档改为 metaObject()->className()）。
+//   两版唯一的公共交集就是虚函数 metaObject()。
+struct PreviewOverlayList
+{
+    StickerPreviewOverlay* items[8];   // 同屏预览层最多 8 个
+    int count;
+};
+
+static PreviewOverlayList previewOverlays(QWidget* parent)
+{
+    PreviewOverlayList out;
+    out.count = 0;
+#ifdef QT3_BUILD
+    // ⚠ 每轮重取：列表可能因上方对象被 deleteLater 而变空/被置空
+    const QObjectList* kids = parent->children();
+    if (!kids) {
+        return out;
+    }
+    for (QObjectList::Iterator it = kids->begin(); it != kids->end(); ++it) {
+        QObject* kid = *it;
+#else
+    const QObjectList kids = parent->children();
+    for (int i = 0; i < kids.size(); ++i) {
+        QObject* kid = kids.at(i);
+#endif
+        if (!kid) {
+            continue;
+        }
+        StickerPreviewOverlay* ov = 0;
+#ifdef QT3_BUILD
+        const char* cn = kid->className();
+        if (cn && strcmp(cn, "StickerPreviewOverlay") == 0) {
+            ov = static_cast<StickerPreviewOverlay*>(kid);
+        }
+#else
+        ov = qobject_cast<StickerPreviewOverlay*>(kid);
+#endif
+        if (ov && out.count < 8) {
+            out.items[out.count++] = ov;
+        }
+    }
+    return out;
 }
 
 static int clampInt(int v, int lo, int hi)
@@ -1178,6 +1249,12 @@ void StickerListPage::reloadActive()
     // ⚠ 列表即将整体重建，m_items 下标全部作废：作废菜单目标，否则用户在旧菜单
     //   上点动作时会按新列表的下标取到另一张贴纸。
     m_currentItemIndex = -1;
+    // 同理关掉预览：它还指着即将消失的那一张。close() 走 closeEvent → closed
+    // → deleteLater（anysk :1216-1217 删除成功后同样 deleteLater 全部）。
+    const PreviewOverlayList prevs = previewOverlays(this);
+    for (int i = 0; i < prevs.count; ++i) {
+        prevs.items[i]->close();
+    }
 
     if (m_activeTab == QString::fromUtf8("__recent")) {
         loadRecentStickers();
@@ -1372,8 +1449,8 @@ void StickerListPage::onDeferredMenuDialog()
         return;
     }
     switch (action) {
-    case 1: editStickerDescription(id, desc); return;
-    case 2: confirmDeleteSticker(id); return;
+    case kPendingEditDesc: editStickerDescription(id, desc); return;
+    case kPendingDelete: confirmDeleteSticker(id); return;
     default: return;
     }
 }
@@ -1443,6 +1520,11 @@ void StickerListPage::showStickerMenu(int index, int contentX, int contentY)
             onStickerScaleAction(i);
         });
     }
+    // 「预览」插在第 3 位（缩放子菜单之后、复制元信息之前），
+    // 与 anysk stickerhomepage.cpp 的菜单顺序一致。
+    insertActionItem(menu, _(qFromUtf8("sticker_menu.preview")), [this]() {
+        onStickerMenuAction(MenuPreview);
+    });
     insertActionItem(menu, _(qFromUtf8("sticker_menu.copy_meta")), [this]() {
         onStickerMenuAction(MenuCopyMeta);
     });
@@ -1470,7 +1552,14 @@ void StickerListPage::showStickerMenu(int index, int contentX, int contentY)
 
     // ⚠ 网格自管滚动（不在任何 QScrollView 里），所以内容坐标加视口原点即全局坐标。
     //   viewport 坐标 = 内容坐标 + m_scrollPos（见 mousePressEvent 的换算）。
-    const QPoint globalPos = mapToGlobal(QPoint(contentX, contentY) + m_grid->viewportPos());
+    // ⚠⚠ 必须用 **m_grid->**mapToGlobal，不能用本页的 mapToGlobal：
+    //   信号的 contentX/contentY 是**网格**坐标（网格自己按 m_scrollPos 画滚动，
+    //   发射时 content = event->pos() - (0,m_scrollPos)）。加上 viewportPos()
+    //   之后拿回的是**网格控件系**的 event->pos()，而网格是页面的子控件、
+    //   位于顶栏与搜索行**之下**。若拿页面 mapToGlobal 去映射网格坐标，弹窗会
+    //   整体下移「顶栏+搜索行」的高度，菜单跟右键位置对不上。
+    const QPoint globalPos =
+        m_grid->mapToGlobal(QPoint(contentX, contentY) + m_grid->viewportPos());
     // ⚠ popup() 是**非阻塞**的：它显示菜单后立刻返回，用户点击发生在之后。
     //   所以 m_currentItemIndex 必须**保持**为 index 直到用户点动作（或列表重建）。
     //   别在这里清掉 —— 清了的话每个动作槽都会因下标 -1 而直接返回。
@@ -1513,6 +1602,12 @@ void StickerListPage::onStickerMenuAction(int action)
         // 子菜单入口本身不做事：Qt 的子菜单由 QMenuData/QMenu 自己弹出。
         return;
 
+    case MenuPreview:
+        // ⚠ **不 touch**：anysk 里 touch 只挂在 copy/copyScaled/copyMeta 路径，
+        //   单纯打开预览不改 lastUsed。
+        openPreview();
+        return;
+
     case MenuCopyMeta: {
         StickerMetaLite meta;
         if (!StickerOps::collectMeta(item->filePath, meta)) {
@@ -1534,7 +1629,7 @@ void StickerListPage::onStickerMenuAction(int action)
         //   window() 打悬垂指针 SIGSEGV），解法是推迟到本次派发结束后再弹。
         //   这里用「记 pending + singleShot 连真槽」，因为 Qt3 的 singleShot
         //   收不了 lambda（见 onDeferredMenuDialog()）。
-        m_pendingMenuDialog = 1;
+        m_pendingMenuDialog = kPendingEditDesc;
         m_pendingMenuId = item->id;
         m_pendingMenuDesc = item->description;
         QTimer::singleShot(0, this, SLOT(onDeferredMenuDialog()));
@@ -1549,7 +1644,7 @@ void StickerListPage::onStickerMenuAction(int action)
 
     case MenuDelete:
         // 与 MenuEditDesc 同款推迟：QMessageBox 是嵌套事件循环。
-        m_pendingMenuDialog = 2;
+        m_pendingMenuDialog = kPendingDelete;
         m_pendingMenuId = item->id;
         m_pendingMenuDesc = QString();
         QTimer::singleShot(0, this, SLOT(onDeferredMenuDialog()));
@@ -1561,6 +1656,67 @@ void StickerListPage::onStickerMenuAction(int action)
     default:
         return;
     }
+}
+
+void StickerListPage::openPreview()
+{
+    // ⚠ 这里必须重取目标：菜单弹出后列表可能已重建（分组切换/搜索重排），
+    //   m_currentItemIndex 可能已指向另一张贴纸。与所有动作槽同一道闸。
+    const StickerItem* item = currentMenuSticker();
+    if (!item) {
+        return;
+    }
+    // 元信息读不出来也要能看图，只是底部留空，故 collectMeta 失败不中断。
+    StickerMetaLite meta;
+    QString metaText;
+    if (StickerOps::collectMeta(item->filePath, meta)) {
+        metaText = StickerOps::formatMeta(meta);
+    }
+    // 每次预览都新建（anysk stickerhomepage.cpp:1191-1201 同款：先把旧实例
+    // deleteLater，再 new 一个）。本类**不存 overlay 指针**，一律靠
+    // previewOverlays(this) 枚举，与 anysk 用 findChildren 的思路一致。
+    const PreviewOverlayList olds = previewOverlays(this);
+    for (int i = 0; i < olds.count; ++i) {
+        olds.items[i]->deleteLater();
+    }
+
+    StickerPreviewOverlay* overlay = new StickerPreviewOverlay(this);
+    // ⚠ deleteRequested 无参数（Qt3 菜单/信号都不能带参），故页面自己记住
+    //   是哪一张，由 onPreviewDeleteRequested() 取用。
+    connect(overlay, SIGNAL(deleteRequested()),
+            this, SLOT(onPreviewDeleteRequested()));
+    // closed → 自销毁，同 anysk :1200-1201（closed 绑 deleteLater）；
+    // 同时通知页面复位 m_previewStickerId。
+    connect(overlay, SIGNAL(closed()), overlay, SLOT(deleteLater()));
+    connect(overlay, SIGNAL(closed()), this, SLOT(onPreviewClosed()));
+    m_previewStickerId = item->id;
+    // ⚠ 必须显式铺满页面：预览层是本页子控件且不在 layout 里，Qt 不会自动
+    //   替它跟随页面尺寸（带 parent 构造的 QWidget 默认只有 100x30）。
+    overlay->setGeometry(rect());
+    overlay->showSticker(item->filePath, item->id, item->emoji, metaText);
+}
+
+void StickerListPage::onPreviewClosed()
+{
+    // 本类不存 overlay 指针，故这里无需置空；实例已由 closed→deleteLater 回收。
+    // 只把 m_previewStickerId 复位，免得删除流程走完后残留一个失效 id。
+    m_previewStickerId = QString();
+}
+
+void StickerListPage::onPreviewDeleteRequested()
+{
+    // ⚠ pending 只能在**这里**（用户真点了删除）填，不能在 openPreview() 里
+    //   提前填 —— 否则用户按 Esc / 点空白关掉预览，也会在下次事件循环里
+    //   弹出无来由的删除确认框。
+    if (m_previewStickerId.isEmpty()) {
+        return;
+    }
+    m_pendingMenuDialog = kPendingDelete;
+    m_pendingMenuId = m_previewStickerId;
+    m_pendingMenuDesc = QString();
+    // 推迟到本次事件派发结束后再弹，理由同 MenuDelete 分支（QMessageBox
+    // 是嵌套事件循环，预览层本身也要先关掉）。
+    QTimer::singleShot(0, this, SLOT(onDeferredMenuDialog()));
 }
 
 void StickerListPage::onStickerScaleAction(int scaleIndex)
@@ -1723,6 +1879,12 @@ void StickerListPage::confirmDeleteSticker(const QString& id)
         return;
     }
     ToastWidget::show(this, _(qFromUtf8("sticker_msg.deleted")), 2000);
+    // 被删的正是在预览里看的那张：关掉全部预览，否则会留一张已不存在的图的窗口。
+    // close() → closeEvent → closed → deleteLater（anysk :1216-1217 同款）。
+    const PreviewOverlayList prevs = previewOverlays(this);
+    for (int i = 0; i < prevs.count; ++i) {
+        prevs.items[i]->close();
+    }
     reloadActive();
 }
 

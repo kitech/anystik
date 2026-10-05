@@ -249,6 +249,14 @@ private slots:
     // 右键菜单三连：请求 → 建菜单 → 动作分发
     void onStickerContextRequested(int index, int contentX, int contentY);
     void onStickerMenuAction(int action);
+    // 放大预览层（每次预览都 new 一个，closed 即 deleteLater 自销毁，同 anysk）。
+    void openPreview();
+    // 预览层要求关闭。本类不存 overlay 指针，故这里无需置空指针，只复位
+    //   m_previewStickerId，免得删除流程走完后残留失效 id。
+    void onPreviewClosed();
+    // 预览层点了删除：记 pending 后延迟弹确认。⚠ 不能在 openPreview() 里就
+    //   填 pending，否则按 Esc 关掉预览也会弹出无来由的确认框。
+    void onPreviewDeleteRequested();
     // 两个子菜单的项下标 1:1 对应缩放档 / 搜索引擎，故只需一个参数
     void onStickerScaleAction(int scaleIndex);
     void onStickerSearchAction(int engine);
@@ -274,12 +282,13 @@ private:
     enum StickerMenuAction {
         MenuCopy = 0,        // 复制
         MenuScaleSub,       // 缩放拷贝 ›
+        MenuPreview,        // 预览（放大查看）
         MenuCopyMeta,       // 复制元信息
         MenuEditDesc,       // 编辑描述简介
         MenuShare,          // 分享（桌面端仅 toast，与 anysk 一致）
         MenuDelete,         // 删除
         MenuSearchSub,      // 搜索相似 ›
-        MenuActionCount     // = 7
+        MenuActionCount     // = 8
     };
     // ⚠ 菜单项不能带参数（Qt3/4 回调签名与 QAction 的 checked 态冲突，
     //   移植计划.md:78），故用 LambdaSlot 捕获下标 + 本成员记住「当前是哪个瓦片」。
@@ -383,10 +392,19 @@ private:
     Menu34* m_ctxMenu;
     // 待执行的延迟弹窗动作。⚠ 见 onDeferredMenuDialog() 处说明：Qt3 的
     //   QTimer::singleShot 收不了 lambda，只能把参数存成员再连真槽。
-    //   kPendingNone = 0，无待办；其余见 onDeferredMenuDialog() 的 switch。
+    //   ⚠ 早先这里只有裸字面量 1/2（switch 内），加预览删除时已是第三个调用方，
+    //   故补上具名常量，与本注释原先声称的 kPendingNone 对齐。
+    enum PendingMenuDialog {
+        kPendingNone = 0,    // 无待办
+        kPendingEditDesc,    // 编辑描述
+        kPendingDelete       // 删除确认
+    };
     int    m_pendingMenuDialog;
     QString m_pendingMenuId;
     QString m_pendingMenuDesc;
+
+    // 当前预览的是哪一张（deleteRequested 无参数，只能页面自己记）。
+    QString m_previewStickerId;
 };
 
 #endif

@@ -48,6 +48,7 @@
   "sticker_menu": {
     "copy": "Copy",
     "scale": "Scale copy ›",
+    "preview": "Preview",
     "scale_0_1": "Copy x0.1",
     "scale_0_25": "Copy x0.25",
     "scale_0_5": "Copy x0.5",
@@ -64,6 +65,7 @@
     "engine_lens": "Google Lens"
   },
   "sticker_msg": {
+    "preview_failed": "Cannot preview this image",
     "copied": "Copied to clipboard",
     "copy_failed": "Copy failed",
     "copied_scale": "Copied {0}",

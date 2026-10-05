@@ -48,6 +48,7 @@
   "sticker_menu": {
     "copy": "複製",
     "scale": "縮放拷貝 ›",
+    "preview": "預覽",
     "scale_0_1": "複製x0.1",
     "scale_0_25": "複製x0.25",
     "scale_0_5": "複製x0.5",
@@ -64,6 +65,7 @@
     "engine_lens": "Google Lens"
   },
   "sticker_msg": {
+    "preview_failed": "無法預覽該圖片",
     "copied": "已複製到剪貼簿",
     "copy_failed": "複製失敗",
     "copied_scale": "已複製 {0}",
