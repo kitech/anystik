@@ -73,6 +73,16 @@
 #include <set>
 #include <vector>
 
+// 右键菜单的版本别名：Qt3 的菜单类是 QPopupMenu、Qt4+ 是 QMenu，两边的头文件互不存在
+// （qpopupmenu.h vs qmenu.h）。与 qlcomp/EmbeddedMenuBar.h:54/58 的 MenuWidget34 同义，
+// 就地取名以免为此 include 整个 EmbeddedMenuBar.h。**必须放在 compat34.h 之后**
+// —— Qt3 分支依赖它 include 的 <qpopupmenu.h>，Qt4+ 依赖 <qmenu.h>。
+#ifdef QT3_BUILD
+typedef QPopupMenu Menu34;
+#else
+typedef QMenu Menu34;
+#endif
+
 #ifdef QT3_BUILD
 #include <qwidget.h>
 #include <qstring.h>
@@ -154,8 +164,18 @@ public:
     //   m_packs.size()）——「最近」/ 搜索结果的包数天然小于包总数。
     const std::vector<StickerItem>& stickers() const { return m_items; }
 
+    // 网格自管滚动，m_scrollPos 是私有的。右键要把「内容坐标」换算回视口坐标
+    // 才能 mapToGlobal（mousePressEvent 那边是反着减的），故给页面开一个出口。
+    QPoint viewportPos() const { return QPoint(0, m_scrollPos); }
+
 signals:
     void stickerClicked(const QString& filePath);
+    // 右键菜单请求（anysk stickerlist.cpp:253-262 RightClickHandler 的等价物）。
+    // ⚠ 只传下标与视口坐标，**不传 StickerItem&**：Qt3 moc 注册自定义结构体很麻烦，
+    //   而 m_items 本来就在本页手里，用下标反查 stickers()[index] 即可。
+    // ⚠ 坐标是**内容坐标**（已减滚动偏移，即 indexAt 的入参），转全局坐标由页面做
+    //   （网格自管滚动、不在任何滚动容器里，mapToGlobal 可直接用）。
+    void stickerContextRequested(int index, int contentX, int contentY);
 
 protected:
     void paintEvent(QPaintEvent* event);
@@ -226,12 +246,56 @@ private slots:
     void onTabChanged(int id);
     void onPackComboChanged(int index);
     void onStickerClicked(const QString& filePath);
+    // 右键菜单三连：请求 → 建菜单 → 动作分发
+    void onStickerContextRequested(int index, int contentX, int contentY);
+    void onStickerMenuAction(int action);
+    // 两个子菜单的项下标 1:1 对应缩放档 / 搜索引擎，故只需一个参数
+    void onStickerScaleAction(int scaleIndex);
+    void onStickerSearchAction(int engine);
+    // 「搜索相似」的图床异步回调（ImageTmpUploader 的 uploaded/failed）
+    void onImageUploaded(const QString& imageUrl);
+    void onImageUploadFailed(const QString& reason);
+    // 菜单动作的**延迟弹窗**执行体（编辑描述 / 删除确认）。
+    // ⚠ Qt3 的 QTimer::singleShot 只有 (int, QObject*, const char* member) 一个
+    //   重载（qtimer.h:62），**没有 functor 版**，不能像 Qt5+ 那样
+    //   singleShot(0, this, []{...})。故只能「记 pending + 连真槽」
+    //   （与 mainwindow.cpp:605 的 onFirstPaintComplete 同款手法）。
+    void onDeferredMenuDialog();
     // 顶栏/底栏按钮：布局与文案照搬 anysk，行为按本批范围留空
     void onTopBarButton();
     void onBottomButton();
 
 private:
     void buildUi();
+
+    // ── 贴纸项右键菜单（anysk stickerhomepage.cpp:797-821 的 8 项去掉「预览」）──
+    // ⚠ 顺序**不可改**：LambdaSlot 按下标捕获动作，onStickerMenuAction 的 switch
+    //   依赖此顺序。增删项必须同步改本 enum + switch + lang/*.json 三处。
+    enum StickerMenuAction {
+        MenuCopy = 0,        // 复制
+        MenuScaleSub,       // 缩放拷贝 ›
+        MenuCopyMeta,       // 复制元信息
+        MenuEditDesc,       // 编辑描述简介
+        MenuShare,          // 分享（桌面端仅 toast，与 anysk 一致）
+        MenuDelete,         // 删除
+        MenuSearchSub,      // 搜索相似 ›
+        MenuActionCount     // = 7
+    };
+    // ⚠ 菜单项不能带参数（Qt3/4 回调签名与 QAction 的 checked 态冲突，
+    //   移植计划.md:78），故用 LambdaSlot 捕获下标 + 本成员记住「当前是哪个瓦片」。
+    //   ⚠ m_currentItemIndex 会在 reloadActive() 后失效（分组切换/搜索重排会换
+    //   列表），所以每个动作槽入口都必须重新做边界校验，不得直接下标取用。
+    void showStickerMenu(int index, int contentX, int contentY);
+    // 取当前菜单目标的瓦片；下标失效返回 0。动作槽的唯一取数入口。
+    const StickerItem* currentMenuSticker() const;
+    static void openSearchEngine(int engine, const QString& imageUrl);
+    // 贴纸项上的一次 touch_sticker（刷新 lastUsed，「最近」分组靠它排序）
+    static void touchSticker(const QString& id);
+    // 描述编辑 / 删除确认。⚠ 都只接受**贴纸 id**，不接受下标：弹窗是嵌套事件
+    //   循环，期间列表可能已重建，按下标会作用到别的贴纸上。
+    void editStickerDescription(const QString& id, const QString& currentDesc);
+    void confirmDeleteSticker(const QString& id);
+
     void buildTopBar(class QBoxLayout* parent);
     void buildSearchRow(class QBoxLayout* parent);
     void buildTabBar(class QBoxLayout* parent);
@@ -305,6 +369,24 @@ private:
 
     QTimer* m_searchTimer;
     QTimer* m_gridDeferTimer;
+
+    // ── 右键菜单状态 ──
+    // 当前菜单作用的瓦片下标；-1 = 无。见上方 m_currentItemIndex 注释。
+    int m_currentItemIndex;
+    // 「搜索相似」的临时图床上传器（anysk startImageSearch 同样只建一个复用）。
+    // parent=this，页面析构时自动回收。
+    class ImageTmpUploader* m_imageUploader;
+    int    m_searchEngine;       // 本次上传对应的目标引擎下标
+    // 当前右键菜单。⚠ 不能靠 findChildren<T>() 回收：Qt3 没有模板版
+    //   findChildren（只有 const char* 版，返回 QObjectList），且 Qt3 的
+    //   QObjectList::operator[] 非 const。改用成员指针显式持有。
+    Menu34* m_ctxMenu;
+    // 待执行的延迟弹窗动作。⚠ 见 onDeferredMenuDialog() 处说明：Qt3 的
+    //   QTimer::singleShot 收不了 lambda，只能把参数存成员再连真槽。
+    //   kPendingNone = 0，无待办；其余见 onDeferredMenuDialog() 的 switch。
+    int    m_pendingMenuDialog;
+    QString m_pendingMenuId;
+    QString m_pendingMenuDesc;
 };
 
 #endif

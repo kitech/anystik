@@ -1,10 +1,15 @@
 #include "stickerlistpage.h"
 #include "compatcore34.h"
 #include "config.h"
+#include "stickerops.h"            // 右键菜单的读图/写 DB 薄封装
 #include "storage.h"              // Storage::instance().init() + stickerDb()
 #include "sticker_db.h"           // StickerRow / StickerPackRow / kPacksAll
 #include "qstandardpaths_shim.h"
 #include "qimagereader_shim.h"
+#include "qurl_shim.h"             // qToPercentEncoding（「搜索相似」拼 URL 用）
+#include "imagetmpuploader.h"      // 「搜索相似」的临时图床（stikcommon 已编入）
+#include "lambdaslot.h"            // 菜单项零参槽代理（菜单项回调不能带参数）
+#include "translator.h"            // _() / _A()
 #include "placeholderlineedit.h"   // Qt3 QLineEdit 无 placeholder → qlcomp 的替代
 #include "toastwidget.h"           // 单击复制的提示（anysk stickerhomepage.cpp:578）
 #include "StyleParams.h"           // g_activeParams：圆钮取当前主题调色板
@@ -13,6 +18,8 @@
 #include <algorithm>
 
 #ifdef QT3_BUILD
+#include <qmessagebox.h>         // 删除确认（include 分支照 mainwindow.cpp:23-28）
+#include <qinputdialog.h>        // 描述编辑
 #include <qpushbutton.h>
 #include <qbuttongroup.h>
 #include <qcombobox.h>
@@ -29,6 +36,8 @@
 #include <qapplication.h>
 #include <qclipboard.h>
 #else
+#include <QMessageBox>
+#include <QInputDialog>
 #include <QPushButton>
 #include <QButtonGroup>
 #include <QComboBox>
@@ -253,6 +262,76 @@ private:
     QByteArray m_s;
 };
 #endif
+
+// ── URL 百分号编码（「搜索相似」拼引擎 URL 用）──
+// ⚠ 返回类型三代各不相同，只能逐分支写死，没法收敛成一个宏：
+//   Qt3 走 stikcommon/qurl_shim.h 的 qToPercentEncoding → QByteArray
+//   （qurl_shim.h:97，QT_VERSION < 0x040000 门控；Qt3 的 QUrl 没有这个静态方法）
+//   Qt4 的 QUrl::toPercentEncoding → QString
+//   Qt5+ 的 QUrl::toPercentEncoding → QByteArray
+// 样板对齐 stikcommon/imagesearchclient.cpp:31-46 的 QLSTIK_PCT_ENCODE。
+// ⚠ 走 QString::fromUtf8 而非 fromLatin1：编码结果含 %XX 与原 URL 的非 ASCII
+//   字节，fromLatin1 会丢高位字节（AGENTS.md 编码纪律）。
+static QString pctEncode(const QString& s)
+{
+#ifdef QT3_BUILD
+    return QString::fromUtf8(qToPercentEncoding(s));
+#elif QT_VERSION < 0x050000
+    return QUrl::toPercentEncoding(s);
+#else
+    return QString::fromUtf8(QUrl::toPercentEncoding(s));
+#endif
+}
+
+// ── 右键菜单：跨版本助手 ──
+// ⚠ Menu34（QPopupMenu / QMenu 的版本别名）定义在头文件里，本文件直接用。
+//   别名为什么必须放在头文件见那处注释。
+
+// 插一个「按下即执行」的项：payload 由 LambdaSlot 绑进 lambda。
+// ⚠ 菜单项回调不能带参数（移植计划.md:78），故每项挂一个零参代理槽。
+//   Qt3：QMenuData::insertItem(text, const QObject* receiver, const char* member)
+//        （qmenudata.h:165）内部连的是 QMenuItem 的零参 activated()，与 call() 严丝合缝。
+//   Qt4+：QMenu::addAction(text, receiver, member) 连 QAction::triggered(bool)，
+//        Qt 允许槽的参数表比信号**短**（多余尾部参数丢弃），故 call() 仍能接上。
+//        此条已用 Qt 6.7.3 实测：SIGNAL(triggered(bool))→SLOT(call()) 命中。
+//   连法与 mainwindow.cpp:468-489 的 addMenuItem(LambdaSlot, SLOT(call())) 一致。
+static void insertActionItem(Menu34* menu, const QString& text,
+                             std::function<void()> fn)
+{
+    // ⚠ LambdaSlot 的 parent 必须是菜单本体：LambdaSlot.h:14 的约定是
+    //   「parent 设为 sender，sender 析构时自动清理」，漏挂就会每次弹菜单漏一批。
+    LambdaSlot* slot = new LambdaSlot(menu, fn);
+#ifdef QT3_BUILD
+    menu->insertItem(text, slot, SLOT(call()));
+#else
+    menu->addAction(text, slot, SLOT(call()));
+#endif
+}
+
+// 插一个子菜单，返回子菜单句柄。
+// ⚠ 返回句柄是必须的：Qt3 要自建 QPopupMenu 再 insertItem 挂上去，
+//   Qt4+ 反过来由 addMenu() 自己建、调用方不能自建再塞进去。
+//   样板逐条对齐 qlstik/mainwindow.cpp:335-356 的 addSubMenu()。
+static Menu34* insertSubMenu(Menu34* menu, const QString& text)
+{
+#ifdef QT3_BUILD
+    // qmenudata.h:184 insertItem(text, QPopupMenu*, id=-1, index=-1)
+    // ⚠ parent 选 menu 而非页面：顶层菜单析构时子菜单跟着走，不会成孤儿。
+    QPopupMenu* sub = new QPopupMenu(menu);
+    // ⚠ Qt3 的 QPopupMenu 不继承父控件字体，不显式设会落到系统默认字体
+    //   （mainwindow.cpp:344-345 同款处理）。
+    sub->setFont(menu->font());
+    menu->insertItem(text, sub);
+    return sub;
+#else
+    return menu->addMenu(text);
+#endif
+}
+
+// ⚠ 刻意**没有**分隔条：anysk showStickerMenu:812-819 的 8 项之间也没有分隔条，
+//   照搬其视觉分组（仅两个「›」子菜单自带层次）。若日后要加，注意 Qt3 的
+//   insertSeparator() 会占用一个 item id —— 但本文件不依赖 id（payload 走
+//   LambdaSlot 闭包），所以加分隔条不会打乱动作下标。
 
 // ── QComboBox 跨版本助手：逐条照搬 qltox/qldox/logindialog.cpp:23-53 ──
 //   Qt3: insertItem(text) / setCurrentItem(i)
@@ -519,6 +598,17 @@ void StickerGridWidget::mousePressEvent(QMouseEvent* event)
             emit stickerClicked(m_items[idx].filePath);
         }
     }
+    else if (event->button() == Qt::RightButton) {
+        // ⚠ 与左键同一条内容坐标换算，别让右键菜单贴到错误的格子上。
+        const QPoint content = event->pos() - QPoint(0, m_scrollPos);
+        const int idx = indexAt(content);
+        // ⚠ 只在瓦片上弹菜单：空白处 indexAt 返回 -1，直接不弹。
+        //   顺带把 qlstik/mainwindow.cpp:290-313 的 QMenu 惯例（parent=this）搬过来，
+        //   菜单与页面同生命周期、不会泄漏。
+        if (idx >= 0) {
+            emit stickerContextRequested(idx, content.x(), content.y());
+        }
+    }
     QWidget::mousePressEvent(event);
 }
 
@@ -670,6 +760,11 @@ StickerListPage::StickerListPage(QWidget* parent)
     , m_initialLoaded(false)        // ⚠ 初始化顺序与头文件声明一致
     , m_searchTimer(0)
     , m_gridDeferTimer(0)
+    , m_currentItemIndex(-1)      // -1 = 当前没有菜单目标
+    , m_imageUploader(0)
+    , m_searchEngine(0)
+    , m_ctxMenu(0)
+    , m_pendingMenuDialog(0)
 {
     for (int i = 0; i < 3; i++) {
         m_tabButtons[i] = 0;
@@ -726,6 +821,10 @@ void StickerListPage::buildUi()
     //   qldox/contactlist.cpp:668 同写法。
     connect(m_grid, SIGNAL(stickerClicked(const QString&)),
             this, SLOT(onStickerClicked(const QString&)));
+    // ⚠ 同上，签名必须是 moc 生成的原样。已用 /opt/qt338sh/bin/moc 实测
+    //   生成 stickerContextRequested(int,int,int)，写 QString 之类会运行期报错。
+    connect(m_grid, SIGNAL(stickerContextRequested(int,int,int)),
+            this, SLOT(onStickerContextRequested(int,int,int)));
     v->addWidget(m_grid, 1);
 
     buildBottomBar(v);
@@ -1076,6 +1175,10 @@ void StickerListPage::onPackComboChanged(int index)
 //   数据变更后重载当前视图；分组已卸载/停用则回退「全部」，避免空白网格。
 void StickerListPage::reloadActive()
 {
+    // ⚠ 列表即将整体重建，m_items 下标全部作废：作废菜单目标，否则用户在旧菜单
+    //   上点动作时会按新列表的下标取到另一张贴纸。
+    m_currentItemIndex = -1;
+
     if (m_activeTab == QString::fromUtf8("__recent")) {
         loadRecentStickers();
         return;
@@ -1225,26 +1328,434 @@ void StickerListPage::onStickerClicked(const QString& filePath)
     // ── 单击：复制到剪贴板（照搬 stickerhomepage.cpp:570-583 的语义）──
     // 复制**原图**而不是 152px 缩略图：瓦片缓存里只有缩略图，
     // 粘出去的图必须是原始分辨率，否则用户拿到的就是糊的。
-    if (filePath.isEmpty() || !QFile::exists(filePath)) {
+    //
+    // ⚠ 读图/解码逻辑收敛到 StickerOps::copyToClipboard，与右键「复制」走同一
+    //   份代码，免得两处解码参数（setAutoTransform）日后各改一处而行为漂移。
+    //   Toast 文案统一为英文，与本文件 retranslateUi/底栏/顶栏
+    //   （:638-655、:876-884、:920-930）现有硬编码文案风格一致；本批不改
+    //   Toast 的硬编码风格，详见文件开头说明。
+    if (!StickerOps::copyToClipboard(filePath)) {
         ToastWidget::show(this, QString::fromUtf8("复制失败"), 2000);
         return;
     }
-    QImageReader reader(filePath);
-    reader.setAutoTransform(true);
-    const QImage full = reader.read();
-    if (full.isNull()) {
-        ToastWidget::show(this, QString::fromUtf8("复制失败"), 2000);
-        return;
-    }
-    // qltox photoviewer.cpp:92-105 就是用 QClipboard::setImage() 递图
-    QApplication::clipboard()->setImage(full);
     ToastWidget::show(this, QString::fromUtf8("已复制到剪贴板"), 2000);
 
     // 本批未实现（anysk 基准里有，此处明确留白而非静默丢弃）：
     //   * 双击预览（stickerhomepage.cpp:585-586 → openPreview）
-    //   * 长按菜单（:588-589 → showStickerMenu）
+    //   * 长按菜单（:588-589 → showStickerMenu）—— 本批只做桌面端右键
     //   * 滚动到顶部/底部浮动按钮（stickerlist.cpp:212）
     //   * 点击反馈（anysk 有按压态高亮）
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 贴纸右键菜单（anysk stickerhomepage.cpp:797-901 的 8 项去掉「预览」→ 7 项）
+// ═══════════════════════════════════════════════════════════════════
+
+// 延迟弹窗的执行体。⚠ Qt3 的 QTimer::singleShot 只有 (int, QObject*, const char*)
+//   一个重载（qtimer.h:62），**没有 functor 版**，所以不能把 lambda 塞进去
+//   （本文件 mainwindow.cpp:605 的 onFirstPaintComplete 是同款「记状态+连真槽」
+//   手法）。这里先把参数**取到局部**再清成员：弹窗是嵌套事件循环，期间
+//   m_pendingMenuId 若被改写，拿局部副本才不会作用到错误的贴纸上。
+void StickerListPage::onDeferredMenuDialog()
+{
+    const int action = m_pendingMenuDialog;
+    const QString id = m_pendingMenuId;
+    const QString desc = m_pendingMenuDesc;
+    // ⚠ 先清待办：弹窗返回后若还有嵌套派发，不应重入同一次动作。
+    //   ⚠ 用 = QString() 而非 clear()：Qt3 的 QString 没有 clear()，
+    //   只有 truncate(uint)/setLength(uint)（qstring.h:431/712）。
+    m_pendingMenuDialog = 0;
+    m_pendingMenuId = QString();
+    m_pendingMenuDesc = QString();
+
+    if (id.isEmpty()) {
+        return;
+    }
+    switch (action) {
+    case 1: editStickerDescription(id, desc); return;
+    case 2: confirmDeleteSticker(id); return;
+    default: return;
+    }
+}
+
+// 缩放子菜单的 4 档。⚠ 下标即 onStickerScaleAction 的参数，与 lang/*.json 的
+//   sticker_menu.scale_0_1 等键**成对对应**，增删必须同步改两处。
+static const double kScaleFactors[4] = { 0.1, 0.25, 0.5, 2.0 };
+static const char* const kScaleKeys[4] = {
+    "sticker_menu.scale_0_1", "sticker_menu.scale_0_25",
+    "sticker_menu.scale_0_5", "sticker_menu.scale_2_0"
+};
+// 成功 toast 里填的**纯数字**。⚠ 不要复用 kScaleKeys 的文案（那是菜单里的
+//   「复制x0.1」），否则会拼成「已复制：复制x0.1」这种病句。
+static const char* const kScaleNums[4] = { "0.1", "0.25", "0.5", "2.0" };
+
+// 搜索引擎子菜单：5 项。⚠ 下标即 onStickerSearchAction / openSearchEngine 的
+//   engine 参数（anysk 用 0/1/2/4 跳号，我这里连续编号，见下）。
+//   ⚠ **3 = DuckDuckGo 没有 by-image 端点**，只能开图片搜索页让用户手传
+//   （anysk stickerhomepage.cpp:1007-1010 同款，故 toast「需手动上传」）。
+static const int kSearchEngineCount = 5;
+
+void StickerListPage::onStickerContextRequested(int index, int contentX, int contentY)
+{
+    // ⚠ 信号与瓦片弹出之间列表可能被重建（搜索重排/分组切换），
+    //   入口必须重新校验，不能信信号带来的下标。
+    if (index < 0 || index >= m_grid->stickerCount()) {
+        return;
+    }
+    showStickerMenu(index, contentX, contentY);
+}
+
+void StickerListPage::showStickerMenu(int index, int contentX, int contentY)
+{
+    // ⚠ 每次弹菜单先清上一次的：否则 QMenu 累积泄漏（anysk showStickerMenu:806-809
+    //   用 findChildren<QskMenu*> 做同一件事；此处改用成员指针，因 Qt3 没有模板版
+    //   findChildren，见头文件 m_ctxMenu 处注释）。
+    // ⚠ 必须 deleteLater 不能 delete：此刻还在 mousePressEvent 的派发栈里，
+    //   delete 会当场析构正在被弹出使用的菜单。
+    if (m_ctxMenu) {
+        m_ctxMenu->deleteLater();
+    }
+
+    m_currentItemIndex = index;
+    // ⚠ 这里**不**缓存 StickerItem 引用/指针：菜单项回调发生在 popup() 之后，
+    //   期间列表可能已重建，缓存的引用会悬空或指向别的贴纸。回调里一律走
+    //   currentMenuSticker() 现取现校验。
+
+    // parent=this：与页面同生命周期；LambdaSlot 也挂在菜单上，随菜单回收。
+    Menu34* menu = new Menu34(this);
+    m_ctxMenu = menu;
+#ifdef QT3_BUILD
+    // ⚠ Qt3 的 QPopupMenu 不继承父字体，不显式设会落到系统默认字体。
+    menu->setFont(font());
+    // ⚠ Qt3 的 QPopupMenu 无 setMinimumWidth（QMenu 才有）；不设下限的话
+    //   长文案「编辑描述简介」会把弹窗挤得比文字还窄。
+    menu->setMinimumWidth(180);
+#endif
+
+    // 顺序**必须**与 StickerMenuAction 枚举一致（头文件该枚举处已注明）。
+    insertActionItem(menu, _(qFromUtf8("sticker_menu.copy")), [this]() {
+        onStickerMenuAction(MenuCopy);
+    });
+    // 缩放子菜单
+    Menu34* scaleSub = insertSubMenu(menu, _(qFromUtf8("sticker_menu.scale")));
+    for (int i = 0; i < 4; i++) {
+        insertActionItem(scaleSub, _(qFromUtf8(kScaleKeys[i])), [this, i]() {
+            onStickerScaleAction(i);
+        });
+    }
+    insertActionItem(menu, _(qFromUtf8("sticker_menu.copy_meta")), [this]() {
+        onStickerMenuAction(MenuCopyMeta);
+    });
+    insertActionItem(menu, _(qFromUtf8("sticker_menu.edit_desc")), [this]() {
+        onStickerMenuAction(MenuEditDesc);
+    });
+    insertActionItem(menu, _(qFromUtf8("sticker_menu.share")), [this]() {
+        onStickerMenuAction(MenuShare);
+    });
+    insertActionItem(menu, _(qFromUtf8("sticker_menu.delete")), [this]() {
+        onStickerMenuAction(MenuDelete);
+    });
+    // 搜索子菜单
+    Menu34* searchSub = insertSubMenu(menu, _(qFromUtf8("sticker_menu.search")));
+    static const char* const kEngineKeys[kSearchEngineCount] = {
+        "sticker_menu.engine_google", "sticker_menu.engine_bing",
+        "sticker_menu.engine_yandex", "sticker_menu.engine_ddg",
+        "sticker_menu.engine_lens"
+    };
+    for (int i = 0; i < kSearchEngineCount; i++) {
+        insertActionItem(searchSub, _(qFromUtf8(kEngineKeys[i])), [this, i]() {
+            onStickerSearchAction(i);
+        });
+    }
+
+    // ⚠ 网格自管滚动（不在任何 QScrollView 里），所以内容坐标加视口原点即全局坐标。
+    //   viewport 坐标 = 内容坐标 + m_scrollPos（见 mousePressEvent 的换算）。
+    const QPoint globalPos = mapToGlobal(QPoint(contentX, contentY) + m_grid->viewportPos());
+    // ⚠ popup() 是**非阻塞**的：它显示菜单后立刻返回，用户点击发生在之后。
+    //   所以 m_currentItemIndex 必须**保持**为 index 直到用户点动作（或列表重建）。
+    //   别在这里清掉 —— 清了的话每个动作槽都会因下标 -1 而直接返回。
+    menu->popup(globalPos);
+}
+
+// 取当前菜单目标的瓦片；失效返回 0。
+// ⚠ 每个动作槽都必须走这里 —— 菜单弹出后列表可能已重建（reloadActive 会把
+//   m_currentItemIndex 置 -1），直接下标取会操作到另一张贴纸。
+const StickerItem* StickerListPage::currentMenuSticker() const
+{
+    if (m_currentItemIndex < 0
+        || m_currentItemIndex >= int(m_grid->stickers().size())) {
+        return 0;
+    }
+    return &m_grid->stickers()[m_currentItemIndex];
+}
+
+void StickerListPage::onStickerMenuAction(int action)
+{
+    // ⚠ 所有分支共用「先取目标、失效即静默返回」这一道闸。菜单弹出后列表可能
+    //   已重建（下标会指向别的贴纸），currentMenuSticker() 会挡掉。
+    const StickerItem* item = currentMenuSticker();
+    if (!item) {
+        return;
+    }
+    // 各分支统一 touch_sticker：anysk copyScaled(:860) / copyStickerToClipboard 路径
+    // 都会刷新 lastUsed，「最近」分组才排得对。软删分支不 touch（马上就删了）。
+    switch (action) {
+    case MenuCopy:
+        touchSticker(item->id);
+        if (!StickerOps::copyToClipboard(item->filePath)) {
+            ToastWidget::show(this, _(qFromUtf8("sticker_msg.copy_failed")), 2000);
+            return;
+        }
+        ToastWidget::show(this, _(qFromUtf8("sticker_msg.copied")), 2000);
+        return;
+
+    case MenuScaleSub:
+        // 子菜单入口本身不做事：Qt 的子菜单由 QMenuData/QMenu 自己弹出。
+        return;
+
+    case MenuCopyMeta: {
+        StickerMetaLite meta;
+        if (!StickerOps::collectMeta(item->filePath, meta)) {
+            ToastWidget::show(this, _(qFromUtf8("sticker_msg.meta_failed")), 2000);
+            return;
+        }
+        touchSticker(item->id);
+        // qltox photoviewer.cpp:92-105 同款：setText 递纯文本
+        QApplication::clipboard()->setText(StickerOps::formatMeta(meta));
+        ToastWidget::show(this, _(qFromUtf8("sticker_msg.meta_copied")), 2000);
+        return;
+    }
+
+    case MenuEditDesc:
+        // ⚠ 菜单此时正在派发栈里，若直接弹 QInputDialog::getText 的嵌套事件循环，
+        //   菜单可能在嵌套循环中被销毁 → 等 dialog 返回后再用 menu 就是悬垂指针。
+        //   anysk 对删除也踩过同样的坑（stickerhomepage.cpp:889-891 注释：QskMenu 的
+        //   close().deleteLater 会在 question() 嵌套循环里被冲刷，随后 :491
+        //   window() 打悬垂指针 SIGSEGV），解法是推迟到本次派发结束后再弹。
+        //   这里用「记 pending + singleShot 连真槽」，因为 Qt3 的 singleShot
+        //   收不了 lambda（见 onDeferredMenuDialog()）。
+        m_pendingMenuDialog = 1;
+        m_pendingMenuId = item->id;
+        m_pendingMenuDesc = item->description;
+        QTimer::singleShot(0, this, SLOT(onDeferredMenuDialog()));
+        return;
+
+    case MenuShare:
+        // ⚠ 桌面端没有系统分享表（anysk shareStickerFile 失败时 toast
+        //   「桌面暂不支持分享」，stickerhomepage.cpp:884）。照搬该行为。
+        touchSticker(item->id);
+        ToastWidget::show(this, _(qFromUtf8("sticker_msg.share_unsupported")), 2000);
+        return;
+
+    case MenuDelete:
+        // 与 MenuEditDesc 同款推迟：QMessageBox 是嵌套事件循环。
+        m_pendingMenuDialog = 2;
+        m_pendingMenuId = item->id;
+        m_pendingMenuDesc = QString();
+        QTimer::singleShot(0, this, SLOT(onDeferredMenuDialog()));
+        return;
+
+    case MenuSearchSub:
+        return;
+
+    default:
+        return;
+    }
+}
+
+void StickerListPage::onStickerScaleAction(int scaleIndex)
+{
+    if (scaleIndex < 0 || scaleIndex > 3) {
+        return;
+    }
+    const StickerItem* item = currentMenuSticker();
+    if (!item) {
+        return;
+    }
+    touchSticker(item->id);
+    const bool ok = StickerOps::copyScaledToClipboard(item->filePath,
+                                                      kScaleFactors[scaleIndex]);
+    if (!ok) {
+        ToastWidget::show(this, _(qFromUtf8("sticker_msg.copy_failed")), 2000);
+        return;
+    }
+    // ⚠ 成功文案带档位号，用 _A() 的 {0} 占位（Translator::t 从 {0} 起算，
+    //   translator.cpp 里按 args 下标替换）。⚠ Qt3 分支会把 {0} 换成 %1。
+    ToastWidget::show(this,
+        _A(qFromUtf8("sticker_msg.copied_scale"), QStringList()
+           << QString::fromUtf8(kScaleNums[scaleIndex])), 2000);
+}
+
+void StickerListPage::onStickerSearchAction(int engine)
+{
+    if (engine < 0 || engine >= kSearchEngineCount) {
+        return;
+    }
+    const StickerItem* item = currentMenuSticker();
+    if (!item) {
+        return;
+    }
+    // ⚠ engine 3 = DuckDuckGo 没有 by-image 端点：只能开图片搜索页让用户手传
+    //   （anysk stickerhomepage.cpp:1007-1010 同款，故 toast「需手动上传」）。
+    if (engine == 3) {
+        ToastWidget::show(this, _(qFromUtf8("sticker_msg.ddg_manual")), 2500);
+        qOpenUrl(QString("https://duckduckgo.com/?iax=images&ia=images"));
+        return;
+    }
+    // 其余 4 个引擎都要先把图传成公网直链（anysk startImageSearch 同款）。
+    touchSticker(item->id);
+    m_searchEngine = engine;
+    if (!m_imageUploader) {
+        // 只建一个复用（anysk 亦然）；parent=this 随页面回收
+        m_imageUploader = new ImageTmpUploader(this);
+        // ⚠ 字符串 connect 逐字对齐 moc 生成的签名（带 const 引用）
+        connect(m_imageUploader, SIGNAL(uploaded(const QString&)),
+                this, SLOT(onImageUploaded(const QString&)));
+        connect(m_imageUploader, SIGNAL(failed(const QString&)),
+                this, SLOT(onImageUploadFailed(const QString&)));
+    }
+    // ⚠ 单实例复用：上次在途的回包可能串到本次 engine 上，upload() 前先 cancel
+    //   （ImageTmpUploader.h:21-22 的 cancel 正是为此）。
+    m_imageUploader->cancel();
+    ToastWidget::show(this, _(qFromUtf8("sticker_msg.uploading")), 2000);
+    m_imageUploader->upload(item->filePath);
+}
+
+void StickerListPage::onImageUploaded(const QString& imageUrl)
+{
+    if (imageUrl.isEmpty()) {
+        ToastWidget::show(this, _(qFromUtf8("sticker_msg.upload_failed")), 2000);
+        return;
+    }
+    StickerListPage::openSearchEngine(m_searchEngine, imageUrl);
+}
+
+void StickerListPage::onImageUploadFailed(const QString& reason)
+{
+    // ⚠ reason 是图床侧的原始报错（含 host 名/网络细节），只进日志不进 UI：
+    //   直接弹给用户等于泄露内部 host 拓扑。
+    qWarning("StickerListPage: image upload failed: %s", qToUtf8(reason).data());
+    ToastWidget::show(this, _(qFromUtf8("sticker_msg.upload_failed")), 2000);
+}
+
+// touch_sticker（刷新 lastUsed）。anysk copyScaled(:860)/copyStickerToClipboard 路径
+// 都会刷新，「最近」分组才排得对。失败静默：排序刷新不是用户可见功能。
+void StickerListPage::touchSticker(const QString& id)
+{
+    StickerOps::touch(id);
+}
+
+// 描述编辑：原生 QInputDialog。⚠ 140 字上限由调用方（DB 层）截断，这里照
+//   anysk editStickerDescription 的做法先截，避免把超长文本塞进 DB 再被丢。
+void StickerListPage::editStickerDescription(const QString& id,
+                                             const QString& currentDesc)
+{
+    bool ok = false;
+#ifdef QT3_BUILD
+    // ⚠ Qt3 的 parent 是**倒数第二**个参数（qinputdialog.h:77-78），Qt4+ 挪到了
+    //   最前面。两边顺序不同，必须分支，不能照抄 Qt4 文档的写法。
+    const QString entered = QInputDialog::getText(
+        _(qFromUtf8("sticker_menu.edit_desc")),
+        _(qFromUtf8("sticker_msg.desc_prompt")),
+        QLineEdit::Normal, currentDesc, &ok, this);
+#else
+    const QString entered = QInputDialog::getText(
+        this,
+        _(qFromUtf8("sticker_menu.edit_desc")),
+        _(qFromUtf8("sticker_msg.desc_prompt")),
+        QLineEdit::Normal, currentDesc, &ok);
+#endif
+    if (!ok) {
+        return;     // 用户取消
+    }
+    if (entered == currentDesc) {
+        return;     // 没改就不写库
+    }
+    QString desc = entered;
+    if (desc.length() > 140) {
+        desc = desc.left(140);
+    }
+    if (!StickerOps::setDescription(id, desc)) {
+        ToastWidget::show(this, _(qFromUtf8("sticker_msg.desc_failed")), 2000);
+        return;
+    }
+    ToastWidget::show(this, _(qFromUtf8("sticker_msg.desc_saved")), 2000);
+    // 瓦片上的描述标签要跟着变
+    reloadActive();
+}
+
+// 删除确认 + 软删。
+// ⚠ 软删：只调 DB 的 delete_sticker，**不删磁盘文件** —— 与 anysk
+//   deleteSticker 逐字一致（anysk/src/stickerstore.h:9-11 有同样说明）。
+//   「删除」语义是移出列表/不再出现在最近，可从回收站或包里恢复。
+void StickerListPage::confirmDeleteSticker(const QString& id)
+{
+    #ifdef QT3_BUILD
+    // ⚠ Qt3 的 question() 返回 **int**、按钮是 enum{Yes=3,No=4,...}（qmessagebox.h:74），
+    //   拿不到 StandardButton；Qt4+ 返回 StandardButton 且默认按钮单独传参。
+    //   ⚠ 默认按钮给 No：误回车不该删东西。Qt3 无「默认按钮」概念，只能靠
+    //   按钮顺序把 No 放后面（QMessageBox 的默认焦点取第一个按钮），
+    //   故显式把 Yes/No 都传出来。
+    const int ret = QMessageBox::question(
+        this,
+        _(qFromUtf8("sticker_menu.delete")),
+        _(qFromUtf8("sticker_msg.delete_confirm")),
+        (int)QMessageBox::Yes, (int)QMessageBox::No);
+    if (ret != (int)QMessageBox::Yes) {
+        return;
+    }
+#else
+    // ⚠ Qt4/5/6 的 question() 重载**没有**带 icon 的 (parent,icon,title,text,
+    //   buttons,default) 版本（qmessagebox.h:178-180 只有 title/text/buttons/default），
+    //   带 icon 的那个返回 int 且已过时（:181）。想不出问号图标就别硬塞。
+    const QMessageBox::StandardButton ret = QMessageBox::question(
+        this,
+        _(qFromUtf8("sticker_menu.delete")),
+        _(qFromUtf8("sticker_msg.delete_confirm")),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);        // ⚠ 默认焦点给「否」
+    if (ret != QMessageBox::Yes) {
+        return;
+    }
+#endif
+    if (!StickerOps::remove(id)) {
+        ToastWidget::show(this, _(qFromUtf8("sticker_msg.delete_failed")), 2000);
+        return;
+    }
+    ToastWidget::show(this, _(qFromUtf8("sticker_msg.deleted")), 2000);
+    reloadActive();
+}
+
+void StickerListPage::openSearchEngine(int engine, const QString& imageUrl)
+{
+    // ⚠ 用 fromUtf8 而非 anysk 的 fromLatin1（stickerhomepage.cpp:1309/1311）：
+    //   imageUrl 是图床返回的公网直链，含非 ASCII 路径段时 fromLatin1 会丢
+    //   高位字节（AGENTS.md 编码纪律）。pctEncode 三分支见本文件该函数。
+    const QString enc = pctEncode(imageUrl);
+    // 固定的图+关键词偏置（anysk :1311-1313 同款，后续可换成弹窗输入的值）
+    const QString kw = pctEncode(QString::fromUtf8("相似表情包"));
+    QUrl url;
+    switch (engine) {
+    case 0: // Google
+        url = QUrl(QString("https://www.google.com/searchbyimage?image_url=") + enc
+                    + QString("&gl=US&hl=en&q=") + kw);
+        break;
+    case 1: // Bing
+        url = QUrl(QString("https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=")
+                    + enc + QString("&q=") + kw);
+        break;
+    case 4: // Google Lens
+        url = QUrl(QString("https://lens.google.com/uploadbyurl?url=") + enc
+                    + QString("&gl=US&hl=en&q=") + kw);
+        break;
+    default: // 2 = Yandex（anysk 也用 default 兜底）
+        url = QUrl(QString("https://yandex.com/images/search?url=") + enc
+                    + QString("&rpt=imageview&text=") + kw);
+        break;
+    }
+    if (url.isValid()) {
+        qOpenUrl(url.toString());
+    }
 }
 
 void StickerListPage::retranslateUi()
