@@ -18,12 +18,21 @@
 //                   回退 PNG 并把 *fellBackToPng 置 true，供调用方选
 //                   `copied_scale_fallback` 文案（§18.8）。
 //
-// ⚠ 已知不在本批范围：GIF/APNG/WebP 三个动图编码器分别在批次 4/5/6。
-//   本批这三类走 PNG 回退分支（copyScaled 的 out 参数会如实报 true），
-//   等编码器落地后自动变成同格式输出，控制流不用再改。
+// ⚠ 动图三兄弟均已落地专用编码器：GIF（批次 4，tangora gif-h）、APNG（批次 5，
+//   手拼 PNG chunk）、WebP（批次 6，libwebp WebPAnimEncoder，保 WebP 不转 APNG）。
+//   某格式编码失败时走 PNG 回退分支（copyScaled 的 out 参数会如实报 true）。
+//   Qt6 上 APNG 被原生 PNG 插件拍平（imageCount==1、read() 只出首帧），根本到不了
+//   APNG 分支，自然回退 PNG —— 与 §18.1 第 6 条一致，不是本处逻辑。
 
-#include "compat34.h"
-
+// ⚠ 刻意**不** include qlcomp 的 compat34.h（本类用不到其中的任何符号）。
+//   原因：compat34.h → compatcore34.h 会声明 qlcomp 的
+//   `qOpenReadOnly(QFile&)`，它在 Qt4+ 分支是
+//   `open(QIODevice::ReadOnly | QIODevice::Text)` —— 文本模式读二进制会在
+//   Qt6 上吞掉每个 0x0D 字节（实测 260 字节样本丢 3 字节）。对本 TU 而言它
+//   比 stikcommon 的二进制版 `qOpenReadOnly(QIODevice&)`（qglobaltype_shim.h）
+//   更精确匹配，会把后者遮蔽，导致 .cpp 里读贴纸原始字节 / 读回临时 GIF 被
+//   静默破坏。anystik 的 stickerstore.cpp 同样只 include qglobaltype_shim.h、
+//   从不 include compat34.h，故其 buildGifBytes 走的是二进制版 —— 这里对齐它。
 #ifdef QT3_BUILD
 #include <qstring.h>
 #else

@@ -501,9 +501,15 @@ isEmpty(QT_VERSION) {
                           $$STIK_VENDOR_DIR/libnsgif/lzw.c
     STIKCOMMON_INCLUDES += $$STIK_VENDOR_DIR/libnsgif \
                            $$STIK_VENDOR_DIR/uc_apng_loader
-    # WebP 动画解码需要 demux；mux 留给后续 WebP 重编码（stickerstore.cpp:1154
-    # 旧的 webp→apng 转换路径改造时会用到）
+    # WebP 动画解码需要 demux；mux 供 WebP 重编码（stickerclipboard.cpp
+    # qClipEncodeWebp 的 WebPAnimEncoder）
     LIBS += -lwebp -lwebpdemux -lwebpmux -lm
+} else:!lessThan(QT_VERSION, 5.0.0) {
+    # Qt5/6：动图 WebP 重编码（stickerclipboard.cpp qClipEncodeWebp）。编 WebP 只
+    # 需 mux+encode，解码由 Qt 自带 libwebp 插件负责。⚠ -lwebpmux 与 -lwebp
+    # **必须成对**：只给 -lwebpmux 会 `DSO missing from command line`
+    # （libwebpmux 依赖 libwebp 的符号，§18.10 第 4 项）。
+    LIBS += -lwebpmux -lwebp
 }
 
 # davobfus 的 libobfuscate 在 vendor；共享模块已全部物理迁入本目录，不再需要 anystik/src

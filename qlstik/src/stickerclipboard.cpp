@@ -10,6 +10,21 @@
 #include "qfile_shim.h"           // qIODeviceWrite（Qt3 的 QFile/QBuffer 没有 write()）
 #include "qba_shim.h"             // qbaConstData / qbaSize
 
+// 批次 4/5/6 的编码器（GIF/APNG/WebP）共享：
+#include "qimage_shim.h"          // qImageRgbaBytes / qImageScanlineRgba（RGBA8888 字节序）
+#include "qtemporaryfile_shim.h"  // Qt3 的 QTemporaryFile（Qt6 走原生 <QTemporaryFile>）
+#include "tangora_gif.h"          // gif-h：GifBegin/GifWriteFrame/GifEnd（公开域单头）
+#include "qzlib_shim.h"           // Qt3 的 qCompress（Qt6 走 QtCore 原生，头内门控）
+
+// WebP 动图编码（批次 6）：系统 libwebp 1.6.0，mux 提供 WebPAnimEncoder。
+// 两个头自身带 extern "C"，直接 include 即可（stikcommon.pri 两端都挂 webpmux）。
+#include <webp/encode.h>
+#include <webp/mux.h>
+
+// APNG/WebP 编码器用 <stdint.h> 的 uint32_t/uint16_t/uint8_t，不用 quint*：
+// 后者 Qt 3.5 没有（quint32 是 Qt4 引入，qformatsniff_shim.h:22-23 已记）。
+#include <stdint.h>
+
 #ifdef QT3_BUILD
 #include <qapplication.h>
 #include <qfile.h>
@@ -25,6 +40,7 @@
 #include <QMimeData>
 #include <QGuiApplication>
 #include <QClipboard>   // QGuiApplication::clipboard() 返回 QClipboard*，不引是 incomplete type
+#include <QTemporaryFile>
 #endif
 
 #include "qlist_shim.h"           // Qt3 值语义 QList<T>（必须在上面所有 Qt 头之后）
@@ -116,6 +132,332 @@ static QByteArray qClipEncodeOne(const QImage& im, const char* format)
     buf.close();
     return out;
 #endif
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 批次 4：动图 GIF 编码器（tangora gif-h）
+// ═══════════════════════════════════════════════════════════════════════
+
+// 毫秒 → 百分秒（GIF GCE Delay Time 单位是 1/100s，tangora_gif.h:765 注释）。
+// Qt 的 nextImageDelay() 是毫秒，不换算动画会慢 10 倍；GIF 合法域 1..65535，
+// 0ms 会被某些查看器当 0 吞掉，clamp 到至少 1。
+static uint32_t qClipGifDelayCs(int ms)
+{
+    if (ms < 1) ms = 1;
+    int cs = (ms + 5) / 10;                 // 就近取整
+    if (cs < 1) cs = 1;
+    if (cs > 65535) cs = 65535;
+    return uint32_t(cs);
+}
+
+// 帧列表 → GIF 字节。
+//
+// ⚠ tangora 的 GifBegin 第二参是**文件名**（tangora_gif.h:766）不是 FILE*，
+//   且内部 fopen("wb") 独占创建，故必须走临时文件：写完 GifEnd 关句柄、再读回。
+// ⚠ 临时文件模板沿用 test_qmimedatabase_shim.cpp:42-55 的范式：扩展名写在
+//   XXXXXX **之后**，Qt3 的 fillTemplate() 用 mid(xPos+6) 保留尾部；
+//   Qt3 QFile 没有 rename()，所以不能「先建再改名」。
+// ⚠ 入参必须是 RGBA8888 字节序：qImageRgbaBytes()（qimage_shim.h）在 Qt3 侧
+//   把 BGRA 内存逐像素换序、Qt6 侧等价于 convertToFormat，两端产出相同。
+static QByteArray qClipEncodeGif(const QList<QImage>& frames,
+                                 const QList<int>& delays)
+{
+    if (frames.size() < 2) return QByteArray();
+
+#ifdef QT3_BUILD
+    QTemporaryFile tmp(QString::fromUtf8("/tmp/stikclip_XXXXXX.gif"));
+#else
+    QTemporaryFile tmp(QStringLiteral("/tmp/stikclip_XXXXXX.gif"));
+#endif
+    if (!tmp.open()) return QByteArray();
+    const QString path = tmp.fileName();
+    tmp.close();                            // GifBegin 要独占创建文件
+
+    const int w = frames.first().width();
+    const int h = frames.first().height();
+    const int defDelayCs = delays.size() == frames.size()
+                         ? int(qClipGifDelayCs(delays.first())) : 10;
+
+    GifWriter writer;
+    if (!GifBegin(&writer, qUtf8Printable(path), uint32_t(w), uint32_t(h),
+                  uint32_t(defDelayCs), 8, true)) {
+        return QByteArray();
+    }
+
+    bool ok = true;
+    for (int i = 0; i < frames.size(); ++i) {
+        int delayCs = defDelayCs;
+        if (delays.size() == frames.size())
+            delayCs = int(qClipGifDelayCs(delays.at(i)));
+        const QByteArray rgba = qImageRgbaBytes(frames.at(i));
+        // ✓ 与 anystik stickerstore.cpp:1651 同款：qbaConstData() 返回
+        //   const char*，gif-h 收 const uint8_t*，reinterpret_cast 逐位透传。
+        ok = GifWriteFrame(&writer,
+                reinterpret_cast<const uint8_t*>(qbaConstData(rgba)),
+                uint32_t(w), uint32_t(h), uint32_t(delayCs), 8, true);
+        if (!ok) break;
+    }
+    GifEnd(&writer);
+    if (!ok) return QByteArray();
+
+    QFile f(path);
+    if (!qOpenReadOnly(f)) return QByteArray();
+    const QByteArray bytes = f.readAll();
+    f.close();
+    return bytes;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 批次 5：动图 APNG 编码器（手拼 PNG chunk）
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Qt 两端都没有 APNG 写出插件（§18.10 第 1 项），故自己拼 chunk。结构照
+// anystik stickerstore.cpp 的 buildApngFromFrames：IHDR/acTL/fcTL/IDAT/fdAT/IEND；
+// 每帧 filter=none 逐行、再 qCompress（zlib）成 IDAT/fdAT 的压缩流。
+// ⚠ chunk 类型字面量一律走 qbaLit()，**不能**用 QByteArrayLiteral()：后者在
+//   Qt3 会落成含尾 NUL 的 QCString（qba_shim.h:16），chunk type 变 5 字节、CRC 全错。
+
+static QByteArray qClipBe32(uint32_t v)
+{
+    QByteArray b = qbaUninit(4);
+    b[0] = char(v >> 24); b[1] = char(v >> 16); b[2] = char(v >> 8); b[3] = char(v);
+    return b;
+}
+
+static QByteArray qClipBe16(uint16_t v)
+{
+    QByteArray b = qbaUninit(2);
+    b[0] = char(v >> 8); b[1] = char(v);
+    return b;
+}
+
+// PNG CRC32（IEEE 多项式 0xedb88320，反射式），覆盖 type + data。
+static uint32_t qClipPngCrc(const QByteArray& type, const QByteArray& data)
+{
+    static uint32_t table[256];
+    static bool tableReady = false;
+    if (!tableReady) {
+        for (uint32_t n = 0; n < 256; ++n) {
+            uint32_t c = n;
+            for (int k = 0; k < 8; ++k)
+                c = (c & 1) ? (0xedb88320u ^ (c >> 1)) : (c >> 1);
+            table[n] = c;
+        }
+        tableReady = true;
+    }
+    uint32_t c = 0xffffffffu;
+    for (int i = 0; i < type.size(); ++i)
+        c = table[(c ^ uint8_t(type.at(i))) & 0xff] ^ (c >> 8);
+    for (int i = 0; i < data.size(); ++i)
+        c = table[(c ^ uint8_t(data.at(i))) & 0xff] ^ (c >> 8);
+    return c ^ 0xffffffffu;
+}
+
+// 拼一个 PNG chunk：len(4) + type(4) + data + crc(4)。
+static QByteArray qClipPngChunk(const QByteArray& type, const QByteArray& data)
+{
+    QByteArray out;
+    qbaReserve(out, 12 + data.size());
+    const uint32_t len = uint32_t(data.size());
+    qbaAppend(out, char(len >> 24));
+    qbaAppend(out, char(len >> 16));
+    qbaAppend(out, char(len >> 8));
+    qbaAppend(out, char(len));
+    qbaAppend(out, type);
+    qbaAppend(out, data);
+    const uint32_t crc = qClipPngCrc(type, data);
+    qbaAppend(out, char(crc >> 24));
+    qbaAppend(out, char(crc >> 16));
+    qbaAppend(out, char(crc >> 8));
+    qbaAppend(out, char(crc));
+    return out;
+}
+
+// 一帧 RGBA → filter=none 逐行扫描线，再 zlib 压缩（IDAT/fdAT 的载荷）。
+static QByteArray qClipApngScanlinesZ(const QImage& im)
+{
+    QByteArray raw;
+    const int bpl = im.width() * 4;
+    qbaReserve(raw, im.height() * (bpl + 1));
+    for (int y = 0; y < im.height(); ++y) {
+        qbaAppend(raw, char(0));                        // filter type: none
+        qbaAppend(raw, qImageScanlineRgba(im, y));
+    }
+    return qCompress(raw, 6);
+}
+
+// APNG 结构自检（不依赖解码器，纯 chunk 走查）：签名对、acTL 帧数对、
+// fcTL 数==帧数、fdAT 数==帧数-1。Qt3 shim 的 APNG imageCount() 恒报 1，
+// 不能靠读回帧数校验，故只能查 chunk。
+static bool qClipApngSelfCheck(const QByteArray& png, int frames)
+{
+    if (png.size() < 8) return false;
+    static const char sig[8] = {char(0x89), 'P', 'N', 'G', '\r', '\n', char(0x1a), '\n'};
+    const char* base = qbaConstData(png);
+    for (int i = 0; i < 8; ++i)
+        if (base[i] != sig[i]) return false;
+
+    int off = 8;
+    int fcTl = 0, fdAt = 0;
+    uint32_t actlFrames = 0;
+    while (off + 12 <= png.size()) {
+        const char* p = base + off;
+        const uint32_t len = (uint32_t(uint8_t(p[0])) << 24) | (uint32_t(uint8_t(p[1])) << 16)
+                          | (uint32_t(uint8_t(p[2])) << 8)  | uint32_t(uint8_t(p[3]));
+        if (off + 12 + int(len) > png.size()) return false;
+        const QByteArray type = qbaFromRaw(p + 4, 4);
+        if (type == qbaLit("acTL") && len >= 8) {
+            actlFrames = (uint32_t(uint8_t(p[8])) << 24) | (uint32_t(uint8_t(p[9])) << 16)
+                       | (uint32_t(uint8_t(p[10])) << 8)  | uint32_t(uint8_t(p[11]));
+        } else if (type == qbaLit("fcTL")) {
+            ++fcTl;
+        } else if (type == qbaLit("fdAT")) {
+            ++fdAt;
+        } else if (type == qbaLit("IEND")) {
+            break;
+        }
+        off += 12 + int(len);
+    }
+    return actlFrames == uint32_t(frames) && fcTl == frames && fdAt == frames - 1;
+}
+
+// 帧列表（RGBA）→ APNG 字节。失败返回空，调用方走 PNG 回退。
+static QByteArray qClipEncodeApng(const QList<QImage>& frames,
+                                  const QList<int>& delays)
+{
+    if (frames.size() < 2) return QByteArray();
+    const int w = frames.first().width();
+    const int h = frames.first().height();
+    if (w <= 0 || h <= 0) return QByteArray();
+
+    QByteArray png;
+    {
+        const char sig[8] = {char(0x89), 'P', 'N', 'G', '\r', '\n', char(0x1a), '\n'};
+        qbaAppend(png, sig, 8);
+    }
+
+    QByteArray ihdr;
+    qbaAppend(ihdr, qClipBe32(uint32_t(w)));
+    qbaAppend(ihdr, qClipBe32(uint32_t(h)));
+    qbaAppend(ihdr, char(8));                 // bit depth
+    qbaAppend(ihdr, char(6));                 // color type: RGBA
+    qbaAppend(ihdr, char(0));                 // compression
+    qbaAppend(ihdr, char(0));                 // filter
+    qbaAppend(ihdr, char(0));                 // interlace
+    qbaAppend(png, qClipPngChunk(qbaLit("IHDR"), ihdr));
+
+    QByteArray actl;
+    qbaAppend(actl, qClipBe32(uint32_t(frames.size())));
+    qbaAppend(actl, qClipBe32(0));            // 无限循环
+    qbaAppend(png, qClipPngChunk(qbaLit("acTL"), actl));
+
+    uint32_t seq = 0;
+    const bool hasDelay = (delays.size() == frames.size());
+    for (int i = 0; i < frames.size(); ++i) {
+        const QImage& fr = frames.at(i);
+        uint16_t dnum = 1, dden = 10;          // 无 delay 信息时默认 100ms
+        if (hasDelay) {
+            int ms = delays.at(i);
+            if (ms < 1) ms = 10;              // 0/非法延迟回落
+            if (ms > 6553) ms = 6553;         // 百分秒域能表达的倒数上限
+            dnum = uint16_t(qBound(1, (ms * 10 + 9) / 10, 6553));  // 四舍五入
+            dden = 100;
+        }
+        QByteArray fctl;
+        qbaAppend(fctl, qClipBe32(seq++));
+        qbaAppend(fctl, qClipBe32(uint32_t(fr.width())));
+        qbaAppend(fctl, qClipBe32(uint32_t(fr.height())));
+        qbaAppend(fctl, qClipBe32(0));        // x 偏移
+        qbaAppend(fctl, qClipBe32(0));        // y 偏移
+        qbaAppend(fctl, qClipBe16(dnum));
+        qbaAppend(fctl, qClipBe16(dden));
+        qbaAppend(fctl, char(0));             // dispose_op: none（全画布帧）
+        qbaAppend(fctl, char(0));             // blend_op: source（整帧替换）
+        qbaAppend(png, qClipPngChunk(qbaLit("fcTL"), fctl));
+
+        if (i == 0) {
+            qbaAppend(png, qClipPngChunk(qbaLit("IDAT"), qClipApngScanlinesZ(fr)));
+        } else {
+            QByteArray fdat;
+            qbaAppend(fdat, qClipBe32(seq++));
+            qbaAppend(fdat, qClipApngScanlinesZ(fr));
+            qbaAppend(png, qClipPngChunk(qbaLit("fdAT"), fdat));
+        }
+    }
+    qbaAppend(png, qClipPngChunk(qbaLit("IEND"), QByteArray()));
+
+    if (!qClipApngSelfCheck(png, frames.size())) return QByteArray();
+    return png;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 批次 6：动图 WebP 编码器（libwebp WebPAnimEncoder）
+// ═══════════════════════════════════════════════════════════════════════
+//
+// §18.1 第 5 条硬约束：WebP 必须输出 WebP，不转 APNG。约束见 §18.10 第 4 项：
+// 时间戳累计非递减；每帧必须全画布（本机 1.6.0 的 WebPPicture 无 x/y offset）；
+// 末帧以 NULL 帧在总时长处收尾；WebPPictureFree 只释像素、结构每帧 Init。
+static QByteArray qClipEncodeWebp(const QList<QImage>& frames,
+                                  const QList<int>& delays)
+{
+    if (frames.size() < 2) return QByteArray();
+    const int w = frames.first().width();
+    const int h = frames.first().height();
+    if (w <= 0 || h <= 0) return QByteArray();
+
+    WebPAnimEncoderOptions opts;
+    if (!WebPAnimEncoderOptionsInit(&opts)) return QByteArray();
+    opts.anim_params.loop_count = 0;          // 无限循环
+
+    WebPAnimEncoder* enc = WebPAnimEncoderNew(w, h, &opts);
+    if (!enc) return QByteArray();
+
+    bool ok = true;
+    int ts = 0;
+    for (int i = 0; i < frames.size(); ++i) {
+        const QByteArray rgba = qImageRgbaBytes(frames.at(i));
+        if (rgba.size() < w * h * 4) { ok = false; break; }
+
+        int ms = (delays.size() == frames.size()) ? delays.at(i) : 100;
+        if (ms < 1) ms = 1;
+        ts += ms;                             // 累计时间戳，非递减
+
+        WebPPicture pic;
+        if (!WebPPictureInit(&pic)) { ok = false; break; }
+        pic.use_argb = 1;
+        pic.width = w;
+        pic.height = h;
+        if (!WebPPictureImportRGBA(
+                &pic, reinterpret_cast<const uint8_t*>(qbaConstData(rgba)),
+                w * 4)) {                     // rgba_stride 单位是**字节**
+            WebPPictureFree(&pic);
+            ok = false;
+            break;
+        }
+        if (!WebPAnimEncoderAdd(enc, &pic, ts, NULL)) {
+            WebPPictureFree(&pic);
+            ok = false;
+            break;
+        }
+        WebPPictureFree(&pic);                // 只释像素，pic 结构下帧复用
+    }
+
+    WebPData data;
+    WebPDataInit(&data);
+    if (ok) {
+        if (!WebPAnimEncoderAdd(enc, NULL, ts, NULL)) ok = false;   // 末帧收尾
+        else if (!WebPAnimEncoderAssemble(enc, &data)) ok = false;
+    }
+
+    QByteArray out;
+    if (ok && data.bytes && data.size > 0)
+        // ⚠ Qt3 的 QByteArray(QMemArray<char>) 没有 (const char*, int) 构造，
+        //   用 qbaFromRaw 显式拷贝（Qt4+ 同样可用，两端一致）。
+        out = qbaFromRaw(reinterpret_cast<const char*>(data.bytes), int(data.size));
+
+    WebPDataClear(&data);
+    WebPAnimEncoderDelete(enc);
+    return out;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -262,15 +604,40 @@ bool StickerClipboard::copyScaled(const QString& filePath, double scale,
     QList<QPair<QString, QByteArray> > parts;
     bool sameFormat = false;
 
-    // 动图三兄弟（GIF/APNG/WebP）需要专用编码器，分别在批次 4/5/6。
-    // 在那之前一律走下面的 PNG 回退分支 —— 出参如实报 true，toast 会显示
-    //「回退PNG」，不会静默给用户一张静图。
+    // 动图三兄弟走专用编码器（批次 4/5/6）。判据用 **frames.size()>1**，不用
+    // 上面的 `animated`：Qt3 的 APNG 垫片 imageCount() 恒报 1，但 read() +
+    // jumpToNextImage() 能吐全部帧（stikcommon.pri:490 已记录），故必须按实解出
+    // 的帧数判，否则 Qt3 的 APNG 会掉进静态分支。
     const bool animatedFormat = (fmt == qFmtLit("gif") || fmt == qFmtLit("apng")
                                  || fmt == qFmtLit("webp"));
 
-    if (animated && animatedFormat) {
-        // 待批次 4/5/6 填入真实编码器；此处保持空实现。
-        sameFormat = false;
+    if (frames.size() > 1 && fmt == qFmtLit("gif")) {
+        // 批次 4：tangora gif-h。RGBA 字节与帧延迟都来自上面解出的 frames/delays，
+        // 帧数与 delay 逐帧保真（§18.5 帧上限 600 已在外层约束）。
+        const QByteArray gif = qClipEncodeGif(frames, delays);
+        if (!gif.isEmpty()) {
+            parts.append(qMakePair(QString::fromUtf8("image/gif"), gif));
+            sameFormat = true;
+        }
+    } else if (frames.size() > 1 && fmt == qFmtLit("apng")) {
+        // 批次 5：手拼 APNG chunk。Qt6 上 APNG 被原生 PNG 插件拍平
+        // （imageCount==1、read() 只出首帧），走不到这里；能到的只有 Qt3 垫片，
+        // 与 §18.1 第 6 条「Qt6 缩放 APNG 回退 PNG」一致。
+        const QByteArray apng = qClipEncodeApng(frames, delays);
+        if (!apng.isEmpty()) {
+            parts.append(qMakePair(QString::fromUtf8("image/apng"), apng));
+            // APNG 双挂：社区约定 image/apng，部分接收端只认 image/png（同非缩放
+            // 路径，qformatsniff_shim.h:150-152）。同一份字节，不再额外解码。
+            parts.append(qMakePair(QString::fromUtf8("image/png"), apng));
+            sameFormat = true;
+        }
+    } else if (frames.size() > 1 && fmt == qFmtLit("webp")) {
+        // 批次 6：libwebp WebPAnimEncoder（§18.1 第 5 条：保 WebP，不转 APNG）。
+        const QByteArray webp = qClipEncodeWebp(frames, delays);
+        if (!webp.isEmpty()) {
+            parts.append(qMakePair(QString::fromUtf8("image/webp"), webp));
+            sameFormat = true;
+        }
     } else if (frames.size() > 1 && !animatedFormat) {
         // 非动图格式却解出多帧（如多页 TIFF）：Qt 的 QImage::save 只能编一张，
         // 同格式做不到保帧数。回退 PNG 只出**首页**，后续页会丢 —— 这是回退的
