@@ -25,9 +25,15 @@
 // ── Qt3 专用：本 TU 全局编译于 -O0，但面积采样是逐像素热路径，
 // 对整文件单独提到 -O3（仅本 TU，不影响其余 -O0 代码；Qt6 不编本文件）。
 // 放在全部 include 之后，避免连带把 qimage.h 里的 inline 也提优化。
+// ⚠ 光有 pragma O3 不够：-O0 下内联器不展开 qimageScaleAARGBA_helper /
+//   INTERPOLATE_PIXEL_256 等叶子函数，逐像素调用开销照旧（实测 scale 只降
+//   约 17%）。故热路径函数一律 always_inline，实测可再降（527→315ms）。
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC push_options
 #pragma GCC optimize("O3")
+#define QSS_INLINE __attribute__((always_inline)) inline
+#else
+#define QSS_INLINE inline
 #endif
 
 namespace {
@@ -199,7 +205,7 @@ QImageScaleInfo *qimageCalcScaleInfo(const QImage &img,
     return isi;
 }
 
-inline void qimageScaleAARGBA_helper(const unsigned int *pix, int xyap, int Cxy,
+QSS_INLINE void qimageScaleAARGBA_helper(const unsigned int *pix, int xyap, int Cxy,
                                      int step, int &r, int &g, int &b, int &a)
 {
     r = qRed(*pix)   * xyap;
@@ -221,7 +227,7 @@ inline void qimageScaleAARGBA_helper(const unsigned int *pix, int xyap, int Cxy,
     a += qAlpha(*pix) * j;
 }
 
-static inline unsigned int INTERPOLATE_PIXEL_256(unsigned int x, unsigned int a,
+static QSS_INLINE unsigned int INTERPOLATE_PIXEL_256(unsigned int x, unsigned int a,
                                                  unsigned int y, unsigned int b)
 {
     Q_UINT64 t = (((Q_UINT64(x)) | ((Q_UINT64(x)) << 24)) & Q_UINT64_C(0x00ff00ff00ff00ff)) * a;
@@ -235,7 +241,7 @@ static inline unsigned int INTERPOLATE_PIXEL_256(unsigned int x, unsigned int a,
 //   先按 y(上下) 插值、再按 x(左右) 插值。Qt 文档里的通用 C 版是 x 先 y 后，
 //   整数截断不可交换，两者会差 ±1（实测 up_xy 路径 scale_hash 不一致）。
 //   这里复刻 SSE2 的 y-first 顺序，保证与 anystik 逐字节一致。
-static inline unsigned int interpolate_4_pixels(unsigned int tl, unsigned int tr,
+static QSS_INLINE unsigned int interpolate_4_pixels(unsigned int tl, unsigned int tr,
                                                 unsigned int bl, unsigned int br,
                                                 unsigned int distx, unsigned int disty)
 {
@@ -246,7 +252,7 @@ static inline unsigned int interpolate_4_pixels(unsigned int tl, unsigned int tr
     return INTERPOLATE_PIXEL_256(left, idistx, right, distx);
 }
 
-void qimageScaleAARGBA_up_xy(QImageScaleInfo *isi, unsigned int *dest,
+QSS_INLINE void qimageScaleAARGBA_up_xy(QImageScaleInfo *isi, unsigned int *dest,
                              int dw, int dh, int dow, int sow)
 {
     const unsigned int **ypoints = isi->ypoints;
@@ -283,7 +289,7 @@ void qimageScaleAARGBA_up_xy(QImageScaleInfo *isi, unsigned int *dest,
     }
 }
 
-void qimageScaleAARGBA_up_x_down_y(QImageScaleInfo *isi, unsigned int *dest,
+QSS_INLINE void qimageScaleAARGBA_up_x_down_y(QImageScaleInfo *isi, unsigned int *dest,
                                    int dw, int dh, int dow, int sow)
 {
     const unsigned int **ypoints = isi->ypoints;
@@ -320,7 +326,7 @@ void qimageScaleAARGBA_up_x_down_y(QImageScaleInfo *isi, unsigned int *dest,
     }
 }
 
-void qimageScaleAARGBA_down_x_up_y(QImageScaleInfo *isi, unsigned int *dest,
+QSS_INLINE void qimageScaleAARGBA_down_x_up_y(QImageScaleInfo *isi, unsigned int *dest,
                                    int dw, int dh, int dow, int sow)
 {
     const unsigned int **ypoints = isi->ypoints;
@@ -358,7 +364,7 @@ void qimageScaleAARGBA_down_x_up_y(QImageScaleInfo *isi, unsigned int *dest,
     }
 }
 
-void qimageScaleAARGBA_down_xy(QImageScaleInfo *isi, unsigned int *dest,
+QSS_INLINE void qimageScaleAARGBA_down_xy(QImageScaleInfo *isi, unsigned int *dest,
                                int dw, int dh, int dow, int sow)
 {
     const unsigned int **ypoints = isi->ypoints;
@@ -408,7 +414,7 @@ void qimageScaleAARGBA_down_xy(QImageScaleInfo *isi, unsigned int *dest,
 }
 
 // 与 Qt6 qt_qimageScaleAARGBA 同款的四路分派。
-void qimageScaleAARGBA(QImageScaleInfo *isi, unsigned int *dest,
+QSS_INLINE void qimageScaleAARGBA(QImageScaleInfo *isi, unsigned int *dest,
                        int dw, int dh, int dow, int sow)
 {
     if (isi->xup_yup == 3)
