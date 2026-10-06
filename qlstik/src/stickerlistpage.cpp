@@ -7,6 +7,7 @@
 #include "sticker_db.h"           // StickerRow / StickerPackRow / kPacksAll
 #include "qstandardpaths_shim.h"
 #include "qimagereader_shim.h"
+#include "qimage_shim.h"           // qImageSmoothScale（缩略图缩放）
 #include "qurl_shim.h"             // qToPercentEncoding（「搜索相似」拼 URL 用）
 #include "imagetmpuploader.h"      // 「搜索相似」的临时图床（stikcommon 已编入）
 #include "lambdaslot.h"            // 菜单项零参槽代理（菜单项回调不能带参数）
@@ -138,12 +139,13 @@ protected:
 //   QPaintDevice」并 SIGABRT。
 //   故缓存在 StickerGridWidget::m_tileImageCache（头文件有完整说明）。
 
-// 缩略图缩放：Qt3 是 smoothScale（返回**新副本**），Qt4+ 是 scaled(SmoothTransformation)。
-// 只在 decodedTileImage 里对每张贴纸调用一次，不在 paintEvent 热路径上。
+// 缩略图缩放：Qt3 走本仓移植的 Imlib2 面积采样（qImageSmoothScale），Qt4+ 走
+// scaled(SmoothTransformation)。不用 Qt3 原生 smoothScale()：pnmscale 系，
+// 实测比 Qt6 慢约 38 倍。只在 decodedTileImage 里对每张贴纸调用一次。
 static QImage scaleThumb(const QImage& src, int px)
 {
 #ifdef QT3_BUILD
-    return src.smoothScale(px, px);
+    return qImageSmoothScale(src, px, px);
 #else
     return src.scaled(px, px, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 #endif

@@ -12,6 +12,8 @@
 
 #if QT_VERSION < 0x040000
 
+#include "qimage_shim.h"   // qImageSmoothScale（Imlib2 面积采样，替代慢的 smoothScale）
+
 #include <qbuffer.h>
 #include <qfile.h>
 #include <stddef.h>
@@ -527,10 +529,11 @@ QImage QImageReader::read()
     QImage im = m_frames[m_index];
     // 缩放语义对齐 Qt6：GIF/WebP/APNG/静态多数插件不支持原生 ScaledSize，Qt6 走
     // image->scaled(scaledSize, IgnoreAspectRatio, Smooth) 回退；Qt3 侧用
-    // smoothScale（默认 ScaleFree ≡ IgnoreAspectRatio）复刻同一结果，且只缩放
-    // 当前这一帧。size()/scaledSize() 的返回值不受影响。
+    // qImageSmoothScale（= IgnoreAspectRatio 拉伸到恰好 scaledSize）复刻同一结果，
+    // 且只缩放当前这一帧。size()/scaledSize() 的返回值不受影响。
+    // ⚠ 不用 Qt3 原生 smoothScale()：pnmscale 系，实测比 Qt6 慢约 38 倍。
     if (m_scaledSize.isValid() && !im.isNull())
-        im = im.smoothScale(m_scaledSize);
+        im = qImageSmoothScale(im, m_scaledSize.width(), m_scaledSize.height());
     // ⚠⚠ 必须**无条件**推进游标，不能只在 m_animated 时推进。
     //   Qt6 对照实测（/tmp/opencode/probe/zk6.cpp，6.7.3，静态 JPEG）：
     //     read#0 isNull=0 → read#1 isNull=1 → read#2 isNull=1

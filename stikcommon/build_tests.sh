@@ -84,6 +84,7 @@ qjson_shim.cpp
 qstandardpaths_shim.cpp
 qzipreader_shim.cpp
 qimagereader_shim.cpp
+qimagesmoothscale.cpp
 ../vendor/pugixml/pugixml.cpp
 "
 

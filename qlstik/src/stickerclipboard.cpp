@@ -13,7 +13,7 @@
 // 批次 4/5/6 的编码器（GIF/APNG/WebP）共享：
 #include "qimage_shim.h"          // qImageRgbaBytes / qImageScanlineRgba（RGBA8888 字节序）
 #include "qtemporaryfile_shim.h"  // Qt3 的 QTemporaryFile（Qt6 走原生 <QTemporaryFile>）
-#include "tangora_gif.h"          // gif-h：GifBegin/GifWriteFrame/GifEnd（公开域单头）
+#include "tangora_gif_O3.h"       // gif-h（公开域单头）Qt3 专用 O3 副本：GifBegin/GifWriteFrame/GifEnd
 #include "qzlib_shim.h"           // Qt3 的 qCompress（Qt6 走 QtCore 原生，头内门控）
 
 // WebP 动图编码（批次 6）：系统 libwebp 1.6.0，mux 提供 WebPAnimEncoder。
@@ -69,11 +69,10 @@ static const int kMaxDim = 4096;
 //   故不留重复副本。若日后 stickerops 又要缩放，从这里取。
 static QImage qClipScaled(const QImage& im, int w, int h)
 {
-#ifdef QT3_BUILD
-    return im.smoothScale(w, h, QImage::ScaleFree);
-#else
-    return im.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-#endif
+    // Qt3 走本仓移植的 Imlib2 面积采样（qImageSmoothScale），Qt6 走原生
+    // scaled(IgnoreAspectRatio, Smooth)。原 Qt3 的 im.smoothScale() 是
+    // pnmscale 系实现，实测慢约 38 倍（见 qimage_shim.h 注）。
+    return qImageSmoothScale(im, w, h);
 }
 
 // Qt3 无 qMax/qBound（/opt/qt338sh/include 下全树 grep 无定义，qglobal.h 只有

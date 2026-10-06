@@ -79,15 +79,27 @@ inline QImage qImageRgba(const QImage& im)
     return r;
 }
 
+// 平滑缩放（拉伸到恰好 w×h），Qt3 用本仓移植的 Imlib2 面积采样算法
+// （qimagesmoothscale.cpp），Qt6 用原生 scaled(IgnoreAspectRatio, Smooth)。
+//
+// ⚠ 不再用 Qt3 的 QImage::smoothScale()：它是 NetPBM pnmscale 系实现，实测
+//   (240x240/154 帧 GIF → 120x120) 比 Qt6 慢约 38 倍（3690ms vs 96ms）。
+//   本函数在两端产出一致的像素（GIF 为 1-bit alpha，直存/预乘等价）。
+QImage qImageSmoothScale(const QImage& im, int w, int h);   // 实现在 qimagesmoothscale.cpp
+
 // scaled(size, KeepAspectRatio, SmoothTransformation) 的 Qt3 等价物。
-// Qt3 无 scaled()，只有返回副本的 scale()/smoothScale()（qimage.h:158/165），
-// 且 aspect 枚举名是 ScaleMin/ScaleMax：
+// Qt3 无 scaled()，先按 ScaleMin 算出等比装入 s 的目标尺寸，再走 qImageSmoothScale
+// （与原 smoothScale(s, ScaleMin) 同为「装得下」语义）：
 //   ScaleMin == Qt6 Qt::KeepAspectRatio（等比缩放到装得下，尺寸可小于请求）
 //   ScaleMax == Qt6 Qt::KeepAspectRatioByExpanding（等比缩放填满，允许超出）
 // 实测 4x2 → 请求 3x3：ScaleMin 得 3x1，与 Qt6 KeepAspectRatio 同为 3x1。
 inline QImage qImageScaledKeepAspectSmooth(const QImage& im, const QSize& s)
 {
-    return im.smoothScale(s, QImage::ScaleMin);
+    if (im.isNull() || s.width() <= 0 || s.height() <= 0) return QImage();
+    QSize t = im.size();
+    t.scale(s, QSize::ScaleMin);
+    if (!t.isValid() || t.width() <= 0 || t.height() <= 0) return QImage();
+    return qImageSmoothScale(im, t.width(), t.height());
 }
 
 // 半透明 QColor。Qt3 的 QColor 只有三参构造（qcolor.h:82），无四参、无
@@ -229,6 +241,13 @@ inline QByteArray qImageRgbaBytes(const QImage& im)
 inline QImage qImageRgba(const QImage& im)
 {
     return im.isNull() ? im : im.convertToFormat(QImage::Format_RGBA8888);
+}
+
+// 平滑缩放（拉伸到恰好 w×h）。Qt3 侧是 qimagesmoothscale.cpp 的 Imlib2 面积
+// 采样移植；Qt6 侧即原生 scaled(IgnoreAspectRatio, SmoothTransformation)。
+inline QImage qImageSmoothScale(const QImage& im, int w, int h)
+{
+    return im.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
 }
 
 inline QImage qImageScaledKeepAspectSmooth(const QImage& im, const QSize& s)

@@ -496,6 +496,9 @@ STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qimage_shim.h \
                       $$STIKCOMMON_DIR/qimagereader_shim.h
 isEmpty(QT_VERSION) {
     STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qimagereader_shim.cpp
+    # Qt3 快速平滑缩放（Imlib2 面积采样移植，替代慢约 38x 的 QImage::smoothScale）。
+    # qImageSmoothScale 声明在 qimage_shim.h；Qt6 侧为头内 inline，无此 .cpp。
+    STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qimagesmoothscale.cpp
     # libnsgif 需以 C99 单独编译：其源用 // 注释与 stdint，且 gif.c/lzw.c 互调
     STIKCOMMON_SOURCES += $$STIK_VENDOR_DIR/libnsgif/gif.c \
                           $$STIK_VENDOR_DIR/libnsgif/lzw.c

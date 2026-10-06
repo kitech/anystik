@@ -1,5 +1,6 @@
 #include "stickerpreviewoverlay.h"
 #include "qimagereader_shim.h"   // 本仓完整 QImageReader：GIF/APNG/WebP 多帧，delay 已是 ms
+#include "qimage_shim.h"         // qImageSmoothScale（预览缩放）
 #include "translator.h"          // _() / qFromUtf8
 #include "toastwidget.h"          // ToastWidget::show(parent, text, ms)
 #include "stickerops.h"           // 动作栏「复制」复用同一份实现
@@ -48,17 +49,17 @@ static const QColor kCloseText(230, 230, 230);
 
 // 平滑缩放到**恰好** w×h 的 QPixmap（比例已由 scaledImageRect 算好）。
 // 两处跨版本差异，都必须分支：
-//  1) 缩放 API：Qt3 是 QImage::smoothScale（qimage.h:158，默认 ScaleFree ≡
-//     IgnoreAspectRatio）；Qt4+ **没有**可用的 smoothScale —— Qt6 的
+//  1) 缩放 API：Qt3 走本仓移植的 qImageSmoothScale（Imlib2 面积采样，等价
+//     Qt6 的 scaled(...,IgnoreAspectRatio,SmoothTransformation)，替代慢约 38x
+//     的原生 QImage::smoothScale）；Qt4+ **没有**可用的 smoothScale —— Qt6 的
 //     smoothScaled(int,int) 是 protected（qimage.h:295，public 段无此函数），
 //     公开的平滑缩放只有 scaled(w,h,mode,Qt::SmoothTransformation)。
-//     写法对齐 shim 自己的注释（qimagereader_shim.cpp:511-513 就这么对齐 Qt6 的）。
 //  2) QImage→QPixmap：Qt3 有 QPixmap(const QImage&) 构造（qpixmap.h:68）；
 //     **Qt6 删掉了该构造**，只剩 static QPixmap::fromImage（qpixmap.h:89）。
 static QPixmap scaleToPixmap(const QImage& src, int w, int h)
 {
 #ifdef QT3_BUILD
-    return QPixmap(src.smoothScale(w, h));
+    return QPixmap(qImageSmoothScale(src, w, h));
 #else
     return QPixmap::fromImage(src.scaled(w, h, Qt::IgnoreAspectRatio,
                                          Qt::SmoothTransformation));
