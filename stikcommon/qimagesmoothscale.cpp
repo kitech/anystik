@@ -22,6 +22,14 @@
 #include <qimage.h>
 #include <qcolor.h>
 
+// ── Qt3 专用：本 TU 全局编译于 -O0，但面积采样是逐像素热路径，
+// 对整文件单独提到 -O3（仅本 TU，不影响其余 -O0 代码；Qt6 不编本文件）。
+// 放在全部 include 之后，避免连带把 qimage.h 里的 inline 也提优化。
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC push_options
+#pragma GCC optimize("O3")
+#endif
+
 namespace {
 
 struct QImageScaleInfo {
@@ -450,5 +458,9 @@ QImage qImageSmoothScale(const QImage &srcImage, int dw, int dh)
     qimageFreeScaleInfo(scaleinfo);
     return buffer;
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC pop_options
+#endif
 
 #endif // QT_VERSION < 0x040000
