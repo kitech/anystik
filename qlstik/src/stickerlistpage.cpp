@@ -1729,16 +1729,21 @@ void StickerListPage::onStickerScaleAction(int scaleIndex)
         return;
     }
     touchSticker(item->id);
+    bool fellBackToPng = false;
     const bool ok = StickerOps::copyScaledToClipboard(item->filePath,
-                                                      kScaleFactors[scaleIndex]);
+                                                      kScaleFactors[scaleIndex],
+                                                      &fellBackToPng);
     if (!ok) {
         ToastWidget::show(this, _(qFromUtf8("sticker_msg.copy_failed")), 2000);
         return;
     }
     // ⚠ 成功文案带档位号，用 _A() 的 {0} 占位（Translator::t 从 {0} 起算，
     //   translator.cpp 里按 args 下标替换）。⚠ Qt3 分支会把 {0} 换成 %1。
+    //   回退 PNG 时改文案：原格式没有同格式编码器（动图三兄弟，编码器在批次
+    //   4/5/6），提醒用户拿到的不再是原格式（§18.8）。
     ToastWidget::show(this,
-        _A(qFromUtf8("sticker_msg.copied_scale"), QStringList()
+        _A(qFromUtf8(fellBackToPng ? "sticker_msg.copied_scale_fallback"
+                                   : "sticker_msg.copied_scale"), QStringList()
            << QString::fromUtf8(kScaleNums[scaleIndex])), 2000);
 }
 

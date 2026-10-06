@@ -173,6 +173,7 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qjson_shim.h \
                        $$STIKCOMMON_DIR/qqueue_shim.h \
                        $$STIKCOMMON_DIR/qurl_shim.h \
                        $$STIKCOMMON_DIR/qimagereader_shim.h \
+                       $$STIKCOMMON_DIR/qformatsniff_shim.h \
                        $$STIKCOMMON_DIR/qdebug_shim.h \
                        $$STIKCOMMON_DIR/qbytearray_shim.h \
                        $$STIKCOMMON_DIR/qwebdavtransport.h \

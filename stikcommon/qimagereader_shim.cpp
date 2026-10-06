@@ -84,6 +84,23 @@ bool pngIsApng(const QByteArray& b)
 
 QByteArray sniffFormat(const QByteArray& b)
 {
+    // ⚠⚠ 这里**故意**把 APNG 归入 "png"，不要"顺手对齐"改成 "apng" ⚠⚠
+    //
+    // 本函数的返回值即 QImageReader 的 m_fmt，语义是**格式族**而非精确格式：
+    //   · :258 `m_fmt == "png"` → 解析 IHDR 取画布尺寸
+    //   · :382 `m_fmt == "png" && pngIsApng(m_bytes)` → 分派 APNG 解码器
+    // 两处都依赖 m_fmt 对 APNG 报 "png"（再各自用 pngIsApng 做二次细分）。
+    //
+    // 若把下面这行改成 return qba("apng")，上述两个分支会**同时**落空，且都是
+    // 静默失败（实测推导见 移植计划.md §18.3 的对照表）：
+    //   · :258 落空 → m_canvasSize 停在 Qt3 默认 (-1,-1)，而 :256 已把
+    //     m_sizeParsed 置 true → size() 恒 -1×-1，永不重解析；
+    //   · :382 落空 → APNG 掉进通用 QImage::loadFromData → 只出首帧，
+    //     **动画静默丢失**。
+    //
+    // 需要区分 APNG / 静态 PNG 的新调用方，请用 qformatsniff_shim.h 的
+    //   qSniffImageFormat()  —— 它区分 "apng" / "png"（已双端探针 17/17 通过）；
+    // 需要族级判定时用 qSniffFormatFamily()（APNG 归 "png"，与此处一致）。
     if (pngIsApng(b))               return qba("png");
     if (startsWith(b, "\x89PNG\r\n\x1a\n", 8)) return qba("png");
     if (startsWith(b, "\xff\xd8\xff", 3))      return qba("jpeg");

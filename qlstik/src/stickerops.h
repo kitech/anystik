@@ -6,15 +6,14 @@
 // 只做「读文件 / 解码 / 写 DB」，不碰 UI：一律返回 bool，toast 与弹窗由调用方
 // （StickerListPage）发起 —— 静态类拿不到 QWidget* parent。
 //
-// ⚠ 与 anysk 的三处有意差异（不是遗漏，改动时勿"顺手对齐"）：
+// ⚠ 与 anysk 的两处有意差异（不是遗漏，改动时勿"顺手对齐"）：
 //   1. anysk 用 probeImageValidity() 精确嗅探格式，那是 anystik/src 私有函数、
 //      不在 stikcommon，故不搬；改用 qmimedatabase_shim + QImageReader 垫片，
 //      对本菜单要的三个字段（类型/尺寸/帧数）够用。
-//   2. anysk 的 copyStickerScaledToClipboard 走 buildGifBytes/
-//      buildApngFromFrames 保留动画；这里只出首帧，与本文件 copyToClipboard
-//      及现有单击复制（stickerlistpage.cpp:1232-1234 同样只读首帧）保持一致。
-//   3. anysk 的 deleteSticker 也只调 stickerDb().delete_sticker()（软删，
-//      不删文件）—— 逐字照搬，不要补文件删除。
+//   2. ~~anysk 的 copyStickerScaledToClipboard 走 buildGifBytes/
+//      buildApngFromFrames 保留动画；这里只出首帧~~ —— **2026-10-06 已改**：
+//      复制逻辑迁到 StickerClipboard（§18），本文件的两个 copy* 只是薄包装。
+//      差异 3（deleteSticker 只软删）不变。
 
 #include "compat34.h"
 
@@ -43,10 +42,19 @@ struct StickerMetaLite {
 class StickerOps {
 public:
     // 读原图进剪贴板。失败返回 false，调用方负责 toast。
+    // ⚠ 保动画：真实实现在 StickerClipboard::copyOriginal()（原始字节直通，
+    //   动图 GIF/APNG/WebP 逐字节无损）。本函数降为薄包装，勿再在这里碰
+    //   QImageReader —— 那是动图被拍成静图的根因（§18.1）。
     static bool copyToClipboard(const QString& filePath);
 
-    // 按比例缩放后进剪贴板。只出首帧（见文件头差异 2）。
-    static bool copyScaledToClipboard(const QString& filePath, double scale);
+    // 按比例缩放后进剪贴板。真实实现在 StickerClipboard::copyScaled()。
+    //
+    // ⚠ *fellBackToPng 回传「是否发生 PNG 回退」：某格式没有同格式编码器时
+    //   （当前是动图三兄弟 GIF/APNG/WebP，编码器在批次 4/5/6）缩放结果会退成
+    //   PNG，调用方须改用 `copied_scale_fallback` 文案告知用户（§18.8）。
+    //   传 0 表示不关心。为兼容既有调用点，该参数有默认值。
+    static bool copyScaledToClipboard(const QString& filePath, double scale,
+                                      bool* fellBackToPng = 0);
 
     // 采集文件元信息。文件不存在/读不出返回 false，out 保持默认构造。
     static bool collectMeta(const QString& filePath, StickerMetaLite& out);

@@ -57,6 +57,7 @@ SOURCES += \
     src/pagemanager.cpp \
     src/stickerlistpage.cpp \
     src/stickerops.cpp \
+    src/stickerclipboard.cpp \
     src/stickerpreviewoverlay.cpp \
     $$STIKCOMMON_SOURCES
 
@@ -68,6 +69,7 @@ HEADERS += \
     src/pagemanager.h \
     src/stickerlistpage.h \
     src/stickerops.h \
+    src/stickerclipboard.h \
     src/stickerpreviewoverlay.h \
     $$STIKCOMMON_HEADERS
 

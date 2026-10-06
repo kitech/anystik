@@ -1,4 +1,5 @@
 #include "stickerops.h"
+#include "stickerclipboard.h"     // 复制管线真身（§18）：保动画、保原格式
 #include "storage.h"              // Storage::instance().stickerDb()
 #include "sticker_db.h"           // StickerDbSyncInterface
 #include "qimagereader_shim.h"    // Qt3 的完整 QImageReader + imageCount 垫片
@@ -52,18 +53,6 @@ private:
 #endif
 
 // ── 三个跨版本小工具（就地自写，理由见文件头关于 shim 的注记）──
-// QImage 缩放：Qt3 只有 **const 且返回副本** 的 scale()/smoothScale()
-// （qimage.h:158/163，ScaleFree=拉伸到恰好 w×h），Qt4+ 是非 const 的
-// scaled()（默认 IgnoreAspectRatio，语义与 Qt3 ScaleFree 一致）。
-static QImage qScaledTo(const QImage& im, int w, int h)
-{
-#ifdef QT3_BUILD
-    return im.smoothScale(w, h, QImage::ScaleFree);
-#else
-    return im.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-#endif
-}
-
 // 文件扩展名（不含点）：Qt3 只有 extension(bool)，Qt4+ 才有 suffix()。
 // 两者语义等价（a.tar.gz→gz、.bashrc→bashrc、a.→空）。
 static QString qSuffixOf(const QFileInfo& fi)
@@ -95,49 +84,23 @@ static QString qUpperOf(const QString& s)
 
 bool StickerOps::copyToClipboard(const QString& filePath)
 {
-    // 复制**原图**而不是 152px 缩略图：瓦片缓存里只有缩略图，
-    // 粘出去的图必须是原始分辨率，否则用户拿到的就是糊的。
-    if (filePath.isEmpty() || !QFile::exists(filePath)) {
-        return false;
-    }
-    QImageReader reader(filePath);
-    reader.setAutoTransform(true);
-    const QImage full = reader.read();
-    if (full.isNull()) {
-        return false;
-    }
-    // qltox photoviewer.cpp:92-105 就是用 QClipboard::setImage() 递图
-    QApplication::clipboard()->setImage(full);
-    return true;
+    // ⚠ 这里**不再**自己读图（§18.1）。原实现是 QImageReader::read() 读首帧 +
+    // QApplication::clipboard()->setImage()，动图因此被拍成静图。
+    // StickerClipboard::copyOriginal() 走原始字节直通，实测两端逐字节无损
+    // （§18.10 第 2 项）。
+    //
+    // 「复制原图而不是 152px 缩略图」这条不变：瓦片缓存里只有缩略图，
+    // 读的就是磁盘上的原始文件。
+    return StickerClipboard::copyOriginal(filePath);
 }
 
-bool StickerOps::copyScaledToClipboard(const QString& filePath, double scale)
+bool StickerOps::copyScaledToClipboard(const QString& filePath, double scale,
+                                       bool* fellBackToPng)
 {
-    if (filePath.isEmpty() || scale <= 0.0 || !QFile::exists(filePath)) {
-        return false;
-    }
-    QImageReader reader(filePath);
-    reader.setAutoTransform(true);
-    QImage img = reader.read();
-    if (img.isNull()) {
-        return false;
-    }
-    // ⚠ 缩放走本地 qScaledTo（见上方注释），**不要直接调 scale()/scaled()**：
-    //   Qt3 是 const 返回副本的 scale()，Qt4+ 是非 const 的 scaled()，签名不兼容。
-    //   ⚠ 至少 1px：0.1 缩放后宽或高可能算出 0，QImage 拒绝 0 尺寸。
-    //   ⚠ 用 ScaleFree/IgnoreAspectRatio 而非 KeepAspectRatio：w/h 由同一个
-    //   scale 因子算出、比例已严格一致，两者结果相同，但 free 语义保证拿到的
-    //   就是请求尺寸（KeepAspectRatio 允许返回更小的尺寸）。
-    int w = int(img.width() * scale + 0.5);
-    int h = int(img.height() * scale + 0.5);
-    if (w < 1) { w = 1; }
-    if (h < 1) { h = 1; }
-    img = qScaledTo(img, w, h);
-    if (img.isNull()) {
-        return false;
-    }
-    QApplication::clipboard()->setImage(img);
-    return true;
+    // 缩放逐帧、解码/重编码全在 StickerClipboard 里（§18.5）。本函数只负责
+    // 把「是否回退 PNG」透给调用方，让它选 copied_scale / copied_scale_fallback
+    // 文案（§18.8）—— 文案是调用方的责任，静态类不该管 UI。
+    return StickerClipboard::copyScaled(filePath, scale, fellBackToPng);
 }
 
 bool StickerOps::collectMeta(const QString& filePath, StickerMetaLite& out)
