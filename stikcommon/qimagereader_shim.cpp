@@ -2,10 +2,12 @@
 //
 // 只在 QT3_BUILD 下编译；Qt6 走 Qt 原生 <QImageReader>，本文件不参与。
 //
-// 本文件引入了三个后端的实现：
+// 本文件引入了四个后端的实现：
 //   · libnsgif          —— GIF 动画解码（anystik/vendor/libnsgif/gif.c,lzw.c）
 //   · uc_apng_loader    —— APNG 动画解码（自带 stb_image 实现）
 //   · libwebp           —— WebP 动画解码（系统库 -lwebp -lwebpdemux）
+//   · libtiff（系统库） —— TIFF 解码（/opt/qt338sh 无 tiff 插件；由 qlstik.pro
+//                          的 pkg-config 探测激活，HAVE_LIBTIFF 才编解码支路）
 // 其余静态格式走 Qt3 原生 QImage::loadFromData。
 
 #include "qimagereader_shim.h"
@@ -18,11 +20,18 @@
 #include <qfile.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <cstdio>     // SEEK_SET/SEEK_CUR/SEEK_END（tifMemSeek）
 #include <cstdlib>
 #include <cstring>
 
 #include <webp/decode.h>
 #include <webp/demux.h>
+
+// libtiff：Qt3 无 tiff 插件，由本垫片经 libtiff 解码。HAVE_LIBTIFF 由
+// qlstik.pro / build_tests.sh 的 pkg-config 探测定义，控制解码支路与白名单。
+#ifdef HAVE_LIBTIFF
+#include <tiffio.h>
+#endif
 
 // uc_apng_loader 自己 include stb_image.h，但要求实现体在同 TU 里只出现一次，
 // 因此这里先展开实现体（uc_apng_loader.h 见到 STBI_INCLUDE_STB_IMAGE_H 就跳过）。
@@ -159,6 +168,114 @@ QSize sniffJpegSize(const QByteArray& b)
     return QSize();
 }
 
+// ── TIFF ──────────────────────────────────────────────────────────────────
+// libtiff 从内存打开的 I/O 回调（不落盘；Qt3 无 tiff 插件，见 supportedImageFormats
+// 头注释）。状态句柄挂 QImageReaderDecoderState::tifMem，与 m_dec 同生命周期
+// （libtiff 在 TIFFClose() 前随时可能 seek/read）。
+struct TifMem
+{
+    const uint8_t* data;
+    size_t size;
+    size_t pos;
+};
+
+#ifdef HAVE_LIBTIFF
+tmsize_t tifMemRead(thandle_t h, void* buf, tmsize_t n)
+{
+    if (n < 0) return (tmsize_t)-1;
+    TifMem* m = (TifMem*)h;
+    const size_t avail = m->size - m->pos;
+    const size_t take = ((size_t)n <= avail) ? (size_t)n : avail;
+    ::memcpy(buf, m->data + m->pos, take);
+    m->pos += take;
+    return (tmsize_t)take;
+}
+
+tmsize_t tifMemWrite(thandle_t, void*, tmsize_t)
+{
+    return (tmsize_t)-1;   // 只读打开，无写路径
+}
+
+toff_t tifMemSeek(thandle_t h, toff_t off, int whence)
+{
+    TifMem* m = (TifMem*)h;
+    const toff_t base = (whence == SEEK_SET) ? 0
+                      : (whence == SEEK_CUR) ? (toff_t)m->pos
+                      : (toff_t)m->size;                    // SEEK_END
+    const toff_t npos = base + off;
+    if (npos < 0 || npos > (toff_t)m->size) return (toff_t)-1;
+    m->pos = (size_t)npos;
+    return npos;
+}
+
+int tifMemClose(thandle_t)
+{
+    return 0;   // 缓冲区归 m_dec 所有，不 free
+}
+
+toff_t tifMemSize(thandle_t h)
+{
+    return (toff_t)((TifMem*)h)->size;
+}
+#endif // HAVE_LIBTIFF
+
+// TIFF 便宜尺寸：读 IFD0（第 0 目录），扫 tag 256=ImageWidth / 257=ImageLength。
+// 经典（magic 42）目录项 12B、BigTIFF（43）20B；字节序取头部 MM/II。只认
+// count==1 的内联值（SHORT/LONG，实际文件恒为 inline）。解析失败返回空 QSize，
+// 调用方会在读帧后用实际尺寸兜底（见 decodeMoreFrames 静态分支 :477）。
+QSize sniffTiffSize(const QByteArray& b)
+{
+    const unsigned char* p = (const unsigned char*)b.data();
+    const size_t n = (size_t)b.size();
+    if (n < 16) return QSize();
+    const bool le = (p[0] == 'I' && p[1] == 'I');
+    const bool be = (p[0] == 'M' && p[1] == 'M');
+    if (!le && !be) return QSize();
+    const bool big = (p[2] == 43 && p[3] == 0);
+    const auto r16 = [le](const unsigned char* q) -> unsigned {
+        return le ? (unsigned)q[0] | ((unsigned)q[1] << 8)
+                  : ((unsigned)q[0] << 8) | (unsigned)q[1];
+    };
+    const auto r32 = [le](const unsigned char* q) -> uint32_t {
+        return le ? (uint32_t)q[0] | ((uint32_t)q[1] << 8)
+                       | ((uint32_t)q[2] << 16) | ((uint32_t)q[3] << 24)
+                  : ((uint32_t)q[0] << 24) | ((uint32_t)q[1] << 16)
+                       | ((uint32_t)q[2] << 8) | (uint32_t)q[3];
+    };
+    const size_t ifd = big
+        ? (le ? ((size_t)r32(p + 4) | ((size_t)r32(p + 8) << 32))
+              : (((size_t)r32(p + 4) << 32) | (size_t)r32(p + 8)))
+        : (size_t)r32(p + 4);                               // 头 offset 4B/8B
+    const size_t cntBase = big ? 8u : 2u;
+    const size_t stride  = big ? 20u : 12u;
+    const size_t valOff  = big ? 12u : 8u;
+    if (ifd + cntBase > n) return QSize();
+    const size_t count = big
+        ? (le ? ((size_t)r32(p + ifd) | ((size_t)r32(p + ifd + 4) << 32))
+              : (((size_t)r32(p + ifd) << 32) | (size_t)r32(p + ifd + 4)))
+        : (size_t)r16(p + ifd);          // Classic IFD 的 count 是 2 字节
+    uint32_t w = 0, h = 0;
+    for (size_t i = 0; i < count && (w == 0 || h == 0); ++i) {
+        const size_t e = ifd + cntBase + i * stride;
+        if (e + valOff + 4 > n) break;      // 越界条目（坏文件）即止
+        const unsigned tag = r16(p + e);
+        if (tag == 256 || tag == 257) {
+            const unsigned type = r16(p + e + 2);
+            if (r32(p + e + 4) != 1) continue;   // 只认 count==1 的内联值
+            // WIDTH/LENGTH 常见 SHORT(3)：inline 只占前 2B（实测见探针 dump：
+            // BE 下「01 00 00 00」实为 SHORT 256=「01 00」，读满 4B 会得 <<16）。
+            // LONG(4) 走 4B；其余（BYTE 等）退化为取首字节。
+            const unsigned bw = (type == 3 || type == 8) ? 2u
+                              : (type == 4 || type == 9) ? 4u : 1u;
+            const uint32_t v = (bw == 2) ? r16(p + e + valOff)
+                              : (bw == 4) ? r32(p + e + valOff)
+                              : (uint32_t)p[e + valOff];
+            if (tag == 256) w = v; else h = v;
+        }
+    }
+    return (w != 0 && h != 0) ? QSize((int)w, (int)h) : QSize();
+}
+
 QImage imageFromRgba(const uint8_t* rgba, int w, int h)
 {
     QImage im(w, h, 32);
@@ -198,14 +315,19 @@ void gifCbModified(nsgif_bitmap_t*) {}
 // QImageReaderDecoderState 在头文件仅前置声明，这里给出完整定义（pimpl 惯例）。
 struct QImageReaderDecoderState
 {
-    enum Kind { None, Gif, Webp, Apng };
+    enum Kind { None, Gif, Webp, Apng, Tiff };
     Kind  kind;
     nsgif_t*          gif;        // Gif
     WebPAnimDecoder*  webp;       // Webp
     int               webpPrevTs;
     uc::apng::loader<std::istringstream>* apng;   // Apng（move-only，只能堆持有）
+    void*             tiff;       // Tiff：libtiff 句柄（TIFF*）；void* 免引 tiffio.h
+    TifMem            tifMem;     // Tiff：内存 I/O 状态（libtiff 在 Close 前随时 seek）
     QImageReaderDecoderState()
-        : kind(None), gif(0), webp(0), webpPrevTs(0), apng(0) {}
+        : kind(None), gif(0), webp(0), webpPrevTs(0), apng(0), tiff(0)
+    {
+        ::memset(&tifMem, 0, sizeof(tifMem));
+    }
 };
 
 // ── 构造 / 生命周期 ───────────────────────────────────────────────────────
@@ -257,6 +379,11 @@ QImageReader::~QImageReader()
     case QImageReaderDecoderState::Apng:
         delete m_dec->apng;
         break;
+    case QImageReaderDecoderState::Tiff:
+#ifdef HAVE_LIBTIFF
+        if (m_dec->tiff) TIFFClose((TIFF*)m_dec->tiff);
+#endif
+        break;
     default:
         break;
     }
@@ -293,6 +420,9 @@ bool QImageReader::detectFormat()
             wd.bytes = (const uint8_t*)m_bytes.data();
             wd.size = (size_t)m_bytes.size();
             if (WebPGetInfo(wd.bytes, wd.size, &w, &h)) m_canvasSize = QSize(w, h);
+        } else if (m_fmt == qba("tiff")) {
+            // sniffTiffSize 零依赖自研解析（不吃 libtiff），无宏机器也能报出尺寸
+            m_canvasSize = sniffTiffSize(m_bytes);
         }
     }
     return !m_fmt.isEmpty();
@@ -418,6 +548,40 @@ void QImageReader::prepareDecoder()
         return;
     }
 
+    // ── TIFF：libtiff 从内存解（Qt3 无 tiff 插件；Qt4+ 走 Qt 原生插件）────
+    if (m_fmt == qba("tiff")) {
+#ifdef HAVE_LIBTIFF
+        m_dec->tifMem.data = (const uint8_t*)m_bytes.data();
+        m_dec->tifMem.size = (size_t)m_bytes.size();
+        m_dec->tifMem.pos  = 0;
+        TIFF* tif = TIFFClientOpen("memory", "r", (thandle_t)&m_dec->tifMem,
+                                   tifMemRead, tifMemWrite, tifMemSeek,
+                                   tifMemClose, tifMemSize, NULL, NULL);
+        if (!tif) {
+            m_error = UnsupportedFormatError;
+            m_errorStr = "tiff open failed";
+            return;
+        }
+        uint32_t tw = 0, th = 0;
+        TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &tw);
+        TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &th);
+        if (tw == 0 || th == 0) {
+            TIFFClose(tif);
+            m_error = InvalidDataError;
+            m_errorStr = "tiff no size";
+            return;
+        }
+        m_dec->kind = QImageReaderDecoderState::Tiff;
+        m_dec->tiff = (void*)tif;
+        m_canvasSize = QSize((int)tw, (int)th);
+        m_imageCount = 1;
+        m_animated = false;
+        return;
+#endif
+        // 无 libtiff：tiff 落进下方「其余静态格式」，loadFromData 按现状报
+        // UnsupportedFormatError（与白名单不含 tiff 的上层提前拒绝一致）。
+    }
+
     // ── 其余静态格式：一帧，首帧在 decodeMoreFrames() 里 loadFromData ──
     m_imageCount = 1;
     m_animated = false;
@@ -462,6 +626,49 @@ int QImageReader::decodeMoreFrames(int want)
                 m_errorStr = QString("apng: %1").arg(e.what());
                 break;
             }
+        } else if (m_dec->kind == QImageReaderDecoderState::Tiff) {
+#ifdef HAVE_LIBTIFF
+            // TIFFReadRGBAImageOriented 把 Photometric/压缩/alpha 全部合成 RGBA，
+            // 输出按 TIFFGetR/G/B/A 宏取（uint32 ABGR），与 imageFromRgba 期待的
+            // RGBA8888 字节序不同，故不复用它，这里按 ABGR 直接填 Qt3 的 BGRA。
+            TIFF* tif = (TIFF*)m_dec->tiff;
+            const int tw = m_canvasSize.width();
+            const int th = m_canvasSize.height();
+            uint32_t* raster = (uint32_t*)::malloc((size_t)tw * (size_t)th * sizeof(uint32_t));
+            if (!raster) {
+                m_error = InvalidDataError;
+                m_errorStr = "tiff oom";
+                break;
+            }
+            const bool ok = TIFFReadRGBAImageOriented(tif, (uint32_t)tw, (uint32_t)th,
+                                                      raster, ORIENTATION_TOPLEFT, 0) != 0;
+            QImage im(tw, th, 32);
+            if (!ok || im.isNull()) {
+                ::free(raster);
+                m_error = InvalidDataError;
+                m_errorStr = "tiff decode failed";
+                break;
+            }
+            im.setAlphaBuffer(true);
+            const int stride = im.bytesPerLine();
+            uchar* base = im.bits();
+            for (int y = 0; y < th; ++y) {
+                uchar* q = base + (size_t)y * (size_t)stride;
+                const uint32_t* rp = raster + (size_t)y * (size_t)tw;
+                for (int x = 0; x < tw; ++x) {
+                    const uint32_t v = rp[x];
+                    q[0] = (uchar)TIFFGetB(v);
+                    q[1] = (uchar)TIFFGetG(v);
+                    q[2] = (uchar)TIFFGetR(v);
+                    q[3] = (uchar)TIFFGetA(v);
+                    q += 4;
+                }
+            }
+            ::free(raster);
+            m_frames.push_back(im);
+            m_delaysMs.push_back(0);
+#endif
+            break;
         } else {
             QImage im;
             im.loadFromData(m_bytes);
@@ -576,11 +783,15 @@ QValueList<QByteArray> QImageReader::supportedImageFormats()
 {
     // Qt3 没有 qimageio.h，也就没有任何枚举图像插件的公开 API，只能硬编码。
     // 运行时真能用 QImage::loadFromData 解的静态格式 + 垫片补的 gif/webp。
-    // 刻意不含 svg/svgz/tiff：Qt3 无 svg 插件、无 tiff 插件，让上层据此明确
-    // 拒绝并打日志，好过「列进白名单却在运行时静默解码失败」。
+    // 刻意不含 svg/svgz：Qt3 无 svg 插件，让上层据此明确拒绝并打日志，好过
+    // 「列进白名单却在运行时静默解码失败」。tiff 由 libtiff 垫片解，探测到
+    // HAVE_LIBTIFF 时才列入；无宏机器维持原状（上层明确拒绝）。
     static const char* kFormats[] = {
         "bmp", "jpeg", "mng", "pbm", "pgm", "png", "ppm", "xbm", "xpm",
         "gif", "webp"
+#ifdef HAVE_LIBTIFF
+        , "tiff"
+#endif
     };
     QValueList<QByteArray> f;
     for (size_t i = 0; i < sizeof(kFormats) / sizeof(kFormats[0]); ++i) {

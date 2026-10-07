@@ -78,7 +78,7 @@ bool makeJpeg(const QString& path, int w, int h)
 // ⚠ supportedImageFormats() 是硬编码白名单（Qt3 无插件枚举 API）。产品据此
 //   判断「这个后缀要不要尝试解码」。若白名单漏了 gif/webp，动画贴纸会被上层
 //   提前拒掉；若混进了 svg/tiff（Qt3 无对应插件），则会在运行时静默解码失败。
-TEST_CASE("QImageReader::supportedImageFormats: 含 gif/webp/png/jpeg/bmp，不含 svg/tiff")
+TEST_CASE("QImageReader::supportedImageFormats: 含 gif/webp/png/jpeg/bmp，不含 svg；tiff 随 HAVE_LIBTIFF")
 {
     const QValueList<QByteArray> fmts = QImageReader::supportedImageFormats();
     bool hasGif = false, hasWebp = false, hasPng = false, hasJpeg = false, hasBmp = false;
@@ -99,7 +99,11 @@ TEST_CASE("QImageReader::supportedImageFormats: 含 gif/webp/png/jpeg/bmp，不�
     CHECK(hasJpeg);
     CHECK(hasBmp);
     CHECK(!hasSvg);                // 明确不含：Qt3 无 svg 插件
-    CHECK(!hasTiff);               // 明确不含：Qt3 无 tiff 插件
+#ifdef HAVE_LIBTIFF
+    CHECK(hasTiff);                // 带 libtiff：垫片把 tiff 列入白名单（build_tests.sh 探测）
+#else
+    CHECK(!hasTiff);               // 无 libtiff：维持「明确不含 → 上层提前拒绝」现状
+#endif
 }
 
 // ⚠ imageFormat() 静态版：非图像数据必须返回空，而不是乱猜一个格式。

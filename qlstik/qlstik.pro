@@ -190,6 +190,20 @@ SQLITE_LIBS   = $$system(pkg-config --libs sqlite3 2>/dev/null)
     message("SQLite: not found via pkg-config (批次 5 StickerStore 之前不影响构建)")
 }
 
+# TIFF（libtiff，系统库）：Qt3 无 tiff 插件，qimagereader_shim 垫片经 libtiff 解
+# .tif。探测到则 DEFINES=HAVE_LIBTIFF 并链 -ltiff；探测不到维持现状（tiff 被上层
+# 白名单明确拒绝），构建不失败。镜像上面 sqlite 的 pkg-config 探测写法。
+# 不加 --cflags：libtiff-4 的 cflags 仅是 -I/usr/include/webp（头依赖），文件只
+# include <tiffio.h>，/usr/include 默认可达。
+TIFF_LIBS = $$system(pkg-config --libs libtiff-4 2>/dev/null)
+!isEmpty(TIFF_LIBS) {
+    LIBS += $$TIFF_LIBS
+    DEFINES += HAVE_LIBTIFF
+    message("TIFF: $$TIFF_LIBS -> HAVE_LIBTIFF")
+} else {
+    message("TIFF: libtiff-4 not found; tiff stays unsupported")
+}
+
 # zlib（批次 3 起 zipu 解压用；先挂上，后续批次不必再动 .pro）
 LIBS += -lz
 

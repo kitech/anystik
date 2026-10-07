@@ -26,6 +26,14 @@ FLAGS="-DQT3_BUILD -DQT_NO_DEBUG -DQT_SHARED -DQT_THREAD_SUPPORT \
   -I. -I../vendor -I../vendor/libnsgif \
   -I../vendor/uc_apng_loader -I$QTDIR/include -I../qldox -I../qlcomp"
 
+# libtiff：与 qlstik.pro 同款 pkg-config 探测。探测到 → 给测试二进制
+# HAVE_LIBTIFF（断言 supportedImageFormats 白名单含 tiff）并链 -ltiff，与 Qt3
+# 产品二进制同切面；探测不到 → 维持「不含 tiff」断言，链接 $TIFF_LIBS 为空无害。
+TIFF_LIBS="$(pkg-config --libs libtiff-4 2>/dev/null || true)"
+if [ -n "$TIFF_LIBS" ]; then
+    FLAGS="$FLAGS -DHAVE_LIBTIFF"
+fi
+
 # ── 测试文件（新增一个就在这里加一行）────────────────────────────────
 TESTS="
 test_qwebdavlite.cpp
@@ -133,7 +141,7 @@ done
 echo "=== 链接 ==="
 $CXX -o "$OUTDIR/run_tests" $OBJS \
   -L$QTDIR/lib -lqt-mt -lcurl -lssl -lcrypto -lz -lwebp -lwebpdemux -lpthread \
-  -ldl -lX11 -lXss
+  -ldl -lX11 -lXss $TIFF_LIBS
 
 echo "=== 运行 ==="
 LD_LIBRARY_PATH=$QTDIR/lib "$OUTDIR/run_tests" "$@"
