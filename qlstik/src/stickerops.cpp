@@ -13,12 +13,14 @@
 #ifdef QT3_BUILD
 #include <qapplication.h>
 #include <qclipboard.h>
+#include "qclipboard_shim.h"   // Qt3 的 QMimeData + QGuiApplication::clipboard()
 #include <qfile.h>
 #include <qfileinfo.h>
 #include <qcstring.h>
 #else
 #include <QApplication>
 #include <QClipboard>
+#include <QMimeData>
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
@@ -175,6 +177,56 @@ QString StickerOps::formatMeta(const StickerMetaLite& m)
     lines << QString::fromUtf8("帧数: %1").arg(m.frames);
     lines << QString::fromUtf8("更新时间: ") + m.modified;
     return lines.join(QString("\n"));
+}
+
+// 按系统文件管理器的复制机制发布「路径 + 元信息」：
+//   text/uri-list（RFC 2483，CRLF 尾）全环境通用；
+//   x-special/gnome-copied-files（"copy\nURI"、verb 后一个 LF、URI 后**无尾换行**）
+//   供 Nautilus/Thunar/Nemo/MATE 识别复制动作（Nautilus 44+ 遇尾换行/CRLF 整包拒绝）；
+//   text/plain（绝对路径 + 换行 + 5 行元信息）供当纯文本粘贴。
+//   不放图片像素。URI 与 qclipboard_shim.h setUrls 同款（file:// + 原始 UTF-8 路径，
+//   未做百分号编码——与仓库既有 text/uri-list 行为保持一致）。
+bool StickerOps::copyPathAndMetaToClipboard(const QString& filePath)
+{
+    StickerMetaLite meta;
+    if (!collectMeta(filePath, meta)) {
+        return false;
+    }
+    const QFileInfo fi(filePath);
+#ifdef QT3_BUILD
+    const QString absPath = fi.absFilePath();   // Qt3 API 名
+#else
+    const QString absPath = fi.absoluteFilePath();
+#endif
+    const QString uri = QString("file://") + absPath;
+    QByteArray uriList;      // text/uri-list：CRLF 尾缀（含最后一行）
+    QByteArray copiedFiles;  // x-special/gnome-copied-files：无尾换行
+    QByteArray plain;        // text/plain：路径 + 换行 + 5 行元信息
+#ifdef QT3_BUILD
+    const QCString uriU8 = uri.utf8();
+    const QCString plainU8 = (absPath + QString("\n") + formatMeta(meta)).utf8();
+    qBaAppendBytes(uriList, uriU8, (int)uriU8.length());
+    qBaAppendBytes(uriList, "\r\n", 2);
+    qBaAppendBytes(copiedFiles, "copy\n", 5);
+    qBaAppendBytes(copiedFiles, uriU8, (int)uriU8.length());
+    qBaAppendBytes(plain, plainU8, (int)plainU8.length());
+#else
+    uriList.append(uri.toUtf8());
+    uriList.append("\r\n");
+    copiedFiles.append("copy\n");
+    copiedFiles.append(uri.toUtf8());
+    plain.append((absPath + QString("\n") + formatMeta(meta)).toUtf8());
+#endif
+    QMimeData* md = new QMimeData;
+    md->setData(QString("text/uri-list"), uriList);
+    md->setData(QString("x-special/gnome-copied-files"), copiedFiles);
+    md->setData(QString("text/plain"), plain);
+#ifdef QT3_BUILD
+    QGuiApplication::clipboard()->setMimeData(md);   // Qt3 接管所有权（已实测）
+#else
+    QApplication::clipboard()->setMimeData(md);      // Qt4.2+/5/6 接管所有权
+#endif
+    return true;
 }
 
 bool StickerOps::setDescription(const QString& id, const QString& desc)

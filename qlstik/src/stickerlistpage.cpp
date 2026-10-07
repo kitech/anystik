@@ -1606,6 +1606,10 @@ void StickerListPage::showStickerMenu(int index, int contentX, int contentY)
     insertActionItem(menu, _(qFromUtf8("sticker_menu.copy_meta")), [this]() {
         onStickerMenuAction(MenuCopyMeta);
     });
+    // FM复制（路径+元信息）：拷贝族相邻，插在 copy_meta 之后
+    insertActionItem(menu, _(qFromUtf8("sticker_menu.copy_path")), [this]() {
+        onStickerMenuAction(MenuCopyPath);
+    });
     insertActionItem(menu, _(qFromUtf8("sticker_menu.edit_desc")), [this]() {
         onStickerMenuAction(MenuEditDesc);
     });
@@ -1696,6 +1700,15 @@ void StickerListPage::onStickerMenuAction(int action)
         ToastWidget::show(this, _(qFromUtf8("sticker_msg.meta_copied")), 2000);
         return;
     }
+
+    case MenuCopyPath:
+        touchSticker(item->id);
+        if (!StickerOps::copyPathAndMetaToClipboard(item->filePath)) {
+            ToastWidget::show(this, _(qFromUtf8("sticker_msg.copy_failed")), 2000);
+            return;
+        }
+        ToastWidget::show(this, _(qFromUtf8("sticker_msg.path_copied")), 2000);
+        return;
 
     case MenuEditDesc:
         // ⚠ 菜单此时正在派发栈里，若直接弹 QInputDialog::getText 的嵌套事件循环，

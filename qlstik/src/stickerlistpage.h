@@ -287,11 +287,12 @@ private:
         MenuScaleSub,       // 缩放拷贝 ›
         MenuPreview,        // 预览（放大查看）
         MenuCopyMeta,       // 复制元信息
+        MenuCopyPath,       // FM复制（路径+元信息，文件管理器格式）
         MenuEditDesc,       // 编辑描述简介
         MenuShare,          // 分享（桌面端仅 toast，与 anysk 一致）
         MenuDelete,         // 删除
         MenuSearchSub,      // 搜索相似 ›
-        MenuActionCount     // = 8
+        MenuActionCount     // = 9
     };
     // ⚠ 菜单项不能带参数（Qt3/4 回调签名与 QAction 的 checked 态冲突，
     //   移植计划.md:78），故用 LambdaSlot 捕获下标 + 本成员记住「当前是哪个瓦片」。

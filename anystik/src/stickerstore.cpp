@@ -2928,6 +2928,71 @@ bool StickerStore::copyStickerToClipboard(const QString& filePath)
     return true;
 }
 
+// FM复制（桌面三件套 / Android 纯文本降级），字节契约与 qlstik
+// StickerOps::copyPathAndMetaToClipboard 同款（见其实现处注释）。
+bool StickerStore::copyPathAndMetaToClipboard(const QString& filePath)
+{
+    const QFileInfo fi(filePath);
+    if (!fi.exists() || !fi.isFile()) {
+        qWarning() << "[StickerStore] copy path/meta: missing file:" << filePath;
+        return false;
+    }
+#ifdef QT3_BUILD
+    const QString absPath = fi.absFilePath();
+#else
+    const QString absPath = fi.absoluteFilePath();
+#endif
+    const QString text = absPath + QStringLiteral("\n")
+                       + formatStickerMeta(stickerMeta(filePath));
+
+#ifdef Q_OS_ANDROID
+    // Android 无桌面三件套概念：落为系统剪贴板纯文本（路径 + 元信息）
+    bool copied = false;
+    auto future = QNativeInterface::QAndroidApplication::runOnAndroidMainThread(
+        [&copied, text]() {
+            QJniObject context = QNativeInterface::QAndroidApplication::context();
+            if (!context.isValid()) return;
+            QJniObject jtext = QJniObject::fromString(text);
+            copied = QJniObject::callStaticMethod<jboolean>(
+                "io/fedlet/mobutil/ShareActivity", "copyTextToClipboard",
+                "(Landroid/content/Context;Ljava/lang/String;)Z",
+                context.object(), jtext.object());
+        });
+    future.waitForFinished();
+    if (!copied) {
+        qWarning() << "[StickerStore] android copy path/meta failed";
+    }
+    return copied;
+#else
+    // 与 qclipboard_shim setUrls 同款（file:// + 原始 UTF-8 路径，不百分号编码）
+    const QString uri = QStringLiteral("file://") + absPath;
+    QByteArray uriList;      // text/uri-list：CRLF 尾缀（含最后一行）
+    QByteArray copiedFiles;  // x-special/gnome-copied-files：无尾换行
+    QByteArray plain;        // text/plain：路径 + 换行 + 5 行元信息
+#ifdef QT3_BUILD
+    const QCString uriU8 = uri.utf8();
+    const QCString plainU8 = text.utf8();
+    qBaAppendBytes(uriList, uriU8, (int)uriU8.length());
+    qBaAppendBytes(uriList, "\r\n", 2);
+    qBaAppendBytes(copiedFiles, "copy\n", 5);
+    qBaAppendBytes(copiedFiles, uriU8, (int)uriU8.length());
+    qBaAppendBytes(plain, plainU8, (int)plainU8.length());
+#else
+    uriList.append(uri.toUtf8());
+    uriList.append("\r\n");
+    copiedFiles.append("copy\n");
+    copiedFiles.append(uri.toUtf8());
+    plain.append(text.toUtf8());
+#endif
+    QMimeData* md = new QMimeData;
+    md->setData(QStringLiteral("text/uri-list"), uriList);
+    md->setData(QStringLiteral("x-special/gnome-copied-files"), copiedFiles);
+    md->setData(QStringLiteral("text/plain"), plain);
+    QGuiApplication::clipboard()->setMimeData(md);   // Qt5/6 接管所有权（勿再 delete）
+    return true;
+#endif
+}
+
 #ifdef Q_OS_ANDROID
 static bool storeScaledTmpThenCopy(const QImage& scaled)
 {

@@ -152,6 +152,20 @@ public class ShareActivity extends QtActivity {
         }
     }
 
+    // FM复制（Android 降级）：复制纯文本（路径 + 元信息）到系统剪贴板
+    public static boolean copyTextToClipboard(Context ctx, String text) {
+        if (ctx == null || text == null || text.isEmpty()) return false;
+        try {
+            ClipboardManager cm =
+                (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm == null) return false;
+            cm.setPrimaryClip(ClipData.newPlainText("anystik-path-meta", text));
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private static String mimeFor(File f) {
         String n = f.getName().toLowerCase();
         if (n.endsWith(".png"))  return "image/png";

@@ -133,6 +133,9 @@ public:
 
     // 复制图片到剪贴板（Desktop: QClipboard 位图；Android: FileProvider content URI(image/*) + toast）
     bool copyStickerToClipboard(const QString& filePath);
+    // FM复制：按文件管理器复制机制发布「路径+元信息」
+    // （Desktop: text/uri-list + x-special/gnome-copied-files + text/plain；Android: 纯文本路径+元信息）
+    bool copyPathAndMetaToClipboard(const QString& filePath);
     // 由文件探测元信息（类型/大小/长宽/帧数/更新时间）
     StickerMeta stickerMeta(const QString& filePath) const;
     // 按 scale 缩放后复制（静态→QImage scaled 位图；动画帧逐帧缩放，GIF 源保 GIF

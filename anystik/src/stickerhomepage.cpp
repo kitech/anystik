@@ -814,6 +814,7 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
     m_ctxScaleSubIdx = idxScaleSub;
     const int idxPreview = menu->addOption(QskLabelData(tr("预览")));
     const int idxCopyMeta = menu->addOption(QskLabelData(tr("复制元信息")));
+    const int idxCopyPath = menu->addOption(QskLabelData(tr("FM复制")));
     const int idxEditDesc = menu->addOption(QskLabelData(tr("编辑描述简介")));
     const int idxShare = menu->addOption(QskLabelData(tr("分享")));
     const int idxDelete = menu->addOption(QskLabelData(tr("删除")));
@@ -864,7 +865,7 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
     };
 
     connect(menu, &QskMenu::triggered, this,
-        [this, menu, idxCopy, idxScaleSub, idxPreview, idxCopyMeta, idxEditDesc, idxShare, idxDelete, idxSearch](int index) {
+        [this, menu, idxCopy, idxScaleSub, idxPreview, idxCopyMeta, idxCopyPath, idxEditDesc, idxShare, idxDelete, idxSearch](int index) {
         if (index == idxCopy) {
             StickerStore::instance()->touchSticker(m_ctxBrief.id);
             bool ok = StickerStore::instance()->copyStickerToClipboard(m_ctxBrief.filePath);
@@ -881,6 +882,12 @@ void StickerHomePage::showStickerMenu(const StickerBrief& brief,
                 StickerStore::instance()->stickerMeta(m_ctxBrief.filePath);
             QGuiApplication::clipboard()->setText(formatStickerMeta(meta));
             showToast(tr("已复制元信息"));
+        } else if (index == idxCopyPath) {
+            StickerStore::instance()->touchSticker(m_ctxBrief.id);
+            const bool ok = StickerStore::instance()
+                ->copyPathAndMetaToClipboard(m_ctxBrief.filePath);
+            showToast(ok ? tr("已拷贝路径与元信息")
+                         : tr("拷贝失败"));
         } else if (index == idxEditDesc) {
             editStickerDescription(m_ctxBrief);
         } else if (index == idxShare) {

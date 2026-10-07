@@ -62,6 +62,10 @@ public:
     // 拼 anysk formatStickerMeta 的同款 5 行文本。
     static QString formatMeta(const StickerMetaLite& m);
 
+    // 「FM复制」：按系统文件管理器复制文件机制把「路径 + 元信息」写入剪贴板
+    // （text/uri-list + x-special/gnome-copied-files + text/plain，不放像素）。
+    static bool copyPathAndMetaToClipboard(const QString& filePath);
+
     // 三个 DB 写操作。id 即贴纸主键（内容 sha1）。
     static bool setDescription(const QString& id, const QString& desc);
     static bool touch(const QString& id);
