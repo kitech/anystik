@@ -124,6 +124,12 @@ QMAKE_CFLAGS   += $$STIKCOMMON_CFLAGS
 # anystik 侧 CMake 也是 gcc 默认 gnu 模式编它，保持行为一致。
 QMAKE_CXXFLAGS += -O0
 QMAKE_CFLAGS   += -O0
+# sha1.c（Steve Reid）在未定义 SHA1HANDSOFF 时，SHA1_Transform 会把 const 输入
+# 缓冲区强转后**就地改写**（blk0 字节序交换 + blk 消息扩展写回），粘贴经
+# qPasteSha1Hex 后 1.6MB JPEG 字节被毁 → 落盘损坏、libjpeg 报 Corrupt JPEG。
+# 编译期打开 hands-off 分支（先拷贝 workspace 再算），不改库源码；
+# 上游注释见 sha1.c:89「Copies data before messing with it」。摘要/ID 不变。
+DEFINES += SHA1HANDSOFF
 !isEmpty(QT_VERSION) {
     # sha1 实现：Qt3 侧已由 stikcommon.pri 引入 $STIKCOMMON_DIR/sha1.c（仅 Qt3
     # 编译，见 stikcommon.pri:433），Qt4+ 需补 qlcomp/sha1.c（同 Steve Reid 实现）。

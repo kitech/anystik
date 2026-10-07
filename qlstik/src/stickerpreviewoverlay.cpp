@@ -229,6 +229,12 @@ bool StickerPreviewOverlay::openReader()
     r->setAutoTransform(true);
 #endif
     if (!r->canRead()) {
+        // ⚠ toast「无法预览」文案在外层（sticker_msg.preview_failed）；这里把
+        //   底层解码器失败原因落日志，便于区分「文件缺失」与「shim 解不开」。
+        qWarning("StickerPreviewOverlay: preview canRead=false %s err=%d (%s)",
+                 qToUtf8(m_filePath).data(),
+                 (int)r->error(),
+                 qToUtf8(r->errorString()).data());
         delete r;
         return false;
     }

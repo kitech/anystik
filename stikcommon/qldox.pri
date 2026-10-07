@@ -34,7 +34,7 @@
 QLDOX_DIR = $$PWD/../qldox
 
 QLDOX_SOURCES = \
-    $$QLDOX_DIR/cJSON.c \
+    $$PWD/../qlcomp/cJSON.c \
     $$QLDOX_DIR/eventpoller.cpp \
     $$QLDOX_DIR/storage.cpp \
     $$QLDOX_DIR/channel_db.cpp \
@@ -49,7 +49,7 @@ QLDOX_SOURCES = \
 # db 层 7 件的头一并列出：*.h 均无 Q_OBJECT，moc 不产出内容，但 moc 靠 HEADERS
 # 里的 .h 找 include 依赖，漏列会让 moc 看不到跨头依赖。
 QLDOX_HEADERS = \
-    $$QLDOX_DIR/cJSON.h \
+    $$PWD/../qlcomp/cJSON.h \
     $$QLDOX_DIR/eventpoller.h \
     $$QLDOX_DIR/storage.h \
     $$QLDOX_DIR/channel_db.h \

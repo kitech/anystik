@@ -218,3 +218,23 @@ TEST_CASE("QCryptographicHash: 二进制安全，内嵌 NUL 参与摘要")
     // 与一次性喂入 commit 的标准短向量不冲突：单独校验 MD5("a") 长度
     CHECK_EQ(QCryptographicHash::hash(qbaLit("a"), QCryptographicHash::Md5).toHex().size(), 32);
 }
+
+// ⚠ 回归：SHA1 不得改写调用者输入缓冲区（2026-10-07 粘贴 JPEG 落盘损坏根因）。
+//   sha1.c 未定义 SHA1HANDSOFF 时 SHA1_Transform 把 const 输入强转就地改写：
+//   前 64B 经内部 buffer 拷贝幸免，[64, len-尾块) 被字节序交换/消息扩展覆盖
+//   （日志实测 firstdiff=64、lastdiff=1652415=1652416-1），摘要仍正确但缓冲区
+//   已毁 → 之后落盘的是垃圾字节。构建必须带 -DSHA1HANDSOFF（qlstik.pro /
+//   stikcommon.pri / build_tests.sh）；缺宏时本用例必红。输入用 FIPS 180-1
+//   标准向量 "a"×1000000（sha1sum 已复核），走多块路径才暴露此问题。
+TEST_CASE("QCryptographicHash: SHA1 不改写输入缓冲区（>64B 多块）")
+{
+    QByteArray data;
+    data.resize(1000000);
+    data.fill('a');
+    const QByteArray before = data.copy();   // Qt3 QMemArray::copy() 深拷贝
+
+    const Qt3HashBytes h =
+        QCryptographicHash::hash(data, QCryptographicHash::Sha1).toHex();
+    CHECK_EQ(h, qbaLit("34aa973cd4c4daa4f61eeb2bdbad27316534016f"));
+    CHECK(data == before);                   // 输入一字节未动（CHECK 避免失败时打印 1MB）
+}

@@ -467,7 +467,10 @@ int QImageReader::decodeMoreFrames(int want)
             im.loadFromData(m_bytes);
             if (im.isNull()) {
                 m_error = UnsupportedFormatError;
-                m_errorStr = QString("loadFromData failed for %1").arg(m_fmt.data());
+                // ⚠ 不用 arg(m_fmt.data())：Qt3 QByteArray 无尾 NUL，data() 越界读
+                //   （实测 errorString 变成 "jpegU"）。按字节长安全转。
+                m_errorStr = QString("loadFromData failed for %1")
+                                 .arg(QString::fromUtf8(m_fmt.data(), m_fmt.size()));
                 m_imageCount = 0;
                 break;
             }

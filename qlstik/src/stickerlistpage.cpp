@@ -194,6 +194,13 @@ static QPixmap decodedTileImage(const QString& filePath,
                     cache.insert(filePath, result);
                 }
             }
+        } else {
+            // ⚠ 解码失败落空 pixmap → 网格画「?」占位。把解码器给的原因记进
+            //   日志，供真机定位「粘贴成功但列表显示 ?/预览无法预览」（2026-10-07）。
+            qWarning("[StickerListPage] tile decode failed: %s err=%d (%s)",
+                     qToUtf8(filePath).data(),
+                     (int)reader.error(),
+                     qToUtf8(reader.errorString()).data());
         }
     }
     // ⚠ 插入之后再判上限（与 stickerlist.cpp:135-136 先后顺序一致）

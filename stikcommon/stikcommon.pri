@@ -436,6 +436,9 @@ STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qcryptographichash_shim.h \
                       $$STIKCOMMON_DIR/sha1.h
 isEmpty(QT_VERSION) {
     STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/sha1.c
+    # 与 qlstik.pro 同步打开 sha1.c 的 hands-off 分支：SHA1 不得改写调用者
+    # 输入缓冲区（缺宏时 SHA1_Transform 就地改写，见 qlstik.pro 同名注释）。
+    DEFINES += SHA1HANDSOFF
 }
 
 # ── 批次 5：QImageReader / QImage 分版本实现 ──────────────────────────────

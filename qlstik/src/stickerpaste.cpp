@@ -20,6 +20,41 @@
 //   验证见移植计划.md §19.7（nm 抽查）。本 TU 不引 <openssl/sha.h>。
 #include "sha1.h"
 
+//【插桩 2026-10-07】定位「粘贴→落盘」字节链路：读回 vs 写盘哈希对照。
+// 定位后整体移除（含两处 qPasteTrace 调用点）。
+namespace {
+qulonglong qPasteFnv(const QByteArray& b)
+{
+    const unsigned char* p = (const unsigned char*)qbaConstData(b);
+    const int n = (int)b.size();
+    qulonglong h = 14695981039346656037ULL;
+    for (int i = 0; i < n; ++i) { h ^= p[i]; h *= 1099511628211ULL; }
+    return h;
+}
+void qPasteHex(char* out, int outCap, const unsigned char* p, int count)
+{
+    if (count * 2 + 1 > outCap) count = (outCap - 1) / 2;
+    for (int i = 0; i < count; ++i) {
+        const int hi = p[i] >> 4, lo = p[i] & 0xF;
+        out[i * 2]     = char(hi < 10 ? '0' + hi : 'a' + (hi - 10));
+        out[i * 2 + 1] = char(lo < 10 ? '0' + lo : 'a' + (lo - 10));
+    }
+    out[count * 2] = '\0';
+}
+void qPasteTrace(const char* stage, const QByteArray& fmt, const QByteArray& b)
+{
+    const unsigned char* p = (const unsigned char*)qbaConstData(b);
+    const int n = (int)b.size();
+    char head[33], tail[33];
+    qPasteHex(head, sizeof head, p, n < 16 ? n : 16);
+    qPasteHex(tail, sizeof tail, p + (n < 16 ? 0 : n - 16), n < 16 ? 0 : 16);
+    // Qt3 QByteArray 无尾 NUL（qFmtLit 只 resize(n)），%s 越界读出 fmt=jpegZU 乱码。
+    qWarning("[PasteTrace] %s fmt=%.*s size=%d hash=%016llx head=%s tail=%s",
+             stage, (int)fmt.size(), qbaConstData(fmt), (int)b.size(),
+             (unsigned long long)qPasteFnv(b), head, tail);
+}
+} // namespace
+
 #ifdef QT3_BUILD
 #include <qapplication.h>
 #include <qfile.h>
@@ -112,6 +147,66 @@ static QByteArray qPasteEncodeOne(const QImage& im, const char* format)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// 两步验证（【插桩 2026-10-07】定位「剪贴板→落盘」字节链路后，
+// 与上面的 qPasteTrace 插桩一并整体移除）
+// ═══════════════════════════════════════════════════════════════════════
+
+// 被测字节自证有效：指纹 + 深拷贝解码 + 解码后复核原引用。
+//   · deep = qbaFromRaw 逐字节拷贝（Qt3 下切断 QGArray 共享块），解码只吃
+//     这份独立副本，不反过来污染被测对象；
+//   · loadFromData 走缩略图 tile 失败的**同一条解码路径**
+//     （qimagereader_shim.cpp:467），验证结论与现场报错同源；
+//   · hash0/hash1 夹住解码过程：原引用在这一进一出之间变了 → 它指向的
+//     共享块正被别处改写（UAF/共享写），不是解码器读坏；
+//   · deepeq=0 → 源引用与实拷贝已不一致（拷贝时就已不是同一份内容）。
+static void qPasteVerify(const char* stage, const QByteArray& b)
+{
+    const int n = (int)b.size();
+    const qulonglong hash0 = qPasteFnv(b);
+    qPasteTrace(stage, qSniffImageFormat(b), b);       // size/hash/head/tail
+
+    const QByteArray deep = qbaFromRaw(qbaConstData(b), n);
+    QImage im;
+    const bool ok = im.loadFromData(deep);
+
+    const qulonglong hash1    = qPasteFnv(b);
+    const qulonglong hashDeep = qPasteFnv(deep);
+    qWarning("[PasteVerify] %s size=%d hash0=%016llx hash1=%016llx "
+             "deepeq=%d decode=%d w=%d h=%d",
+             stage, n,
+             (unsigned long long)hash0, (unsigned long long)hash1,
+             (hashDeep == hash1) ? 1 : 0,
+             ok ? 1 : 0,
+             ok ? im.width() : 0, ok ? im.height() : 0);
+}
+
+//【插桩 3】step1 时刻的深拷贝快照：此后任一时刻与它逐字节比对，
+// 直接给出损坏区域形状（firstdiff/lastdiff/ndiff），不再只靠哈希推断。
+static QByteArray qPasteSnap;
+
+// 与快照逐字节比对。firstdiff/lastdiff = -1、ndiff = 0 → 与 step1 完全一致。
+static void qPasteDiff(const char* stage, const QByteArray& cur)
+{
+    const int n = (int)qPasteSnap.size();
+    const int m = (int)cur.size();
+    int first = -1, last = -1, nd = 0;
+    const int lim = (n < m) ? n : m;
+    const unsigned char* a = (const unsigned char*)qbaConstData(qPasteSnap);
+    const unsigned char* b = (const unsigned char*)qbaConstData(cur);
+    for (int i = 0; i < lim; ++i) {
+        if (a[i] != b[i]) {
+            if (first < 0) first = i;
+            last = i;
+            ++nd;
+        }
+    }
+    if (n != m) nd += (n > m) ? (n - m) : (m - n);
+    qWarning("[PasteVerify] %s vs-snap snapsize=%d cursize=%d "
+             "firstdiff=%d lastdiff=%d ndiff=%d",
+             stage, n, m, first, last, nd);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // 探测
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -122,6 +217,7 @@ static QByteArray qPasteEncodeOne(const QImage& im, const char* format)
 static bool qPasteProbe(const QByteArray& bytes,
                         QByteArray* outFmt, QSize* outSize, int* outFrames)
 {
+    qPasteTrace("probe-enter", qSniffImageFormat(bytes), bytes);   //【插桩 3】
     if (bytes.isEmpty()) return false;
     const QByteArray rawFmt = qSniffImageFormat(bytes);
     if (rawFmt.isEmpty()) return false;
@@ -149,6 +245,8 @@ static bool qPasteProbe(const QByteArray& bytes,
 #endif
     if (!reader.canRead()) return false;
     const QSize size = reader.size();
+    //【插桩 3】QImageReader 构造（内部 readAll 拷出 m_bytes）之后
+    qPasteTrace("probe-after-ctor", qSniffImageFormat(bytes), bytes);
     if (!size.isValid() || size.width() <= 0 || size.height() <= 0) return false;
     if (outFrames) {
         const int n = reader.imageCount();
@@ -156,10 +254,15 @@ static bool qPasteProbe(const QByteArray& bytes,
     }
     // 终验：完整解码首帧（read() 会推进游标，探测后不再复用 reader）。
     const QImage first = reader.read();
+    //【插桩 3】解码之后（仍在 reader/QBuffer 生命期内）
+    qPasteTrace("probe-after-read", qSniffImageFormat(bytes), bytes);
     if (first.isNull() || !first.size().isValid()) return false;
 
     if (outFmt) *outFmt = rawFmt;
     if (outSize) *outSize = size;
+    //【插桩 3】函数返回前、局部对象（QBuffer/QImageReader）析构前 ——
+    // 与 pasteFromClipboard 里的 probe-after-call 对照，二者不等 → 析构期改写
+    qPasteTrace("probe-exit", rawFmt, bytes);
     return true;
 }
 
@@ -174,17 +277,27 @@ static QByteArray qPasteReadMime(const QMimeData* mime)
 {
     static const char* const kFmtOrder[] = {
         "image/apng", "image/webp", "image/gif",
-        "com.compuserve.gif", "public.gif", "image/x-gif",
-        "image/png", "image/jpeg", "image/tiff", "image/bmp",
-        "image/x-png"
+        "image/png", "image/jpeg", "image/tiff", "image/bmp"
     };
     for (size_t i = 0; i < sizeof(kFmtOrder) / sizeof(kFmtOrder[0]); ++i) {
         const QByteArray raw = mime ? mime->data(QString::fromUtf8(kFmtOrder[i]))
                                     : QByteArray();
         if (raw.isEmpty()) continue;
+        // ⚠ 魔数前置守卫：魔数都不像图片的 target 直接跳过，不盲喂解码器。
+        //   参考 qldox messageinput.cpp:356-426 的 Qt3 成熟做法：图像走原生
+        //   QImageDrag/canDecode 路径，而不是逐个 MIME 名硬解。这里用嗅探等价
+        //   前置，把 X 剪贴板顺手挂的非标准/非图片 target（如损坏的 image/x-png
+        //   或 com.compuserve.gif 花名）挡在 libjpeg 门外，消掉「Unsupported
+        //   marker 0x0c / N extraneous bytes」一类探测噪音（15:52:39 实测日志）。
+        if (qSniffImageFormat(raw).isEmpty()) continue;
+        //【插桩】读取出来后立即验证（probe 之前，捕获读回字节第一手快照）
+        qPasteTrace("readmime-raw", qSniffImageFormat(raw), raw);
         QByteArray fmt;
         QSize size;
-        if (qPasteProbe(raw, &fmt, &size, 0)) return raw;
+        if (qPasteProbe(raw, &fmt, &size, 0)) {
+            qPasteTrace("readmime-hit", fmt, raw);   //【插桩】命中字节
+            return raw;
+        }
     }
     return QByteArray();
 }
@@ -296,6 +409,9 @@ static bool qPasteStore(StickerDbSyncInterface* db,
     // ★ 兼容契约 2 ★：幂等 id = sha1(原始字节)。
     const QString idHex = qPasteSha1Hex(
         (const uint8_t*)qbaConstData(bytes), (size_t)bytes.size());
+    //【插桩 3·二分点 2】SHA1 之后（纯只读运算，预期与 probe-after-call 一致）
+    qPasteTrace("store-after-sha1", qSniffImageFormat(bytes), bytes);
+    qPasteDiff("store-after-sha1", bytes);
 
     // 扩展名映射与 anystik :2427-2442 逐项对齐（apng 刻板 .png）。
     QString ext = QString::fromUtf8(".png");
@@ -331,6 +447,10 @@ static bool qPasteStore(StickerDbSyncInterface* db,
     }
 
     {
+        qPasteTrace("store-before-write", fmt, bytes);   //【插桩】写盘前字节
+        qPasteDiff("store-before-write", bytes);        //【插桩 3】损坏区域形状
+        //【插桩·第二步】内存侧自证：此步 decode=0 → 坏在写盘之前
+        qPasteVerify("step2-mem", bytes);
         QFile file(filePath);
         if (!qOpenWriteOnly(file)) {
             if (err) *err = QString::fromUtf8("图片保存失败");
@@ -341,6 +461,22 @@ static bool qPasteStore(StickerDbSyncInterface* db,
         if (n != (qint64)bytes.size()) {
             if (err) *err = QString::fromUtf8("图片保存失败");
             return false;
+        }
+        //【插桩】写盘后立即重读，与写前对照，判写盘层是否篡改
+        QFile rf(filePath);
+        if (qOpenReadOnly(rf)) {
+            const QByteArray rb = rf.readAll();
+            qPasteTrace("store-after-write", fmt, rb);
+            rf.close();
+            //【插桩·第二步】文件侧自证 + 与内存字节对照：
+            //   match=1 且 file decode=0 → 内存写前已坏；
+            //   match=0 → 写盘层篡改（按现有日志预计不会出现）。
+            qPasteVerify("step2-file", rb);
+            const qulonglong memHash  = qPasteFnv(bytes);
+            const qulonglong fileHash = qPasteFnv(rb);
+            qWarning("[PasteVerify] step2-match memhash=%016llx filehash=%016llx match=%d",
+                     (unsigned long long)memHash, (unsigned long long)fileHash,
+                     memHash == fileHash ? 1 : 0);
         }
     }
 
@@ -399,10 +535,23 @@ bool StickerPaste::pasteFromClipboard(bool* dup, QString* resurrectId, QString* 
     if (bytes.isEmpty()) bytes = qPasteReadUri(mime);
     if (bytes.isEmpty()) bytes = qPasteReadBitmap();
 
+    //【插桩·第一步】剪贴板读取结果自证：与 readmime-hit 对照 ——
+    // 哈希不同/decode=0 → 坏在读取阶段；完好则嫌疑后移到外层 probe。
+    if (!bytes.isEmpty()) {
+        qPasteVerify("step1-clipboard", bytes);
+        //【插桩 3】深拷贝留快照，供后续各点逐字节 diff
+        qPasteSnap = qbaFromRaw(qbaConstData(bytes), (int)bytes.size());
+    }
+
     QByteArray fmt;
     QSize size;
     int frames = 0;
-    if (!qPasteProbe(bytes, &fmt, &size, &frames)) {
+    const bool probed = qPasteProbe(bytes, &fmt, &size, &frames);
+    //【插桩 3·二分点 1】probe 返回后（局部 QBuffer/QImageReader 已析构）：
+    // probe-exit 此处仍一致而本点变坏 → 元凶是 probe 局部对象析构期改写
+    qPasteTrace("probe-after-call", qSniffImageFormat(bytes), bytes);
+    qPasteDiff("probe-after-call", bytes);
+    if (!probed) {
         if (err) *err = QString::fromUtf8("剪贴板中没有图片");
         return false;
     }

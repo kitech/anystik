@@ -115,7 +115,9 @@ OBJS="$OBJS $OUTDIR/prod_cJSON.o"
 for csrc in ../vendor/libnsgif/gif.c ../vendor/libnsgif/lzw.c \
             ../qlcomp/md5.c sha1.c; do
     o="$OUTDIR/prod_$(basename "${csrc%.c}").o"
-    gcc -std=gnu99 -g -O0 -w $FLAGS -c "$csrc" -o "$o"
+    # -DSHA1HANDSOFF：sha1.c 必须走 hands-off 分支（否则 SHA1_Transform 就地
+    # 改写调用者输入，见 qlstik.pro 同名注释）；对其余三个 C 源是空宏无副作用。
+    gcc -std=gnu99 -g -O0 -w $FLAGS -DSHA1HANDSOFF -c "$csrc" -o "$o"
     OBJS="$OBJS $o"
 done
 
