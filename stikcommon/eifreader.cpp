@@ -370,7 +370,15 @@ QString describeEif(const QString& eifPath, QString* errOut)
     }
     result = QStringLiteral("groups=%1 streams=%2 images=%3 dirs=%4")
                  .arg(groups).arg(streams).arg(realImages)
+#ifdef QT3_BUILD
+                 .arg(groupNames.join(QString::fromUtf8(",")));
+#elif QT_VERSION >= 0x050e00
                  .arg(groupNames.join(QLatin1Char(',')));
+#else
+                 // Qt4 / Qt5.0-5.13：QStringList::join 只收 const QString&，
+                 // QLatin1Char 重载是 Qt5.14 才加的。
+                 .arg(groupNames.join(QString::fromUtf8(",")));
+#endif
     return result;
 }
 

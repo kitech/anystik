@@ -270,6 +270,8 @@ private slots:
     //   singleShot(0, this, []{...})。故只能「记 pending + 连真槽」
     //   （与 mainwindow.cpp:605 的 onFirstPaintComplete 同款手法）。
     void onDeferredMenuDialog();
+    // 顶栏「粘贴」：读剪贴板入库「粘贴板」→ 跳转（anysk requestPasteSticker）
+    void onPasteButton();
     // 顶栏/底栏按钮：布局与文案照搬 anysk，行为按本批范围留空
     void onTopBarButton();
     void onBottomButton();

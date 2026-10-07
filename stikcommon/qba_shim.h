@@ -16,17 +16,14 @@
 #define QByteArrayLiteral(s) QCString((s))
 #endif
 
-// qcstring.h 是 Qt3/Qt4 独有的（QCString = QByteArray 子类），Qt5 起已移除。
-// 无条件包含会让 Qt6 构建 fatal error。Qt3 专用的 qbaToHex/qbaFromHex 等
-// 辅助自带 #if QT_VERSION < 0x040000 守卫，故此处也按版本守卫。
-#if !defined(QT_VERSION) || QT_VERSION < 0x050000
-#include <qcstring.h>
-#endif
-// Qt5+ 的 qcstring.h 不存在，QByteArray 定义在 QByteArray 头里。必须显式包含：
-// 本头以 QByteArray 作参数/返回类型，若依赖「包含者恰好先包含了 QByteArray」
-// 则该头不自含 —— 换个包含顺序就会报 incomplete type（本次 Qt6 探针即撞上）。
-#if defined(QT_VERSION) && QT_VERSION >= 0x050000
+// qcstring.h 是 **Qt3 独有**（QCString = QByteArray 子类；原注释写「Qt3/Qt4 独有」，
+// buildqt4 全量编译实锤 Qt4 无此头）。Qt4+ 一律用 <QByteArray>。本头以
+// QByteArray 作参数/返回类型，必须显式包含 —— 若依赖「包含者恰好先包含了
+// QByteArray」则该头不自含 —— 换个包含顺序就会报 incomplete type。
+#if defined(QT_VERSION) && QT_VERSION >= 0x040000
 #include <QByteArray>
+#else
+#include <qcstring.h>     // Qt3：QByteArray 定义处
 #endif
 #include <ctype.h>
 #include <string.h>
@@ -387,8 +384,12 @@ inline QByteArray qbaLit(const char* s)
 // 就是「长度 + 未初始化」，语义等价；Qt6+ 用原生带 Qt::Uninitialized 的构造。
 inline QByteArray qbaUninit(int size)
 {
-#if QT_VERSION < 0x050000
-    return QByteArray(size);
+#if QT_VERSION < 0x040000
+    return QByteArray(size);             // Qt3：长度 + 未初始化
+#elif QT_VERSION < 0x050000
+    QByteArray r;                         // Qt4：无 QByteArray(int) 构造，resize 底座
+    r.resize(size);
+    return r;
 #else
     return QByteArray(size, Qt::Uninitialized);
 #endif

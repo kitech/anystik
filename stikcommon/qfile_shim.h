@@ -238,7 +238,9 @@ inline QString qFileInfoCompleteBaseName(const QFileInfo& fi) { return fi.comple
 inline QString qFileInfoPath(const QFileInfo& fi)         { return fi.path(); }
 inline QString qFileInfoAbsoluteFilePath(const QFileInfo& fi) { return fi.absoluteFilePath(); }
 inline QString qFileInfoAbsolutePath(const QFileInfo& fi)  { return fi.absolutePath(); }
-inline bool qFileInfoExists(const QString& path)          { return QFileInfo::exists(path); }
+// QFileInfo::exists(const QString&) 是 Qt5 才有的静态重载；Qt4 只有成员
+// exists() 与静态 exists(const QFileInfo&)，故统一走成员版（Qt3/4/5/6 都有）。
+inline bool qFileInfoExists(const QString& path)          { return QFileInfo(path).exists(); }
 
 #endif
 

@@ -149,13 +149,13 @@ static inline bool qMkdir(const QString& path) { return qMkpath(path); }
 // **没有** ReadOnly 枚举；Qt4+ 才有 QIODevice::ReadOnly。这差异没法塞进类型，
 // 故按本文件 qAbsPath/qMkdir 的同款范式给自由函数（见上"QIODevice 打开模式"）。
 //
-// 不用宏的原因：Qt3 下 `QIODevice::ReadOnly` 本身是语法错误，没法用一个宏把
-// 整段 `QIODevice::ReadOnly` 文本换成合法表达式；宏必须逐调用点写，反而更易漏。
-// #if < 0x050000 覆盖 Qt3/Qt4/Qt5 前的 IO_ReadOnly 宏（Qt5 起该宏已移除，
-// Qt5+ 走 QIODevice::ReadOnly 枚举）。本机只装了 Qt3 与 Qt6，Qt4/5 未实测。
+// ⚠ 边界是 < 0x040000 而非 < 0x050000：IO_ReadOnly/IO_WriteOnly 宏只在 **Qt3**
+//   qiodevice.h 存在（Qt4 起改为 QIODevice::ReadOnly/WriteOnly 枚举；Qt3 的
+//   QIODevice 没有枚举）。注释原文（"#if < 0x050000 覆盖 Qt4"）没有实测过 Qt4，
+//   buildqt4 全量编译实锤 Qt4 无此宏，故收窄。
 inline bool qOpenReadOnly(QIODevice& dev)
 {
-#if QT_VERSION < 0x050000
+#if QT_VERSION < 0x040000
     return dev.open(IO_ReadOnly);
 #else
     return dev.open(QIODevice::ReadOnly);
@@ -172,7 +172,7 @@ inline bool qOpenReadOnly(QIODevice& dev)
 //   （该宏值 0x0002，IO_Truncate 另有 0x0008，见 qiodevice.h:65,68。）
 inline bool qOpenWriteOnly(QIODevice& dev)
 {
-#if QT_VERSION < 0x050000
+#if QT_VERSION < 0x040000
     return dev.open(IO_WriteOnly);
 #else
     return dev.open(QIODevice::WriteOnly);
@@ -184,7 +184,7 @@ inline bool qOpenWriteOnly(QIODevice& dev)
 // 续传。Qt3 无 Append 枚举，需用 IO_Append|IO_WriteOnly（qiodevice.h:64-68）。
 inline bool qOpenWriteOnlyAppend(QIODevice& dev)
 {
-#if QT_VERSION < 0x050000
+#if QT_VERSION < 0x040000
     return dev.open(IO_Append | IO_WriteOnly);
 #else
     return dev.open(QIODevice::WriteOnly | QIODevice::Append);

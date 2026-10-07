@@ -135,7 +135,11 @@ bool StickerOps::collectMeta(const QString& filePath, StickerMetaLite& out)
     // 尺寸与帧数。qimagereader_shim.h 补齐了 imageCount / jumpToNextImage /
     // nextImageDelay（Qt3 原生没有），Qt5+ 是原生接口。
     QImageReader reader(filePath);
+#ifdef QT34_READER_NO_AUTOTRANSFORM
+    /* Qt4：EXIF 方向不矫正（无此 API，见 qimagereader_shim.h） */
+#else
     reader.setAutoTransform(true);
+#endif
     if (reader.canRead()) {
         const QSize sz = reader.size();
         if (sz.isValid()) {

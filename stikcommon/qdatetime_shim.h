@@ -105,7 +105,13 @@ inline qint64 qDateTimeEpochSecs()
 #else
 inline qint64 qDateTimeEpochSecs()
 {
+#if QT_VERSION >= 0x050800
     return QDateTime::currentSecsSinceEpoch();
+#else
+    // Qt4 / Qt5.0-5.7：currentSecsSinceEpoch() 是 Qt5.8 才有的，
+    // 用 toTime_t()（Unix 纪元秒，语义一致；toTime_t 在 Qt4/5 一直存在）。
+    return qint64(QDateTime::currentDateTime().toTime_t());
+#endif
 }
 #endif
 

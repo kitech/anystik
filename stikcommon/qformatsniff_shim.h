@@ -27,9 +27,10 @@
 #endif
 
 // QByteArray 的落点跨版本不同：Qt3 是 qcstring.h 里的 QByteArray（:98，
-// public 继承 QMemArray<char>），Qt5+ 移到了 QByteArray 头。必须按版本分别显式包含
-// —— 不能依赖「包含者恰好先引了 QByteArray」，否则换个包含顺序就报 incomplete type。
-#if defined(QT_VERSION) && QT_VERSION >= 0x050000
+// public 继承 QMemArray<char>），Qt4+ 移到了 QtCore 的 <QByteArray> 头。必须按版本
+// 分别显式包含 —— 不能依赖「包含者恰好先引了 QByteArray」，否则换个包含顺序就报
+// incomplete type。⚠ 边界是 0x040000 而非 0x050000：Qt4 也没有 <qcstring.h>。
+#if defined(QT_VERSION) && QT_VERSION >= 0x040000
 #include <QByteArray>
 #else
 #include <qcstring.h>     // Qt3：QByteArray 定义处

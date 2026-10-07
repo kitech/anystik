@@ -223,7 +223,11 @@ bool StickerPreviewOverlay::openReader()
     //   文件名/QIODevice，无 parent 参数），故不能挂 parent 让 Qt 回收 ——
     //   必须自己 delete，见 openReader() 与析构函数。
     QImageReader* r = new QImageReader(m_filePath);
+#ifdef QT34_READER_NO_AUTOTRANSFORM
+    /* Qt4：EXIF 方向不矫正（无此 API，见 qimagereader_shim.h） */
+#else
     r->setAutoTransform(true);
+#endif
     if (!r->canRead()) {
         delete r;
         return false;

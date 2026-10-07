@@ -38,7 +38,11 @@
 #include <QImage>
 #include <QImageReader>
 #include <QMimeData>
+// QGuiApplication：Qt5+ 原生；Qt4 无此类，由 qclipboard_shim.h 的垫片提供
+// （其 <0x050000 段 include <qapplication.h> 并 define class QGuiApplication）。
+#if QT_VERSION >= 0x050000
 #include <QGuiApplication>
+#endif
 #include <QClipboard>   // QGuiApplication::clipboard() 返回 QClipboard*，不引是 incomplete type
 #include <QTemporaryFile>
 #endif
@@ -165,6 +169,9 @@ static QByteArray qClipEncodeGif(const QList<QImage>& frames,
 
 #ifdef QT3_BUILD
     QTemporaryFile tmp(QString::fromUtf8("/tmp/stikclip_XXXXXX.gif"));
+#elif QT_VERSION < 0x050000
+    // Qt4：无 QStringLiteral 宏（Qt5 才引入），与 Qt3 分支同款 fromUtf8。
+    QTemporaryFile tmp(QString::fromUtf8("/tmp/stikclip_XXXXXX.gif"));
 #else
     QTemporaryFile tmp(QStringLiteral("/tmp/stikclip_XXXXXX.gif"));
 #endif
@@ -178,7 +185,9 @@ static QByteArray qClipEncodeGif(const QList<QImage>& frames,
                          ? int(qClipGifDelayCs(delays.first())) : 10;
 
     GifWriter writer;
-    if (!GifBegin(&writer, qUtf8Printable(path), uint32_t(w), uint32_t(h),
+    // 不用 qUtf8Printable()（Qt4 无此宏）：临时文件名恒为 ASCII，encodeName 跨版本
+    const QByteArray encPath = QFile::encodeName(path);
+    if (!GifBegin(&writer, encPath.data(), uint32_t(w), uint32_t(h),
                   uint32_t(defDelayCs), 8, true)) {
         return QByteArray();
     }
@@ -508,7 +517,11 @@ bool StickerClipboard::copyOriginal(const QString& filePath)
         if (!qOpenReadOnly(buf)) return false;
         QImageReader rd(&buf);
 #endif
+#ifdef QT34_READER_NO_AUTOTRANSFORM
+        /* Qt4：EXIF 方向不矫正（无此 API，见 qimagereader_shim.h） */
+#else
         rd.setAutoTransform(true);
+#endif
         const QImage first = rd.read();
         if (first.isNull()) return false;
         QMimeData* md = new QMimeData;
@@ -558,7 +571,11 @@ bool StickerClipboard::copyScaled(const QString& filePath, double scale,
     if (!qOpenReadOnly(buf)) return false;
     QImageReader rd(&buf);
 #endif
+#ifdef QT34_READER_NO_AUTOTRANSFORM
+    /* Qt4：EXIF 方向不矫正（无此 API，见 qimagereader_shim.h） */
+#else
     rd.setAutoTransform(true);
+#endif
 
     // 多帧判定用 imageCount()，不用 supportsOption(Animation)：Qt6 的 PNG 插件
     // 对 APNG 报 imageCount()==1、Animation=false（stikcommon.pri:487-491 已实测），

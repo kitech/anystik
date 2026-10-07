@@ -138,18 +138,30 @@ public:
     QMimeType mimeTypeForFile(const QFileInfo& fi, MatchMode mode = MatchDefault) const
     {
         // Qt3 QFileInfo 无 suffix()，其 extension(false) 的语义与 Qt6 suffix() 等价
-        // （实测：a.tar.gz→gz，.bashrc→bashrc，a.→空）。
+        // （实测：a.tar.gz→gz，.bashrc→bashrc，a.→空）。Qt4+ 用原生 suffix()。
+#if QT_VERSION < 0x040000
         return match(fi.filePath(), fi.extension(false).lower(), mode);
+#else
+        return match(fi.filePath(), fi.suffix().toLower(), mode);
+#endif
     }
     QMimeType mimeTypeForFile(const QString& fileName, MatchMode mode = MatchDefault) const
     {
         QFileInfo fi(fileName);
+#if QT_VERSION < 0x040000
         return match(fi.filePath(), fi.extension(false).lower(), mode);
+#else
+        return match(fi.filePath(), fi.suffix().toLower(), mode);
+#endif
     }
     // mimeTypeForName 未在 stickerstore 用到；给最小实现（按 name 直构，不查别名）。
     QMimeType mimeTypeForName(const QString& nameOrAlias) const
     {
+#if QT_VERSION < 0x040000
         QMimeType t = qMimeTypeFromExtension(nameOrAlias.lower());
+#else
+        QMimeType t = qMimeTypeFromExtension(nameOrAlias.toLower());
+#endif
         if (t.isValid()) return t;
         // 允许 "image/png" 这类直接名字
         if (nameOrAlias.contains(QString("/")))
@@ -187,9 +199,15 @@ private:
     int readHead(const QString& path, char* buf) const
     {
         QFile f(path);
+#if QT_VERSION < 0x040000
         if (!f.open(IO_ReadOnly))
             return 0;
         const int n = f.readBlock(buf, 64);
+#else
+        if (!f.open(QIODevice::ReadOnly))
+            return 0;
+        const int n = (int)f.read(buf, 64);
+#endif
         f.close();
         return n > 0 ? n : 0;
     }

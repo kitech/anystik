@@ -17,19 +17,18 @@
 #endif
 
 #include <qstring.h>
-// qcstring.h 是 Qt3/Qt4 独有的（QCString = QByteArray 子类）；Qt5 起已移除，
-// 无条件包含会让 Qt6 构建在 myi18n.o 就 fatal error。Qt3 的 qUtf8Printable
-// 分支需要它，故按版本守卫。
-#if QT_VERSION < 0x050000
+// ⚠ qcstring.h 是 **Qt3 独有**（QCString = QByteArray 子类）。原注释写
+//   「Qt3/Qt4 独有」是未实测的臆断——buildqt4 全量编译实锤 Qt4 无此头
+//   （/usr/include/qt4/QtCore/ 下没有 qcstring.h），无条件包含会让 Qt6 构建
+//   在 myi18n.o 就 fatal error。Qt4+ 一律用 <QByteArray> 与 <QStringList>。
+#if QT_VERSION < 0x040000
 #include <qcstring.h>
 // QStringList 在 Qt3 是独立类（<qstringlist.h>，QValueList<QString> 的子类），
 // qstring.h 里只有前向声明；qStringListRemoveDuplicates 要按值操作它，必须真包含。
 #include <qstringlist.h>
 #else
-// Qt5+ 把 QStringList 并入 QtCore，但 <qstring.h> 不保证拉入完整定义；
-// 下面 qStringListRemoveDuplicates 的 Qt5+ 分支按值操作 QStringList，
-// 缺了会报 "incomplete type"。故显式包含。此分支对 Qt3 不参与编译。
-#include <QStringList>
+#include <QByteArray>     // Qt4+/Qt5/6：qUtf8Printable 宏的 toUtf8().constData() 依赖
+#include <QStringList>    // Qt4+/Qt5/6：QStringList 并入 QtCore，<qstring.h> 不保证
 #endif
 #include <string.h>
 #include <string>   // qToStdString/qFromStdString（Qt3 无 QString::toStdString）
@@ -314,9 +313,10 @@ inline QString qFromUtf16(const char16_t* chars, int n)
 
 // std::u16string 与 char16_t 序列布局一致（Qt4 的 fromStdU16String 也只做
 // reinterpret_cast + 长度）。char16_t 属 C++11，需在 Qt3 下确认编译器支持。
+// ⚠ 边界是 0x050000：fromStdU16String 是 Qt5 才加的（Qt4 没有）。
 inline QString qFromStdU16String(const std::u16string& s)
 {
-#if QT_VERSION < 0x040000
+#if QT_VERSION < 0x050000
     return qFromUtf16(s.data(), (int)s.size());
 #else
     return QString::fromStdU16String(s);
@@ -420,7 +420,11 @@ inline QStringList qStringSplitSkipEmpty(const QString& s, QChar sep)
 #else
 inline QStringList qStringSplitSkipEmpty(const QString& s, QChar sep)
 {
-    return s.split(sep, Qt::SkipEmptyParts);
+#if QT_VERSION >= 0x050e00
+    return s.split(sep, Qt::SkipEmptyParts);                // Qt5.14+：SplitBehavior 归 Qt
+#else
+    return s.split(sep, QString::SkipEmptyParts);           // Qt4/Qt5.0-5.13
+#endif
 }
 #endif
 

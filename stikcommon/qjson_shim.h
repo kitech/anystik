@@ -43,7 +43,11 @@
 //   * Compact 输出用 cJSON_PrintUnformatted；它与 Qt 的 Compact 在分隔符和
 //     非 ASCII 策略上不完全等价。本模块自读自写无害，若要与服务器对拍需单独验证。
 
-#ifdef QT3_BUILD
+// ⚠ include 段原本按 QT3_BUILD 分叉，但 Qt4 也要走同一套 cJSON 垫片（Qt4 没有
+//   原生 QtJson 模块，QJson* 是 Qt4.5 才进 QtCore 的补丁产物、4.0-4.4 完全没有，
+//   4.5+ 的形态又与 5.x 有差异）。故按版本号分叉：
+//   Qt3 用 qcstring.h 里的 QByteArray；Qt4+（以及 Qt5+ 原生段）用 <QByteArray>。
+#if QT_VERSION < 0x040000
 // Qt3.5 无 CamelCase 转发头；且 QByteArray 还没有独立头文件，它定义在
 // qcstring.h 里（QCString 的基类）。
 #include <qstring.h>
@@ -56,7 +60,7 @@
 #endif
 #include "qstring_shim.h"   // Qt3 的 QString 无 fromUtf8 之外的 QStringLiteral
 
-#ifdef QT3_BUILD
+#if QT_VERSION < 0x050000
 
 #include "cJSON.h"
 
@@ -264,10 +268,10 @@ private:
     cJSON* m_node;
 };
 
-#endif // QT3_BUILD
-// ↑ 上方整套 cJSON 版 QJsonValue/Object/Array/Document **仅 Qt3**。
-//   Qt4.5+ 有原生 QJson*，无守卫会在 Qt6 下报 "redefinition of 'class QJsonValue'"
-//   等一串错。下面 qJsonParseObject() 才是两版本共用的跨版本入口。
+#endif // QT_VERSION < 0x050000
+// ↑ 上方整套 cJSON 版 QJsonValue/Object/Array/Document **仅 Qt3/Qt4**。
+//   Qt5+ 走原生 QJson*；若无守卫会在 Qt6 下报 "redefinition of 'class
+//   QJsonValue'" 等一串错。下面 qJsonParseObject() 才是两版本共用的跨版本入口。
 
 // ── qJsonParseObject()：解析并取顶层 object ──────────────────────────────
 // QJsonDocument/QJsonParseError 都是 Qt4.5 才引入的类型，Qt3 侧本 shim 的
@@ -278,7 +282,8 @@ private:
 // 失败时返回空 QJsonObject（Qt 的 QJsonObject::isEmpty() 为真）。
 inline QJsonObject qJsonParseObject(const QByteArray& raw, bool* ok = 0)
 {
-#if QT_VERSION < 0x040500
+#if QT_VERSION < 0x050000
+    // Qt3/Qt4：走本 shim 的单参 fromJson（Qt4 没有真正的 QJsonParseError 形态）。
     const QJsonDocument d = QJsonDocument::fromJson(raw);
     const bool good = d.isObject();
     if (ok) *ok = good;

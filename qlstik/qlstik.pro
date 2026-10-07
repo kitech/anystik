@@ -59,6 +59,7 @@ SOURCES += \
     src/stickerops.cpp \
     src/stickerclipboard.cpp \
     src/stickerpreviewoverlay.cpp \
+    src/stickerpaste.cpp \
     $$STIKCOMMON_SOURCES
 
 HEADERS += \
@@ -71,6 +72,7 @@ HEADERS += \
     src/stickerops.h \
     src/stickerclipboard.h \
     src/stickerpreviewoverlay.h \
+    src/stickerpaste.h \
     $$STIKCOMMON_HEADERS
 
 # src/main.cpp 与 src/mainwindow.cpp 都 #include "app_icon.xpm"（内嵌 XPM，
@@ -123,6 +125,9 @@ QMAKE_CFLAGS   += $$STIKCOMMON_CFLAGS
 QMAKE_CXXFLAGS += -O0
 QMAKE_CFLAGS   += -O0
 !isEmpty(QT_VERSION) {
+    # sha1 实现：Qt3 侧已由 stikcommon.pri 引入 $STIKCOMMON_DIR/sha1.c（仅 Qt3
+    # 编译，见 stikcommon.pri:433），Qt4+ 需补 qlcomp/sha1.c（同 Steve Reid 实现）。
+    SOURCES += ../qlcomp/sha1.c
     greaterThan(QT_VERSION, 5.0.0) {
         QMAKE_CXXFLAGS += -std=c++17
         QMAKE_CFLAGS   += -std=gnu17

@@ -158,4 +158,17 @@ private:
 
 #endif // QT_VERSION < 0x040000
 
+#if !defined(QT3_BUILD) && QT_VERSION >= 0x040000 && QT_VERSION < 0x050000
+// ⚠ Qt4 的 QImageReader 没有 setAutoTransform()/autoTransform()（Qt5 起才有）。
+//   应用层共用调用点（stickerclipboard/stickerops/stickerlistpage/
+//   stickerpreviewoverlay/stickerpaste）统一写道：
+//     #ifdef QT34_READER_NO_AUTOTRANSFORM
+//         /* Qt4：EXIF 方向不矫正（无此 API） */
+//     #else
+//         reader.setAutoTransform(true);
+//     #endif
+//   Qt3 ✓ / Qt5 ✓ / Qt6 ✓，只有 Qt4 跳过。
+#define QT34_READER_NO_AUTOTRANSFORM 1
+#endif
+
 #endif // QLSTIK_QIMAGEREADER_SHIM_H

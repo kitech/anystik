@@ -2,6 +2,7 @@
 #include "compatcore34.h"
 #include "config.h"
 #include "stickerops.h"            // 右键菜单的读图/写 DB 薄封装
+#include "stickerpaste.h"          // 顶栏「粘贴」→ StickerPaste::pasteFromClipboard
 #include "stickerpreviewoverlay.h"  // 「预览」的放大查看层
 #include "storage.h"              // Storage::instance().init() + stickerDb()
 #include "sticker_db.h"           // StickerRow / StickerPackRow / kPacksAll
@@ -57,9 +58,12 @@
 #include <QDir>
 #include <QEvent>
 #include <QList>
+#if QT_VERSION >= 0x050600
 #include <QEnterEvent>
+#endif
 #include <QApplication>
 #include <QClipboard>
+#include <QUrl>          // 搜索相似拼 URL（Qt3 由 compat34.h 侧引入 qurlinfo.h，这里补 Qt4+）
 #endif
 
 // ═════════ anystik 悬浮圆钮：QLimeStyle 无法按控件强制 18px 圆角 ═════════
@@ -115,8 +119,10 @@ protected:
     }
 #ifdef QT3_BUILD
     virtual void enterEvent(QEvent*) { update(); }
-#else
+#elif QT_VERSION >= 0x050600
     virtual void enterEvent(QEnterEvent*) { update(); }
+#else
+    virtual void enterEvent(QEvent*) { update(); }   // Qt4/5.0-5.5：QWidget::enterEvent(QEvent*)
 #endif
     virtual void leaveEvent(QEvent*) { update(); }
 };
@@ -164,7 +170,11 @@ static QPixmap decodedTileImage(const QString& filePath,
     QPixmap result;
     if (!filePath.isEmpty() && QFile::exists(filePath)) {
         QImageReader reader(filePath);
+#ifdef QT34_READER_NO_AUTOTRANSFORM
+        /* Qt4：EXIF 方向不矫正（无此 API，见 qimagereader_shim.h） */
+#else
         reader.setAutoTransform(true);                     // stickerlist.cpp:130
+#endif
         // 与 anystik 对齐（stickerlist.cpp:131）：让 shim 只解当前帧并缩到 152px
         // （= TILE_SIZE*2），不再先 read() 全尺寸再缩放。
         reader.setScaledSize(QSize(kThumbPx, kThumbPx));
@@ -928,7 +938,8 @@ void StickerListPage::buildTopBar(QBoxLayout* parent)
         //   Qt3 (parent,text) / Qt4+ (text,parent) 的参数顺序差异
         QPushButton* b = new QPushButton(topBar);
         b->setText(QString::fromUtf8(kTopBtnText[i]));
-        connect(b, SIGNAL(clicked()), this, SLOT(onTopBarButton()));
+        connect(b, SIGNAL(clicked()), this,
+                (i == 0) ? SLOT(onPasteButton()) : SLOT(onTopBarButton()));
         // 前三个宽 68（:420/428/436），⋯ 是 44×44（:505）
         if (i < 3) {
             b->setFixedWidth(68);
@@ -1387,6 +1398,63 @@ void StickerListPage::onTabChanged(int id)
         loadRecentStickers();
     } else if (id == 2 && !m_pastePackId.isEmpty()) {
         loadPackStickers(m_pastePackId);   // :718 内部会写 m_activeTab
+    }
+}
+
+// 顶栏「粘贴」：读剪贴板入库「粘贴板」分组并跳转。
+void StickerListPage::onPasteButton()
+{
+    bool dup = false;
+    QString resurrectId;
+    QString err;
+    if (!StickerPaste::pasteFromClipboard(&dup, &resurrectId, &err)) {
+        ToastWidget::show(this,
+                          err.isEmpty() ? QString::fromUtf8("剪贴板中没有图片") : err,
+                          2000);
+        return;
+    }
+
+    // ⚠ 该内容行此前被软删：文件仍在（幂等命中），只差把行还原。询问后
+    //   restore_sticker 复活它（对齐 anysk stickerstore.cpp:2495-2502 的 resurrectId）。
+    if (!resurrectId.isEmpty()) {
+#ifdef QT3_BUILD
+        const int ret = QMessageBox::question(
+            this,
+            QString::fromUtf8("粘贴"),
+            QString::fromUtf8("粘贴板中已有此贴纸（已删除），是否恢复？"),
+            (int)QMessageBox::Yes, (int)QMessageBox::No);
+        if (ret == (int)QMessageBox::Yes) {
+#else
+        const QMessageBox::StandardButton ret = QMessageBox::question(
+            this,
+            QString::fromUtf8("粘贴"),
+            QString::fromUtf8("粘贴板中已有此贴纸（已删除），是否恢复？"),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);        // 默认焦点给「否」（与 confirmDeleteSticker 同款）
+        if (ret == QMessageBox::Yes) {
+#endif
+            StickerDbSyncInterface* db = Storage::instance().stickerDb();
+            const QByteArray rb = qToUtf8(resurrectId);
+            if (db && db->restore_sticker(rb.data())) {
+                ToastWidget::show(this, QString::fromUtf8("已恢复"), 2000);
+                reloadActive();
+            } else {
+                ToastWidget::show(this, QString::fromUtf8("恢复失败"), 2000);
+            }
+        }
+        return;                       // 询问过则不叠加「已粘贴」toast
+    }
+
+    if (dup) {
+        ToastWidget::show(this, QString::fromUtf8("已在粘贴板中"), 2000);
+    } else {
+        ToastWidget::show(this, QString::fromUtf8("已粘贴到粘贴板"), 2000);
+    }
+    refreshTabBar();                  // 首次建包后才有 m_pastePackId（:1182-1191）
+    if (!m_pastePackId.isEmpty()) {
+        onTabChanged(2);              // 跳到「粘贴板」tab
+    } else {
+        reloadActive();
     }
 }
 

@@ -234,13 +234,27 @@ inline int qImageFormatTag(const QImage& im)
 inline QByteArray qImageRgbaBytes(const QImage& im)
 {
     if (im.isNull() || im.width() <= 0 || im.height() <= 0) return QByteArray();
+#if QT_VERSION >= 0x050a00
+    // Qt5.10+/Qt6：原生 RGBA8888 + sizeInBytes()（本文件其余同名函数同源；
+    //   Qt4/Qt5.0-5.9 无这两个 API，见函数体下的 Qt4 分支说明）。
     const QImage c = im.convertToFormat(QImage::Format_RGBA8888);
     return QByteArray(reinterpret_cast<const char*>(c.constBits()), int(c.sizeInBytes()));
+#else
+    // Qt4/Qt5.0-5.9：无 Format_RGBA8888（仅 Format_ARGB32）与 sizeInBytes()
+    //   （仅 numBytes）。按 32bpp ARGB 近似 —— 该路径调用点是刻板转码兜底
+    //   （stickerclipboard 的 gif 帧打包），桌面端不触发；保持能编译即可。
+    const QImage c = im.convertToFormat(QImage::Format_ARGB32);
+    return QByteArray(reinterpret_cast<const char*>(c.bits()), int(c.numBytes()));
+#endif
 }
 
 inline QImage qImageRgba(const QImage& im)
 {
+#if QT_VERSION >= 0x050a00
     return im.isNull() ? im : im.convertToFormat(QImage::Format_RGBA8888);
+#else
+    return im.isNull() ? im : im.convertToFormat(QImage::Format_ARGB32);
+#endif
 }
 
 // 平滑缩放（拉伸到恰好 w×h）。Qt3 侧是 qimagesmoothscale.cpp 的 Imlib2 面积
@@ -269,9 +283,15 @@ inline bool qImageSameRgba(const QImage& a, const QImage& b)
 {
     if (a.isNull() || b.isNull()) return a.isNull() && b.isNull();
     if (a.size() != b.size()) return false;
+#if QT_VERSION >= 0x050a00
     return a.constBits() && b.constBits()
         && ::memcmp(a.constBits(), b.constBits(),
                     std::size_t(a.sizeInBytes())) == 0;
+#else
+    return a.bits() && b.bits()
+        && ::memcmp(a.bits(), b.bits(),
+                    std::size_t(a.numBytes())) == 0;
+#endif
 }
 
 enum qImageFormat { qFmtArgb32 = 0, qFmtRgb32 = 1, qFmtRgba8888 = 2 };
@@ -281,7 +301,11 @@ inline QImage qImageConvertToFormat(const QImage& im, qImageFormat fmt)
     if (im.isNull()) return im;
     switch (fmt) {
     case qFmtRgb32:      return im.convertToFormat(QImage::Format_RGB32);
+#if QT_VERSION >= 0x050a00
     case qFmtRgba8888:   return im.convertToFormat(QImage::Format_RGBA8888);
+#else
+    case qFmtRgba8888:   return im.convertToFormat(QImage::Format_ARGB32);
+#endif
     case qFmtArgb32:
     default:             return im.convertToFormat(QImage::Format_ARGB32);
     }
@@ -323,9 +347,15 @@ inline void qPainterDrawRoundedRect(QPainter& p, const QRect& r,
 inline QByteArray qImageScanlineRgba(const QImage& im, int y)
 {
     if (im.isNull() || y < 0 || y >= im.height()) return QByteArray();
+#if QT_VERSION >= 0x050a00
     const QImage c = im.convertToFormat(QImage::Format_RGBA8888);
     return QByteArray(reinterpret_cast<const char*>(c.constScanLine(y)),
                       int(c.bytesPerLine()));
+#else
+    const QImage c = im.convertToFormat(QImage::Format_ARGB32);
+    return QByteArray(reinterpret_cast<const char*>(c.scanLine(y)),
+                      int(c.bytesPerLine()));
+#endif
 }
 
 #endif // QT_VERSION < 0x040000
