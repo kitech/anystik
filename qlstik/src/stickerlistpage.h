@@ -164,8 +164,9 @@ public:
     //   m_packs.size()）——「最近」/ 搜索结果的包数天然小于包总数。
     const std::vector<StickerItem>& stickers() const { return m_items; }
 
-    // 网格自管滚动，m_scrollPos 是私有的。右键要把「内容坐标」换算回视口坐标
-    // 才能 mapToGlobal（mousePressEvent 那边是反着减的），故给页面开一个出口。
+    // 网格自管滚动，m_scrollPos 是私有的。viewportPos 返回「视口原点在内容坐标系
+    // 中的位置」；页面拿 内容坐标 - viewportPos() 得到视口坐标，再 mapToGlobal
+    // （mousePressEvent 那边是 event->pos() + (0,m_scrollPos)），故给页面开一个出口。
     QPoint viewportPos() const { return QPoint(0, m_scrollPos); }
 
 signals:

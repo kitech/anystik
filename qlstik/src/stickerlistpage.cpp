@@ -664,8 +664,9 @@ int StickerGridWidget::indexAt(const QPoint& contentPos) const
 void StickerGridWidget::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
-        // ⚠ 事件坐标是视口坐标，减掉滚动偏移才是内容坐标
-        const QPoint content = event->pos() - QPoint(0, m_scrollPos);
+        // ⚠ 事件坐标是视口坐标，加回滚动偏移才是内容坐标
+        //   （paintEvent:707-720 是 屏幕y = 内容y - m_scrollPos）
+        const QPoint content = event->pos() + QPoint(0, m_scrollPos);
         const int idx = indexAt(content);
         if (idx >= 0) {
             emit stickerClicked(m_items[idx].filePath);
@@ -673,7 +674,7 @@ void StickerGridWidget::mousePressEvent(QMouseEvent* event)
     }
     else if (event->button() == Qt::RightButton) {
         // ⚠ 与左键同一条内容坐标换算，别让右键菜单贴到错误的格子上。
-        const QPoint content = event->pos() - QPoint(0, m_scrollPos);
+        const QPoint content = event->pos() + QPoint(0, m_scrollPos);
         const int idx = indexAt(content);
         // ⚠ 只在瓦片上弹菜单：空白处 indexAt 返回 -1，直接不弹。
         //   顺带把 qlstik/mainwindow.cpp:290-313 的 QMenu 惯例（parent=this）搬过来，
@@ -1552,16 +1553,14 @@ void StickerListPage::showStickerMenu(int index, int contentX, int contentY)
         });
     }
 
-    // ⚠ 网格自管滚动（不在任何 QScrollView 里），所以内容坐标加视口原点即全局坐标。
-    //   viewport 坐标 = 内容坐标 + m_scrollPos（见 mousePressEvent 的换算）。
+    // ⚠ 网格自管滚动（不在任何 QScrollView 里），所以内容坐标减视口原点即视口坐标。
+    //   视口坐标 = 内容坐标 - m_scrollPos（viewportPos() 即视口原点在内容系的位置，
+    //   见 mousePressEvent 的换算：content = event->pos() + (0,m_scrollPos)）。
     // ⚠⚠ 必须用 **m_grid->**mapToGlobal，不能用本页的 mapToGlobal：
-    //   信号的 contentX/contentY 是**网格**坐标（网格自己按 m_scrollPos 画滚动，
-    //   发射时 content = event->pos() - (0,m_scrollPos)）。加上 viewportPos()
-    //   之后拿回的是**网格控件系**的 event->pos()，而网格是页面的子控件、
-    //   位于顶栏与搜索行**之下**。若拿页面 mapToGlobal 去映射网格坐标，弹窗会
-    //   整体下移「顶栏+搜索行」的高度，菜单跟右键位置对不上。
+    //   网格是页面的子控件、位于顶栏与搜索行**之下**。若拿页面 mapToGlobal
+    //   去映射网格坐标，弹窗会整体下移「顶栏+搜索行」的高度，菜单跟右键位置对不上。
     const QPoint globalPos =
-        m_grid->mapToGlobal(QPoint(contentX, contentY) + m_grid->viewportPos());
+        m_grid->mapToGlobal(QPoint(contentX, contentY) - m_grid->viewportPos());
     // ⚠ popup() 是**非阻塞**的：它显示菜单后立刻返回，用户点击发生在之后。
     //   所以 m_currentItemIndex 必须**保持**为 index 直到用户点动作（或列表重建）。
     //   别在这里清掉 —— 清了的话每个动作槽都会因下标 -1 而直接返回。
