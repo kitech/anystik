@@ -30,8 +30,8 @@
 #include "app_icon.xpm"
 
 // 顶级菜单顺序（setTopMenuText 依赖此顺序，勿随意调整）
-static const char* const kTopMenuKeys[4] = {
-    "menu.file", "menu.demo", "menu.appearance", "menu.help"
+static const char* const kTopMenuKeys[3] = {
+    "menu.file", "menu.appearance", "menu.help"
 };
 
 // 三套语言代码，与 titlebar 语言下拉索引一一对应
@@ -284,7 +284,7 @@ int MainWindow::styleIndexOf(const QString& styleId)
     return 0;
 }
 
-// ═══════════════ 菜单栏（文件 / 演示 / 外观 / 帮助）═══════════════
+// ═══════════════ 菜单栏（文件 / 外观 / 帮助）══════════════════════
 
 QString MainWindow::darkToggleLabel() const
 {
@@ -409,8 +409,9 @@ void MainWindow::buildMenus()
     addMenuSeparator(file);
     addMenuItem(file, this, SLOT(quitApp()), "action.quit");
 
-    // ── 演示(&D)：状态栏 + 托盘壳自检 ──
-    MenuWidget34* demo = static_cast<MenuWidget34*>(addTopMenu("menu.demo"));
+    // ── 演示(&D)：状态栏 + 托盘壳自检，并入文件菜单（隔线隔开）──
+    addMenuSeparator(file);
+    void* demo = addSubMenu(file, _("menu.demo"), "menu.demo");
     addMenuItem(demo, this, SLOT(onDemoStatusInfo()), "demo.status_info");
     addMenuItem(demo, this, SLOT(onDemoStatusWarning()), "demo.status_warning");
     addMenuItem(demo, this, SLOT(onDemoStatusError()), "demo.status_error");

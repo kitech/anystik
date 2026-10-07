@@ -450,3 +450,36 @@ unifiedPushTopicLength = 14     // 总长度必须 14 字符（含 "up"）
 - **项目选型结论**：GIF 动图解码选用 **libnsgif**（NetSurf 官方、MIT、被 libvips/OBS/GEGL
   广泛采用，API 明确、维护活跃于 NetSurf 生态）。stb_image 的 GIF 动画实现**不选作主路线**，
   仅在此作为对照验证之用（已实测可用）
+
+## openssh-sha1（OpenSSH openbsd-compat SHA-1，双实现并存备胎）
+
+- **Name**: openssh/openssh-portable → `openbsd-compat/sha1.c`（`$OpenBSD: sha1.c,v 1.27
+  2019/06/07 22:56:36 dtucker Exp $`，OpenBSD libc / BIND / libreSSL 同一血统）
+- **Upstream**: https://github.com/openssh/openssh-portable/blob/master/openbsd-compat/sha1.c
+  （2026-10-07 抓取）
+- **License**: Steve Reid 100% Public Domain（原头注释）；OpenBSD 后续修改同公版声明
+- **Files**:
+  - `openssh-sha1/sha1_ossh.c`（去 OpenSSH 脚手架：删 `includes.h`/`WITH_OPENSSL` 门控/
+    4 处 `DEF_WEAK`；加 `<endian.h>`；保留 `explicit_bzero`，glibc >= 2.25 提供）
+  - `openssh-sha1/sha1_ossh.h`（裁剪：仅 `SHA1Init/Pad/Transform/Update/Final` 声明，
+    删 End/File/FileChunk/Data 声明与 `__bounded__` 属性、htonl 宏；守卫 `__SHA1_OSSH_H`）
+- **API 不同名、与现实现零符号冲突**: BSD 风格 `SHA1Init/SHA1Update/SHA1Final`（Final
+  参数序 = digest 在前、`SHA1_CTX{state[5]; u_int64_t count; buffer[64]}`）v.s. 现仓
+  `stikcommon/sha1.c`/`qlcomp/sha1.c` 的 `SHA1_Init/Update/Final`（ctx 在前、`count[2]`）。
+  两套可同时编进同一产物不被调用、互不干扰。
+- **改名原因**: `sha1.{c,h} -> sha1_ossh.{c,h}`。否则 qmake 对 `vendor/.../sha1.c`
+  生成的 `./sha1.o` 与现存 `stikcommon`/`qlcomp` 两个 `sha1.o` 目标冲突
+  （`qlstik/build-qt3/Makefile:1019`、`build-qt6/Makefile:20686`）；头文件同名 + 守卫
+  不同会在同一 TU 双 include 时因 `struct SHA1_CTX` tag 重名而编译失败。
+- **行为对比（本实现默认，无需任何宏）**:
+  - OpenSSH 版：`SHA1Transform` **无条件**把输入 block `memcpy` 进栈 workspace 再算，
+    **默认不会覆盖传入的内存**；无 static 存储，线程安全
+  - qlcomp/sha1.c（与 stikcommon/sha1.c 逐字节相同，`diff -q` 已验；Steve Reid
+    sea-to-sky 变体，用户指认源自 curl 的 vendored 副本）：未定义 `SHA1HANDSOFF` 时
+    `SHA1_Transform` 把 const 输入强转**就地改写**——**默认会覆盖传入的内存**
+- **用途**: 作为双实现并存的备胎**只入库并挂进 qlstik.pro 构建**（全 Qt3/Qt6 目标编译，
+  不被任何源码调用），供后续切换/对照使用。现用实现仍是 `stikcommon`/`qlcomp` sha1
+  （构建设 `-DSHA1HANDSOFF` 兜底覆盖行为）。
+- **已验证**: `-std=gnu99/-std=gnu17 -Wall -Wextra -fsyntax-only` 零警告；独立驱动
+  `/tmp/opencode/sha1ossh_probe.c`：FIPS 三向量（abc / "abcdb…" 56B / 1000000×"a"）全过、
+  1000B 多块输入 hash 后逐字节回读不回写断言通过（2026-10-07）

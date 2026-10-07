@@ -60,6 +60,11 @@ SOURCES += \
     src/stickerclipboard.cpp \
     src/stickerpreviewoverlay.cpp \
     src/stickerpaste.cpp \
+    # OpenSSH openbsd-compat sha1（BSD API SHA1Init/Update/Final，与现有
+    # SHA1_* 不同名零冲突）。双实现并存、只编不接，供后续切换/对照。
+    # 默认不覆盖传入内存（无条件栈拷贝）；现用 qlcomp/qlcomp 侧 sha1 默认会
+    # 覆盖（靠 -DSHA1HANDSOFF 兜底）。见 vendor/vendorinfos.md。
+    ../vendor/openssh-sha1/sha1_ossh.c \
     $$STIKCOMMON_SOURCES
 
 HEADERS += \
