@@ -1676,7 +1676,8 @@ static QByteArray buildGifBytes(const QList<QImage>& frames,
 // macOS 权威读取（默认/旧 native 两模式统一）：NSPasteboard 全 flavor 直读原始字节。
 // Qt 预定义 UTI 表没有 GIF/PNG/APNG/WebP/JPEG（仅 public.tiff→application/x-qt-image）；
 // 这里按魔数收集候选，优先级：多帧动画（GIF/APNG/WebP）→ 多页 TIFF→APNG →
-// file-url 原文件多帧（Finder 粘贴=复制原文件）→ 单帧静态。
+// file-url 原文件（Finder 粘贴=复制原文件；静态场景原文件优于剪贴板预览）→
+// 剪贴板单帧静态字节。
 static void macCollectPasteboard(QByteArray& bytes, QString* srcType = nullptr)
 {
     const auto cands = macPasteboardCollect();
@@ -1760,17 +1761,9 @@ static void macCollectPasteboard(QByteArray& bytes, QString* srcType = nullptr)
         if (fileStatic.isEmpty())
             fileStatic = fb;
     }
-    // 4) 单帧静态：优先剪贴板静态字节，其次 file-url 静态
-    if (!statics.isEmpty()) {
-        const MacPasteCandidate& c = *statics.first();
-        bytes = c.data;
-        QByteArray f;
-        QSize s;
-        probeImageValidity(bytes, &f, &s);
-        qInfo("[StickerPaste] source=pb-collect-static type=%s fmt=%s size=%dx%d bytes=%lld backend=NSPasteboard",
-              qPrintable(c.type), qbaConstData(f), s.width(), s.height(), (qint64)bytes.size());
-        if (srcType) *srcType = c.type;
-    } else if (!fileStatic.isEmpty()) {
+    // 4) 单帧静态：优先 file-url 原文件（Finder 复制图片文件时剪贴板附带的
+    //    public.tiff 只是文件图标/缩略图，不是原图），其次才用剪贴板静态字节
+    if (!fileStatic.isEmpty()) {
         bytes = fileStatic;
         QByteArray f;
         QSize s;
@@ -1779,6 +1772,15 @@ static void macCollectPasteboard(QByteArray& bytes, QString* srcType = nullptr)
               qPrintable(fileUrls.first()), qbaConstData(f), s.width(), s.height(),
               (qint64)bytes.size());
         if (srcType) *srcType = QStringLiteral("file:") + fileUrls.first();
+    } else if (!statics.isEmpty()) {
+        const MacPasteCandidate& c = *statics.first();
+        bytes = c.data;
+        QByteArray f;
+        QSize s;
+        probeImageValidity(bytes, &f, &s);
+        qInfo("[StickerPaste] source=pb-collect-static type=%s fmt=%s size=%dx%d bytes=%lld backend=NSPasteboard",
+              qPrintable(c.type), qbaConstData(f), s.width(), s.height(), (qint64)bytes.size());
+        if (srcType) *srcType = c.type;
     }
 }
 #endif // Q_OS_MACOS

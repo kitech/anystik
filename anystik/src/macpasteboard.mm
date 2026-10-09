@@ -6,6 +6,7 @@
 #import <string.h>
 #include <QByteArray>
 #include <QFileInfo>
+#include <QString>
 #include <QUrl>
 
 QByteArray macPasteboardData(const char* typeName)
@@ -26,6 +27,21 @@ QByteArray macPasteboardData(const char* typeName)
     QByteArray out(int(len), Qt::Uninitialized);
     [data getBytes:out.data() length:len];
     return out;
+}
+
+// 解析 NSPasteboard 的 file-url 为真实本地路径。
+// Finder 复制文件写的是 inode 引用 file:///.file/id=...（非字面路径），
+// QUrl 会得到无效的 "/.file/id=..."；必须经 NSURL 解析才还原到真实文件。
+static QString resolvePasteboardFileUrl(NSString* urlStr)
+{
+    if (!urlStr || urlStr.length == 0) return QString();
+    NSURL* nsurl = [NSURL URLWithString:urlStr];
+    if (nsurl && [nsurl isFileURL]) {
+        NSString* p = [nsurl path];
+        if (p) return QString::fromUtf8([p UTF8String]);
+    }
+    const QUrl u(QString::fromUtf8([urlStr UTF8String]));  // 回退：普通文本 file-url
+    return u.isLocalFile() ? u.toLocalFile() : QString();
 }
 
 QList<MacPasteCandidate> macPasteboardCollect()
@@ -55,12 +71,12 @@ QList<MacPasteCandidate> macPasteboardCollect()
             if (tn && strcmp(tn, "public.file-url") == 0) {
                 NSString* urlStr = [pb stringForType:t];
                 if (urlStr && urlStr.length > 0) {
-                    const QUrl u = QUrl(QString::fromUtf8([urlStr UTF8String]));
-                    if (u.isLocalFile()) {
+                    const QString path = resolvePasteboardFileUrl(urlStr);
+                    if (!path.isEmpty()) {
                         MacPasteCandidate c;
                         c.type = QLatin1String(tn);
                         c.isFileUrl = true;
-                        c.filePath = u.toLocalFile();
+                        c.filePath = path;
                         out << c;
                         fprintf(stderr, "            file-url file=%s\n",
                                 c.filePath.toUtf8().constData());
@@ -74,12 +90,12 @@ QList<MacPasteCandidate> macPasteboardCollect()
                     || strcmp(tn, "com.apple.pasteboard.promised-file-content-type") == 0)) {
                 NSString* urlStr = [pb stringForType:t];
                 if (urlStr && urlStr.length > 0) {
-                    const QUrl u = QUrl(QString::fromUtf8([urlStr UTF8String]));
-                    if (u.isLocalFile() && QFileInfo::exists(u.toLocalFile())) {
+                    const QString path = resolvePasteboardFileUrl(urlStr);
+                    if (!path.isEmpty() && QFileInfo::exists(path)) {
                         MacPasteCandidate c;
                         c.type = QLatin1String(tn);
                         c.isFileUrl = true;
-                        c.filePath = u.toLocalFile();
+                        c.filePath = path;
                         out << c;
                         fprintf(stderr, "            promised-file-url file=%s\n",
                                 c.filePath.toUtf8().constData());
