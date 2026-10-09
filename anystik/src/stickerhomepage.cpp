@@ -1434,14 +1434,67 @@ void StickerHomePage::showPackManageMenu()
         });
 }
 
+// ── 居中带面板弹窗基类（修复旧式裸 QskPopup 两缺陷：无面板背景→全透明、
+//    无手写居中→右上角）。结构与 DescEditPopup/SyncProgressPopup 一致：
+//    内嵌 QskBox 面板（圆角14、0.9 不透明度），updateLayout 里窗口居中。──
+class CenteredPopup : public QskPopup
+{
+public:
+    explicit CenteredPopup(QQuickItem* parent = nullptr)
+        : QskPopup(parent)
+    {
+        setModal(true);
+        setOverlay(true);
+        setPopupFlag(QskPopup::DeleteOnClose, true);
+        setPolishOnResize(true);
+        setPolishOnParentResize(true);
+
+        m_panel = new QskBox(this);
+        m_panel->setBoxShapeHint(QskBox::Panel,
+            QskBoxShapeMetrics(14, Qt::AbsoluteSize));
+        applyDescPanelOpacity(m_panel, 0.9);   // 面板透明度，对齐项目其它弹窗
+
+        m_outer = new QskLinearBox(Qt::Vertical, m_panel);
+    }
+
+    QskLinearBox* contentLayout() const { return m_outer; }
+
+protected:
+    void updateLayout() override
+    {
+        updateGeometry();
+        m_outer->setGeometry(layoutRect());
+    }
+
+private:
+    void updateGeometry()
+    {
+        const auto parentRect = descParentRect(parentItem());
+        if (parentRect.isEmpty()) return;
+
+        // 对齐 SyncProgressPopup（syncprogresspopup.cpp:313-317）与
+        // DescEditPopup::updateGeometry（stickerhomepage.cpp:303-320）
+        const auto hint = m_outer->effectiveSizeHint(Qt::PreferredSize, QSizeF());
+        const qreal maxW = qMin(0.92 * parentRect.width(), 460.0);
+        const qreal maxH = 0.9 * parentRect.height();
+        const qreal panelW = qMax(320.0, maxW);
+        const qreal panelH = qBound(320.0, hint.height() + 36, maxH);
+
+        QRectF r(0, 0, panelW, panelH);
+        r.moveCenter(parentRect.center());
+        setGeometry(r);
+        m_panel->setGeometry(r.translated(-r.topLeft()));
+    }
+
+    QskBox* m_panel = nullptr;
+    QskLinearBox* m_outer = nullptr;
+};
+
 void StickerHomePage::showRenameDialog(const StickerPackBrief& pack)
 {
-    auto* popup = new QskPopup(this);
-    popup->setModal(true);
-    popup->setOverlay(true);
-    popup->setPopupFlag(QskPopup::DeleteOnClose, true);
+    auto* popup = new CenteredPopup(this);
 
-    auto* box = new QskLinearBox(Qt::Vertical, popup);
+    auto* box = new QskLinearBox(Qt::Vertical, popup->contentLayout());
     box->setPreferredWidth(280);
     box->setPreferredHeight(150);
     box->setSpacing(10);
@@ -1695,12 +1748,9 @@ void StickerHomePage::openSearchEngine(int engine, const QString& imageUrl)
 // forImport=true：用户选目录后导入；false：只把所选目录在文件管理器打开。
 void StickerHomePage::showDirPicker(bool forImport)
 {
-    auto* picker = new QskPopup(this);
-    picker->setModal(true);
-    picker->setOverlay(true);
-    picker->setPopupFlag(QskPopup::DeleteOnClose, true);
+    auto* picker = new CenteredPopup(this);
 
-    auto* box = new QskLinearBox(Qt::Vertical, picker);
+    auto* box = new QskLinearBox(Qt::Vertical, picker->contentLayout());
     box->setPreferredWidth(320);
     box->setPreferredHeight(420);
     box->setSpacing(8);
