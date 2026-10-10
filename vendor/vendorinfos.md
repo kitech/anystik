@@ -460,7 +460,9 @@ unifiedPushTopicLength = 14     // 总长度必须 14 字符（含 "up"）
 - **License**: Steve Reid 100% Public Domain（原头注释）；OpenBSD 后续修改同公版声明
 - **Files**:
   - `openssh-sha1/sha1_ossh.c`（去 OpenSSH 脚手架：删 `includes.h`/`WITH_OPENSSL` 门控/
-    4 处 `DEF_WEAK`；加 `<endian.h>`；保留 `explicit_bzero`，glibc >= 2.25 提供）
+    4 处 `DEF_WEAK`；字节序用编译器内建 `__BYTE_ORDER__`（不依赖 glibc `endian.h`，
+    macOS/Android/BSD 通用）；`explicit_bzero` 改为自带 `sha1_explicit_bzero`（volatile
+    写清零，不依赖 libc 声明——macOS 严格 C 模式下 `<string.h>` 不声明它））
   - `openssh-sha1/sha1_ossh.h`（裁剪：仅 `SHA1Init/Pad/Transform/Update/Final` 声明，
     删 End/File/FileChunk/Data 声明与 `__bounded__` 属性、htonl 宏；守卫 `__SHA1_OSSH_H`）
 - **API 不同名、与现实现零符号冲突**: BSD 风格 `SHA1Init/SHA1Update/SHA1Final`（Final

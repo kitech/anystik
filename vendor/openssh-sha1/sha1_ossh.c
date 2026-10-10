@@ -35,7 +35,9 @@
  *   字节序改用编译器内建 __BYTE_ORDER__/__ORDER_LITTLE_ENDIAN__（gcc/clang
  *   在所有平台均预定义，Linux/macOS/Android/BSD 通用，不再依赖 glibc 专有的
  *   <endian.h>，后者在 macOS SDK 不存在）；
- *   保留 explicit_bzero（glibc >= 2.25 / macOS 10.12+/bionic 均提供）。
+ *   自带 sha1_explicit_bzero：删 includes.h 后失去 OpenSSH openbsd-compat
+ *   兜底，且 explicit_bzero 在 macOS 严格 C 模式（__DARWIN_C_LEVEL <
+ *   __DARWIN_C_FULL）下 <string.h> 不声明，故用不可被优化掉的本地清零实现。
  * 改名：sha1.c -> sha1_ossh.c，规避与现仓 stikcommon/sha1.c、qlcomp/sha1.c
  *   的 qmake 目标 ./sha1.o 同名冲突（见 qlstik/build-qt3/Makefile:1019、
  *   build-qt6/Makefile:20686）。
@@ -46,6 +48,16 @@
 #include <string.h>
 
 #include "sha1_ossh.h"
+
+/* 语义等同 explicit_bzero：volatile 写，编译器无法消除清零。
+ * 不依赖任何头文件声明，Linux/macOS/Android/BSD 通用。 */
+static void
+sha1_explicit_bzero(void *buf, size_t len)
+{
+	volatile unsigned char *p = (volatile unsigned char *)buf;
+	while (len--)
+		*p++ = 0;
+}
 
 #define rol(value, bits) (((value) << (bits)) | ((value) >> (32 - (bits))))
 
@@ -198,5 +210,5 @@ SHA1Final(u_int8_t digest[SHA1_DIGEST_LENGTH], SHA1_CTX *context)
 		digest[i] = (u_int8_t)
 		   ((context->state[i>>2] >> ((3-(i & 3)) * 8) ) & 255);
 	}
-	explicit_bzero(context, sizeof(*context));
+	sha1_explicit_bzero(context, sizeof(*context));
 }
