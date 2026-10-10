@@ -19,6 +19,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>          // setenv
 
 #ifdef __linux__
 #include <malloc.h>
@@ -31,6 +32,15 @@ int main(int argc, char* argv[])
 #ifdef __linux__
     mallopt(M_MMAP_THRESHOLD, 32768);
     mallopt(M_ARENA_MAX, 2);
+#endif
+
+    // 中文输入：X11 下所有 Qt 版本统一走 XIM。桌面默认 QT_IM_MODULE=fcitx 是
+    // Qt4/5/6 的输入法插件名，Qt3 无该输入上下文插件 → 拿不到 IME；须在
+    // QApplication 之前强制 xim（fcitx 进程提供 XIM，XMODIFIERS 指向它）。
+    // 照抄 qltox/main.cpp:47-52。
+#ifdef __linux__
+    setenv("QT_IM_MODULE", "xim", true);
+    setenv("XMODIFIERS", "@im=fcitx", true);
 #endif
 
     // 简单命令行解析（Qt3 友好的手写方式，参考 qltox/main.cpp）
