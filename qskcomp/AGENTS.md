@@ -39,6 +39,19 @@
   → 内容超视口保持内容高（出滚动条）；内容矮时填满视口
 - 同类实例: 同上两文件（m_listBox）
 
+### 只读多行文本超高可滚（MultiLineTextEdit + 外层滚动区）
+
+- `MultiLineTextEdit::setContentSized(true)` → 按内容高度出尺寸（重写 `contentsSizeHint`=内容高+内衬），
+  垂直 sizePolicy 自动置 `Minimum`；配 `MyScrollArea::setScrolledItem(edit)` 即超高可滚、带原生滚动条
+- 关键: 进入该模式后【不要】再对该控件 `setPreferredHeight`——显式尺寸会压制 `contentsSizeHint`
+  （QskControl::effectiveSizeHint 语义）；滚动区自身设 preferredHeight 固定视口高
+- 背景: 该模式下组件自身 `m_background` 隐藏，改由外层滚动区 `QskScrollView::Panel` 皮肤承载
+  （对齐 Qt 官方 TextArea-in-ScrollView "背景不随内容滚动"）
+- 与 Qt 官方机制一致: 文本件高 = max(视口高, 内容高)、contentSize 变化通知外层、容器裁剪
+  （见 QQuickTextAreaPrivate::resizeFlickableControl / TextEdit+Flickable 官方样例）
+- Qt≥6.4 `selectByMouse=true`: 桌面鼠标拖选；安卓触摸拖动=滚动 + 系统选择手柄=选中，二者不冲突
+- 同类实例: anystik/src/ipinfopage.cpp（本机地址 96+160 / 出口地址 120+160）
+
 ## QSKinny 文本输入框后半高字（易踩坑）
 
 - 症状: mac/Android 下 QskTextInput/QskTextField 编辑文字只显下半截（字形顶部被裁）；placeholder 正常，Linux 正常

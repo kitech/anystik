@@ -167,6 +167,31 @@ bool MultiLineTextEdit::isReadOnly() const
     return m_readOnly;
 }
 
+void MultiLineTextEdit::setContentSized(bool on)
+{
+    if (m_contentSized == on)
+        return;
+    m_contentSized = on;
+
+    // 垂直 Minimum=GrowFlag：内容高于视口→外层出滚动条，矮于视口仍填满。
+    // 注意：显式 preferred 尺寸会压制 contentsSizeHint（QskControl::effectiveSizeHint），故不设。
+    setSizePolicy(QskSizePolicy::Expanding,
+        on ? QskSizePolicy::Minimum : QskSizePolicy::Preferred);
+
+    m_background->setVisible(!on);   // 背景改由外层滚动区的 Panel 皮肤承载
+
+    if (on) {
+        connect(m_edit, &QQuickTextEdit::contentSizeChanged,
+            this, [this]() { resetImplicitSize(); });
+    }
+    resetImplicitSize();
+}
+
+bool MultiLineTextEdit::isContentSized() const
+{
+    return m_contentSized;
+}
+
 QString MultiLineTextEdit::text() const
 {
     return m_edit->text();
@@ -288,6 +313,18 @@ void MultiLineTextEdit::showContextMenu(const QPointF& scenePos)
             menu->close();
         });
     menu->open();
+}
+
+QSizeF MultiLineTextEdit::contentsSizeHint(
+    Qt::SizeHint which, const QSizeF& constraint) const
+{
+    if (!m_contentSized || !m_edit)
+        return Inherited::contentsSizeHint(which, constraint);
+
+    // 高度=文本内容高 + 上下内衬（updateLayout 里 4px+4px）；宽度交回基类由 Expanding 填满。
+    QSizeF hint = Inherited::contentsSizeHint(which, constraint);
+    hint.setHeight(m_edit->contentHeight() + 8.0);
+    return hint;
 }
 
 void MultiLineTextEdit::updateLayout()

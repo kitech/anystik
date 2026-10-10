@@ -5,6 +5,7 @@
 // QByteArrayLiteral 等 Qt3 侧 typedef，会一并引入 qbytearray_shim.h。
 #include "qba_shim.h"
 #include "qstring_shim.h"
+#include "myscrollarea.h"
 
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
@@ -12,6 +13,8 @@
 #include <QskFontRole.h>
 #include <QskTextOptions.h>
 #include <QskSizePolicy.h>
+#include <QskScrollView.h>
+#include <QskBoxShapeMetrics.h>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -80,11 +83,19 @@ void IPInfoPage::onCreate(const QVariantMap&, const QVariantMap&)
     localTitle->setFontRole(QskFontRole::Caption);
     localTitle->setTextColor(QColor(140, 160, 190));
 
-    m_localLabel = new MultiLineTextEdit(layout);
-    m_localLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
-    m_localLabel->setPreferredHeight(96);
+    m_localLabel = new MultiLineTextEdit;          // 无父项：交由外层滚动区接管
+    m_localLabel->setContentSized(true);           // 按内容高度出尺寸（超高可滚）
     m_localLabel->setReadOnly(true);    // 结果区只读：可选中/复制，禁编辑
     m_localLabel->setText(QString());
+
+    auto* localScroll = new MyScrollArea(layout);
+    localScroll->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    localScroll->setPreferredHeight(96 + 160);     // 视口高不变
+    localScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    localScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    localScroll->setBoxShapeHint(QskScrollView::Panel,
+        QskBoxShapeMetrics(8, Qt::AbsoluteSize));  // 圆角对齐原组件面板
+    localScroll->setScrolledItem(m_localLabel);
 
     layout->addSpacer(12, 0);
 
@@ -93,11 +104,19 @@ void IPInfoPage::onCreate(const QVariantMap&, const QVariantMap&)
     exitTitle->setFontRole(QskFontRole::Caption);
     exitTitle->setTextColor(QColor(140, 160, 190));
 
-    m_exitLabel = new MultiLineTextEdit(layout);
-    m_exitLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
-    m_exitLabel->setPreferredHeight(120);
+    m_exitLabel = new MultiLineTextEdit;
+    m_exitLabel->setContentSized(true);
     m_exitLabel->setReadOnly(true);     // 结果区只读：可选中/复制，禁编辑
     m_exitLabel->setText(QString());
+
+    auto* exitScroll = new MyScrollArea(layout);
+    exitScroll->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    exitScroll->setPreferredHeight(120 + 160);
+    exitScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    exitScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    exitScroll->setBoxShapeHint(QskScrollView::Panel,
+        QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+    exitScroll->setScrolledItem(m_exitLabel);
 
     layout->addSpacer(8, 0);
 

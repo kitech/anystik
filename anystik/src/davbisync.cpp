@@ -100,7 +100,7 @@ void SyncEngine::createConnection()
         (m_connectionType == 2) ? QWebdav::HTTPS : QWebdav::HTTP,
         m_host, m_rootPath, m_username, m_password, m_port);
     // 空闲超时：仅在连续无字节传输时计时，且随上传/下载进度重置；大图留余量
-    m_webdav->setTransferTimeout(90000);
+    m_webdav->setTransferTimeout(290000);
     // 暴露被吞掉的认证/SSL 等内部原因（errorChanged 为 QWebdav 公开 signal）
     connect(m_webdav, &QWebdav::errorChanged, this,
             [this](const QString& e) {

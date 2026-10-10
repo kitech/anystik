@@ -36,6 +36,12 @@ public:
     void setReadOnly(bool on);          // 只读=禁改文本，选中/复制/光标/右键照常（Qt 惯例）
     bool isReadOnly() const;
 
+    // 外层滚动容器（QskScrollArea/MyScrollArea）模式：本控件改为按【内容高度】出尺寸
+    // （宽度仍填满可用宽度；内含文本全高排布、内嵌裁剪交给外层 ClipItem），
+    // 垂直 sizePolicy 置 Minimum 使内容可高于视口，从而外层出滚动条。默认关。
+    void setContentSized(bool on);
+    bool isContentSized() const;
+
 Q_SIGNALS:
     void textEdited();
 
@@ -52,6 +58,7 @@ protected:
     void focusOutEvent(QFocusEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;   // 仅右键弹菜单；左键由 m_edit 原生处理
     void updateLayout() override;
+    QSizeF contentsSizeHint(Qt::SizeHint which, const QSizeF& constraint) const override;
 
 private:
     void updatePlaceholder();
@@ -64,6 +71,7 @@ private:
     bool m_colorApplied = false;
     bool m_engaged = false;      // 外壳：编辑态（占位符/光标/输入法面板开关）
     bool m_readOnly = false;     // 只读=禁改文本（见头注释：拦截式，勿用 QQuickTextEdit::setReadOnly）
+    bool m_contentSized = false; // 外层滚动模式：按内容高度出尺寸
 };
 
 #endif // QSK_MULTILINE_TEXT_EDIT_H
