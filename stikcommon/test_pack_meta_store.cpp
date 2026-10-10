@@ -160,6 +160,11 @@ TEST_CASE("packmeta: basename / isCarrierBase / isInternalRel")
     CHECK(!packmeta::isMergeableBase("a.png"));
     CHECK(packmeta::isMergeableRel("packs/Mypack/_stikmeta.svg"));
     CHECK(!packmeta::isMergeableRel("packs/Mypack/a.png"));
+    // findMergeableRel：带路径的 rel 也必须归一命中（路径/无路径不再混淆）
+    CHECK(packmeta::findMergeableRel("pastes/_stikmeta.svg") != nullptr);
+    CHECK(packmeta::findMergeableRel("packs/Mypack/_stikmeta.svg.conflict2")
+          != nullptr);
+    CHECK(packmeta::findMergeableRel("packs/Mypack/a.png") == nullptr);
     CHECK(packmeta::isHiddenFromUi("_stikmeta.svg"));
 
     // JSONL 逐条 LWW 合并

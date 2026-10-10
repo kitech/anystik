@@ -1136,7 +1136,7 @@ void SyncEngine::mergeSpecialNext()
 {
     const QString rel = m_mergeQueue.at(m_mergeIndex);
     const packmeta::MergeableEntry* entry =
-        packmeta::findMergeable(packmeta::canonicalBase(toStd(rel)));
+        packmeta::findMergeableRel(toStd(rel));
     if (!entry || !entry->merge) {          // 入队即已注册，防御性跳过
         log(davbisync::Warn, QStringLiteral("merge"),
             QStringLiteral("未注册的合并项，跳过: %1").arg(rel));

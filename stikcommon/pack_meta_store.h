@@ -65,6 +65,8 @@ int mergeableCount();
 std::string canonicalBase(const std::string& base);
 // 按规范基名查找；未注册返回 nullptr。
 const MergeableEntry* findMergeable(const std::string& base);
+// 按 rel 归一（basenameOf + canonicalBase）后查找；未注册返回 nullptr。
+const MergeableEntry* findMergeableRel(const std::string& rel);
 // base（可含 .conflictN）/ rel 是否已注册可合并。
 bool isMergeableBase(const std::string& base);
 bool isMergeableRel(const std::string& rel);

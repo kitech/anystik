@@ -128,6 +128,11 @@ const MergeableEntry* findMergeable(const std::string& base)
     return nullptr;
 }
 
+const MergeableEntry* findMergeableRel(const std::string& rel)
+{
+    return findMergeable(canonicalBase(basenameOf(rel)));
+}
+
 bool isMergeableBase(const std::string& base)
 {
     return findMergeable(canonicalBase(base)) != nullptr;
@@ -135,7 +140,7 @@ bool isMergeableBase(const std::string& base)
 
 bool isMergeableRel(const std::string& rel)
 {
-    return isMergeableBase(basenameOf(rel));
+    return findMergeableRel(rel) != nullptr;
 }
 
 bool isHiddenFromUi(const std::string& base)
