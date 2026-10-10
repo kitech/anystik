@@ -929,6 +929,22 @@ Please check that ntfy is running in the background</translation>
         <source>暂无记录</source>
         <translation>No records</translation>
     </message>
+    <message>
+        <source>已Root</source>
+        <translation>Rooted</translation>
+    </message>
+    <message>
+        <source>未Root</source>
+        <translation>Not rooted</translation>
+    </message>
+    <message>
+        <source>充电中</source>
+        <translation>Charging</translation>
+    </message>
+    <message>
+        <source>未充电</source>
+        <translation>Not charging</translation>
+    </message>
 </context>
 <context>
     <name>PushHandler</name>

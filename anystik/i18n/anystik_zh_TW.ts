@@ -929,6 +929,22 @@
         <source>暂无记录</source>
         <translation>暫無記錄</translation>
     </message>
+    <message>
+        <source>已Root</source>
+        <translation>已Root</translation>
+    </message>
+    <message>
+        <source>未Root</source>
+        <translation>未Root</translation>
+    </message>
+    <message>
+        <source>充电中</source>
+        <translation>充電中</translation>
+    </message>
+    <message>
+        <source>未充电</source>
+        <translation>未充電</translation>
+    </message>
 </context>
 <context>
     <name>PushHandler</name>

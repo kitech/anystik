@@ -1,6 +1,7 @@
 #include "phonesmsstatusbar.h"
 #include "phonemonitor.h"
 #include "phonedb.h"
+#include "androidutils.h"
 #include "toastpopup.h"
 
 #include <QskBox.h>
@@ -180,6 +181,17 @@ PhoneSmsStatusBar::PhoneSmsStatusBar(QQuickItem* parent)
     setPanel(true);
     setSpacing(4);
 
+    // 行首两项：Root 状态 · 充电状态（间隔点同状态行，Android 才刷新，桌面整行隐藏）
+    m_rootLabel = new QskTextLabel(this);
+    m_rootLabel->setAlignment(Qt::AlignCenter);
+    m_rootLabel->setPreferredWidth(52);
+    auto* sepDot = new QskTextLabel(this);
+    sepDot->setAlignment(Qt::AlignCenter);
+    sepDot->setText(QStringLiteral("·"));
+    m_chargeLabel = new QskTextLabel(this);
+    m_chargeLabel->setAlignment(Qt::AlignCenter);
+    m_chargeLabel->setPreferredWidth(64);
+
     m_statusLabel = new QskTextLabel(this);
     m_statusLabel->setAlignment(Qt::AlignCenter);
     m_statusLabel->setSizePolicy(
@@ -195,6 +207,12 @@ PhoneSmsStatusBar::PhoneSmsStatusBar(QQuickItem* parent)
     setVisible(false);
 
 #ifdef Q_OS_ANDROID
+    m_deviceTimer = new QTimer(this);
+    m_deviceTimer->setInterval(5000);
+    connect(m_deviceTimer, &QTimer::timeout, this, [this]() { updateDeviceStatus(); });
+    m_deviceTimer->start();
+    updateDeviceStatus();
+
     if (PhoneMonitor::instance())
         attachPhoneMonitor();
     else
@@ -249,6 +267,7 @@ PhoneSmsStatusBar::~PhoneSmsStatusBar()
 void PhoneSmsStatusBar::retranslateUi()
 {
     updateStatus();
+    updateDeviceStatus();
     refreshList();
 }
 
@@ -264,6 +283,14 @@ void PhoneSmsStatusBar::updateStatus()
     m_statusLabel->setText(tr("电话 %1 · 短信 %2").arg(calls).arg(sms));
     setVisible(true);
 #endif
+}
+
+void PhoneSmsStatusBar::updateDeviceStatus()
+{
+    if (m_rootLabel)
+        m_rootLabel->setText(androidIsRooted() ? tr("已Root") : tr("未Root"));
+    if (m_chargeLabel)
+        m_chargeLabel->setText(androidIsCharging() ? tr("充电中") : tr("未充电"));
 }
 
 QString PhoneSmsStatusBar::stateLabel(const QString& state) const

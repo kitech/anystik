@@ -7,6 +7,7 @@
 class PhoneSmsListPopup;
 class QskPushButton;
 class QskTextLabel;
+class QTimer;
 
 class PhoneSmsStatusBar : public QskLinearBox
 {
@@ -18,15 +19,19 @@ public:
 
 private:
     void updateStatus();
+    void updateDeviceStatus();
     void attachPhoneMonitor();
     void openListsPopup();
     void refreshList();
     QString stateLabel(const QString& state) const;
     QString attributionOf(const QString& number) const;
 
+    QskTextLabel* m_rootLabel = nullptr;
+    QskTextLabel* m_chargeLabel = nullptr;
     QskTextLabel* m_statusLabel = nullptr;
     QskPushButton* m_listBtn = nullptr;
     PhoneSmsListPopup* m_popup = nullptr;
+    QTimer* m_deviceTimer = nullptr;
     bool m_attached = false;
 };
 

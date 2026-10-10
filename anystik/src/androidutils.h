@@ -16,4 +16,10 @@ QString androidPicturesStickerBaseDir();
 bool androidStorageAccessGranted();
 void requestAndroidStorageAccess();
 
+// Android 设备状态（非 Android 恒 false）：
+//   androidIsRooted   : 启发式判定（常见 su 路径 / which su / test-keys）
+//   androidIsCharging : BatteryManager.isCharging()
+bool androidIsRooted();
+bool androidIsCharging();
+
 #endif

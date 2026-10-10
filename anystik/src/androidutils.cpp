@@ -105,6 +105,26 @@ void requestAndroidStorageAccess()
         "(Landroid/app/Activity;)V",
         activity.object());
 }
+
+bool androidIsRooted()
+{
+    return QJniObject::callStaticMethod<jboolean>(
+        "io/fedlet/mobutil/MobUtil",
+        "isRooted",
+        "()Z");
+}
+
+bool androidIsCharging()
+{
+    QJniObject context = QNativeInterface::QAndroidApplication::context();
+    if (!context.isValid())
+        return false;
+    return QJniObject::callStaticMethod<jboolean>(
+        "io/fedlet/mobutil/MobUtil",
+        "isCharging",
+        "(Landroid/content/Context;)Z",
+        context.object());
+}
 #else
 void showAndroidToast(const QString& message) {
     Q_UNUSED(message)
@@ -123,5 +143,15 @@ bool androidStorageAccessGranted()
 void requestAndroidStorageAccess()
 {
     // 桌面平台空操作
+}
+
+bool androidIsRooted()
+{
+    return false;   // 非 Android 无 Root 概念
+}
+
+bool androidIsCharging()
+{
+    return false;   // 非 Android 不走 Android 电池服务
 }
 #endif
