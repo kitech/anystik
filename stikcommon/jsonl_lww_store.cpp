@@ -135,7 +135,14 @@ std::string serialize(const QMap<QString, QJsonObject>& m)
     return out;
 }
 
-bool writeFile(const QString& absPath, const QMap<QString, QJsonObject>& m)
+std::string merge(const std::string& local, const std::string& cloud)
+{
+    QMap<QString, QJsonObject> m = parse(local);
+    foldInto(m, cloud);
+    return serialize(m);
+}
+
+bool writeFileRaw(const QString& absPath, const std::string& data)
 {
     if (!qMkdir(qAbsPath(QFileInfo(absPath)))) {
         return false;
@@ -144,11 +151,15 @@ bool writeFile(const QString& absPath, const QMap<QString, QJsonObject>& m)
     if (!f.open(kWriteMode)) {
         return false;
     }
-    const std::string s = serialize(m);
-    if (f.write(toBa(s)) < 0) {
+    if (f.write(toBa(data)) < 0) {
         return false;
     }
     return f.commit();
+}
+
+bool writeFile(const QString& absPath, const QMap<QString, QJsonObject>& m)
+{
+    return writeFileRaw(absPath, serialize(m));
 }
 
 } // namespace jsonl_lww

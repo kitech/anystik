@@ -146,6 +146,29 @@ TEST_CASE("packmeta: basename / isCarrierBase / isInternalRel")
     CHECK(packmeta::isInternalRel("packs/Mypack/_stikmeta.svg"));
     CHECK(packmeta::isInternalRel("packs/Mypack/_stikmeta.svg.conflict2"));
     CHECK(!packmeta::isInternalRel("packs/Mypack/a.png"));
+
+    // 可合并边车注册表
+    CHECK(packmeta::canonicalBase("_stikmeta.svg.conflict1") == "_stikmeta.svg");
+    CHECK(packmeta::canonicalBase("_stikmeta.svg.conflictX")
+          == "_stikmeta.svg.conflictX");
+    CHECK(packmeta::canonicalBase("_stikmeta.svg") == "_stikmeta.svg");
+    CHECK(packmeta::findMergeable("_stikmeta.svg") != nullptr);
+    CHECK(packmeta::findMergeable("a.png") == nullptr);
+    CHECK(packmeta::mergeableCount() >= 1);
+    CHECK(packmeta::isMergeableBase("_stikmeta.svg"));
+    CHECK(packmeta::isMergeableBase("_stikmeta.svg.conflict9"));
+    CHECK(!packmeta::isMergeableBase("a.png"));
+    CHECK(packmeta::isMergeableRel("packs/Mypack/_stikmeta.svg"));
+    CHECK(!packmeta::isMergeableRel("packs/Mypack/a.png"));
+    CHECK(packmeta::isHiddenFromUi("_stikmeta.svg"));
+
+    // JSONL 逐条 LWW 合并
+    const std::string local = "{\"rel\":\"a.png\",\"desc\":\"L\",\"mtime\":2}\n";
+    const std::string cloud = "{\"rel\":\"a.png\",\"desc\":\"C\",\"mtime\":1}\n"
+                              "{\"rel\":\"b.png\",\"desc\":\"B\",\"mtime\":3}\n";
+    const std::string merged = jsonl_lww::merge(local, cloud);
+    CHECK(merged.find("\"desc\":\"L\"") != std::string::npos);  // mtime 大者胜
+    CHECK(merged.find("\"desc\":\"B\"") != std::string::npos);  // 合并保留
 }
 
 TEST_CASE("packmeta: carrierDir 普通包 / 粘贴板包")

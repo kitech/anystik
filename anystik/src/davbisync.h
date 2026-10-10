@@ -131,6 +131,8 @@ private:
     void checkAndUpload(const QString& localPath, const QString& cloudRel);
     void uploadFile(const QString& localPath, const QString& cloudRel);
     void downloadFile(const QString& cloudRel, const QString& localAbs);
+    void mergeSpecialNext();       // 可合并边车(如 _stikmeta.svg)折叠合并
+    void uploadMerged(const QString& rel, const QString& localAbs);
     void removeActiveReply(QNetworkReply* reply);   // 注销并销毁 reply
     void createConnection();   // 每轮新建 QWebdav（连接池/认证归零，与重启等价）
     void createParser();       // 每轮新建 parser 并接线
@@ -151,6 +153,9 @@ private:
     QList<QPair<QString, QString>> m_uploadQueue; // (本地绝对路径, 业务 dbRel)
     QList<QPair<QString, QString>> m_downloadQueue; // (业务 dbRel, 本地绝对路径)
     QList<QPair<QString, QString>> m_pendingCloudRenames; // (旧 dbRel, 新 dbRel) 冲突改名
+    QStringList m_mergeQueue;                     // 待折叠合并的边车 dbRel 列表
+    int m_mergeIndex = 0;
+    int m_merged = 0;
     QStringList m_ensuredDirs;                    // 已确保存在的云端目录
     QStringList m_mkdirChain;                     // 待逐层 mkdir 的目录（顶层在前）
     QList<QNetworkReply*> m_activeReplies;        // 在途请求（abort 时逐一取消）

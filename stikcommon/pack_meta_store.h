@@ -45,6 +45,32 @@ std::string basenameOf(const std::string& rel);
 bool isCarrierBase(const std::string& base);
 bool isInternalRel(const std::string& rel);
 
+// ── 可合并边车文件注册表 ──
+// 引擎同步、下载折叠、UI 隐藏三处均按此表分派；新增可自动合并的文件类型，
+// 只需在 pack_meta_store.cpp 的 kMergeables[] 加一行。
+//
+// 合并策略：本地原始字节 + 云端原始字节 → 合并后字节（与文件格式解耦）。
+typedef std::string (*MergeFn)(const std::string& local,
+                               const std::string& cloud);
+
+struct MergeableEntry {
+    const char* basename;     // 规范基名（不含 .conflict<digits>）
+    MergeFn     merge;        // 合并算法
+    bool        hiddenFromUi; // 是否从贴纸列表隐藏
+};
+
+const MergeableEntry* mergeables();
+int mergeableCount();
+// 去掉尾随 .conflict<digits> 得到规范基名。
+std::string canonicalBase(const std::string& base);
+// 按规范基名查找；未注册返回 nullptr。
+const MergeableEntry* findMergeable(const std::string& base);
+// base（可含 .conflictN）/ rel 是否已注册可合并。
+bool isMergeableBase(const std::string& base);
+bool isMergeableRel(const std::string& rel);
+// 是否应从 UI 隐藏。
+bool isHiddenFromUi(const std::string& base);
+
 // 当前 epoch 毫秒（Qt3 走 qdatetime_shim 的 qNowMsecs）。
 long long nowMsec();
 

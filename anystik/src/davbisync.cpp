@@ -3,6 +3,8 @@
 #include "qwebdav.h"
 #include "qwebdavdirparser.h"
 #include "qwebdavitem.h"
+#include "jsonl_lww_store.h"   // readFileRaw / writeFileRaw
+#include "pack_meta_store.h"   // 可合并边车注册表
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -17,6 +19,7 @@
 #include <QNetworkReply>
 
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -70,6 +73,19 @@ bool isConflictRel(const QString& rel)
         }
     }
     return true;
+}
+
+// QString → std::string（仅 anystik，Qt6）。
+std::string toStd(const QString& s)
+{
+    const QByteArray b = s.toUtf8();
+    return std::string(b.constData(), size_t(b.size()));
+}
+
+// 该 rel 的 basename 是否为已注册的可合并边车（如 _stikmeta.svg）。
+bool isMergeableRel(const QString& rel)
+{
+    return packmeta::isMergeableRel(toStd(rel));
 }
 
 } // namespace
@@ -194,6 +210,9 @@ bool SyncEngine::startSync()
     m_uploadQueue.clear();
     m_downloadQueue.clear();
     m_pendingCloudRenames.clear();
+    m_mergeQueue.clear();
+    m_mergeIndex = 0;
+    m_merged = 0;
     m_ensuredDirs.clear();
     m_uploadIndex = 0;
     m_uploadDone = 0;
@@ -459,6 +478,7 @@ void SyncEngine::buildOpQueue()
 {
     m_uploadQueue.clear();
     m_downloadQueue.clear();
+    m_mergeQueue.clear();
     m_conflictRelCloud.clear();
     m_conflictNames.clear();
 
@@ -580,6 +600,26 @@ void SyncEngine::buildOpQueue()
         }
         const bool lc = localChanged(rel, localSize, it.value().mtimeMsec);
         const bool cc = cloudChanged(rel, cloudSize, cit.value().mtimeMsec);
+        // 可合并边车（如 _stikmeta.svg）：不走 .conflictN 双保留，改按注册表
+        // 的 MergeFn 折叠合并 → 双侧皆变或仅云端变时进入合并阶段
+        //（先 GET 再 PUT，一次同步收敛）。
+        if (isMergeableRel(rel)) {
+            if (lc && cc) {
+                m_mergeQueue.append(rel);
+                continue;
+            }
+            if (lc) {                       // 仅本地变 → 照常上传
+                m_uploadQueue.append(QPair<QString, QString>(
+                    m_cloudToLocal.value(rel), rel));
+                continue;
+            }
+            if (cc) {                       // 仅云端变 → 折叠合并
+                m_mergeQueue.append(rel);
+                continue;
+            }
+            ++m_uploadSkipped;
+            continue;
+        }
         if (lc && cc) {
             // 双侧皆变且不一致 → 冲突：云端旧版改名 .conflictN 保留，本地新版本上传覆盖
             m_conflictRelCloud.append(rel);
@@ -635,7 +675,8 @@ void SyncEngine::buildOpQueue()
 
     m_uploadTotal = m_uploadQueue.size();
     m_totalJobs = m_uploadQueue.size()
-        + m_downloadQueue.size() + m_pendingCloudRenames.size();
+        + m_downloadQueue.size() + m_pendingCloudRenames.size()
+        + m_mergeQueue.size();
     log(davbisync::Info, QStringLiteral("scan"),
         QStringLiteral("op queue: %1 uploads, %2 downloads, %3 conflicts")
             .arg(m_uploadQueue.size()).arg(m_downloadQueue.size())
@@ -701,7 +742,13 @@ void SyncEngine::pushNext()
         return;
     }
 
-    // 2) 上传（目录链未就位时先逐层 mkdir）
+    // 2) 可合并边车折叠合并（先于上传/下载：必须先 GET 云端再 PUT，否则会被上传覆盖）
+    if (m_mergeIndex < m_mergeQueue.size()) {
+        mergeSpecialNext();
+        return;
+    }
+
+    // 3) 上传（目录链未就位时先逐层 mkdir）
     if (m_uploadIndex < m_uploadQueue.size()) {
         const auto& item = m_uploadQueue.at(m_uploadIndex);
         const QString localPath = item.first;
@@ -730,7 +777,7 @@ void SyncEngine::pushNext()
         return;
     }
 
-    // 3) 下载
+    // 4) 下载
     if (m_downloadIndex < m_downloadQueue.size()) {
         const auto& item = m_downloadQueue.at(m_downloadIndex);
         downloadFile(item.first, QString());
@@ -1082,6 +1129,113 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
             });
 }
 
+// 可合并边车折叠合并：GET 云端载体 → 按注册表 MergeFn 与本地逐条合并 →
+// 原子写回本地 → 由 uploadMerged PUT 回云端。载体为 JSONL（可合并 CRDT），
+// 普通二进制贴纸不走此路径（仍双保留 .conflictN）。
+void SyncEngine::mergeSpecialNext()
+{
+    const QString rel = m_mergeQueue.at(m_mergeIndex);
+    const packmeta::MergeableEntry* entry =
+        packmeta::findMergeable(packmeta::canonicalBase(toStd(rel)));
+    if (!entry || !entry->merge) {          // 入队即已注册，防御性跳过
+        log(davbisync::Warn, QStringLiteral("merge"),
+            QStringLiteral("未注册的合并项，跳过: %1").arg(rel));
+        ++m_mergeIndex;
+        ++m_jobsDone;
+        emitProgress();
+        pushNext();
+        return;
+    }
+    m_fileStartMsec = QDateTime::currentMSecsSinceEpoch();
+    log(davbisync::Info, QStringLiteral("merge"),
+        QStringLiteral("合并 %1").arg(rel));
+
+    QNetworkReply* reply = m_webdav->get(cloudPath(rel));
+    m_activeReplies.append(reply);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, rel, entry]() {
+        const int status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray body = reply->readAll();
+        const QNetworkReply::NetworkError err = reply->error();
+        const QString errStr = reply->errorString();
+        removeActiveReply(reply);
+        if (!m_running) {
+            return;
+        }
+        if (err != QNetworkReply::NoError || status >= 400) {
+            finishWithError(
+                QStringLiteral("merge get failed: %1 (%2 status %3)")
+                    .arg(rel, errStr).arg(status));
+            return;
+        }
+        const QString localAbs =
+            StickerStore::instance()->resolveStickerPath(rel);
+        const std::string merged =
+            entry->merge(jsonl_lww::readFileRaw(localAbs),
+                         std::string(body.constData(), size_t(body.size())));
+        if (!jsonl_lww::writeFileRaw(localAbs, merged)) {
+            finishWithError(
+                QStringLiteral("merge write failed: %1").arg(localAbs));
+            return;
+        }
+        uploadMerged(rel, localAbs);
+    });
+}
+
+void SyncEngine::uploadMerged(const QString& rel, const QString& localAbs)
+{
+    auto file = std::make_unique<QFile>(localAbs);
+    if (!file->open(QIODevice::ReadOnly)) {
+        finishWithError(QStringLiteral("cannot open merged file: %1")
+                            .arg(localAbs));
+        return;
+    }
+    QNetworkReply* reply = m_webdav->put(cloudPath(rel), file.get());
+    m_activeReplies.append(reply);
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, file = std::move(file), rel, localAbs]() {
+                const QByteArray lm = reply->rawHeader("Last-Modified");
+                const QNetworkReply::NetworkError err = reply->error();
+                const QString errStr = reply->errorString();
+                removeActiveReply(reply);
+                if (!m_running) {
+                    return;
+                }
+                if (err != QNetworkReply::NoError) {
+                    finishWithError(QStringLiteral("merge put failed: %1 (%2)")
+                                        .arg(rel, errStr));
+                    return;
+                }
+                const QFileInfo fi(localAbs);
+                davbisync::BaselineEntry le;
+                le.size = fi.size();
+                le.mtimeMsec = fi.lastModified().toMSecsSinceEpoch();
+                m_localFiles.insert(rel, le);
+                davbisync::BaselineEntry ce;
+                ce.size = fi.size();
+                ce.mtimeMsec = 0;
+                if (!lm.isEmpty()) {
+                    const QDateTime t = QDateTime::fromString(
+                        QString::fromLatin1(lm), Qt::RFC2822Date);
+                    if (t.isValid()) {
+                        ce.mtimeMsec = t.toMSecsSinceEpoch();
+                    }
+                }
+                m_cloudFiles.insert(rel, ce);
+                persistBaseline();
+                m_lastFileMs =
+                    QDateTime::currentMSecsSinceEpoch() - m_fileStartMsec;
+                ++m_merged;
+                ++m_mergeIndex;
+                ++m_jobsDone;
+                log(davbisync::Info, QStringLiteral("merge"),
+                    QStringLiteral("合并完成 %1 · %2 s")
+                        .arg(rel).arg(m_lastFileMs / 1000.0, 0, 'f', 1));
+                emitProgress();
+                pushNext();
+            });
+}
+
 QUrl SyncEngine::cloudUrl(const QString& dbRel) const
 {
     QUrl u;
@@ -1166,6 +1320,9 @@ QString SyncEngine::statDetail() const
     if (!m_conflictRelCloud.isEmpty()) {
         parts << QStringLiteral("冲突 %1").arg(m_conflictRelCloud.size());
     }
+    if (m_mergeIndex < m_mergeQueue.size()) {
+        parts << QStringLiteral("合并 %1").arg(m_mergeQueue.size());
+    }
 
     QString curText;
     QString curSizeText;
@@ -1192,7 +1349,8 @@ QString SyncEngine::statDetail() const
     }
 
     const int total = qMax(1, m_uploadTotal + m_downloadQueue.size()
-                              + m_pendingCloudRenames.size());
+                              + m_pendingCloudRenames.size()
+                              + m_mergeQueue.size());
     const int done = m_uploadIndex + m_downloadDone;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const double elapsedSec = qMax(1.0, double(now - m_startMsec) / 1000.0);

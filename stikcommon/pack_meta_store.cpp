@@ -88,14 +88,12 @@ void ensureCarrierRow(StickerDbSyncInterface& db, const std::string& baseDir,
     db.add_sticker(row);
 }
 
-bool isConflictCarrierBase(const std::string& base)
-{
-    const std::string prefix = std::string(kCarrierName) + kConflictMarker;
-    if (base.compare(0, prefix.size(), prefix) != 0) {
-        return false;
-    }
-    return isDigits(base.substr(prefix.size()));
-}
+// ── 可合并边车文件注册表（新增文件类型只加一行）──
+const MergeableEntry kMergeables[] = {
+    { kCarrierName, &jsonl_lww::merge, true },   // _stikmeta.svg：对 UI 隐藏
+    // 未来：{ "tags.jsonl", &jsonl_lww::merge, true },
+};
+const int kMergeableCount = int(sizeof(kMergeables) / sizeof(kMergeables[0]));
 
 } // namespace
 
@@ -105,14 +103,55 @@ std::string basenameOf(const std::string& rel)
     return (p == std::string::npos) ? rel : rel.substr(p + 1);
 }
 
+std::string canonicalBase(const std::string& base)
+{
+    const size_t p = base.rfind(kConflictMarker);
+    if (p == std::string::npos) {
+        return base;
+    }
+    if (isDigits(base.substr(p + std::string(kConflictMarker).size()))) {
+        return base.substr(0, p);
+    }
+    return base;
+}
+
+const MergeableEntry* mergeables() { return kMergeables; }
+int mergeableCount() { return kMergeableCount; }
+
+const MergeableEntry* findMergeable(const std::string& base)
+{
+    for (int i = 0; i < kMergeableCount; ++i) {
+        if (base == kMergeables[i].basename) {
+            return &kMergeables[i];
+        }
+    }
+    return nullptr;
+}
+
+bool isMergeableBase(const std::string& base)
+{
+    return findMergeable(canonicalBase(base)) != nullptr;
+}
+
+bool isMergeableRel(const std::string& rel)
+{
+    return isMergeableBase(basenameOf(rel));
+}
+
+bool isHiddenFromUi(const std::string& base)
+{
+    const MergeableEntry* e = findMergeable(canonicalBase(base));
+    return e != nullptr && e->hiddenFromUi;
+}
+
 bool isCarrierBase(const std::string& base)
 {
-    return base == kCarrierName || isConflictCarrierBase(base);
+    return isMergeableBase(base);
 }
 
 bool isInternalRel(const std::string& rel)
 {
-    return isCarrierBase(basenameOf(rel));
+    return isHiddenFromUi(basenameOf(rel));
 }
 
 long long nowMsec()

@@ -2610,10 +2610,17 @@ bool StickerStore::importStickerFile(const QString& packId,
         : rel.section(QLatin1Char('/'), -1);
     const QString dst = targetDir + QLatin1Char('/') + fileName;
 
-    // 幂等：同包同相对路径已有行 → 已导入（双向按 size 判 same，不会重入）
+    // 幂等：同包同相对路径已有行 → 已导入（双向按 size 判 same，不会重入）。
+    // 例外：可合并边车（如 _stikmeta.svg）行在但目标文件缺失（被外部删除/
+    // 首落失败）→ 落到下面重新落地，否则同步收尾的 packmeta 折叠合并会因
+    // 读不到本地文件而失败、云端更新永久搁浅。
+    const bool mergeableOk = packmeta::isMergeableBase(qToStdString(fileName));
     const auto existing = db.list_stickers(qUtf8Printable(packId));
     for (const auto& e : existing) {
         if (qFromStdString(e.file_path) == rel) {
+            if (mergeableOk && !QFileInfo(dst).isFile()) {
+                break;
+            }
             return true;
         }
     }
@@ -2623,10 +2630,9 @@ bool StickerStore::importStickerFile(const QString& packId,
     // 跳过图片解码预检，按普通行入库供同步收尾的 packmeta 消费。
     const bool svgOk = qToLower(qFileInfoSuffix(QFileInfo(fileName)))
                        == QLatin1String("svg");
-    const bool carrierOk = packmeta::isCarrierBase(qToStdString(fileName));
     QImageReader probe(srcAbs);
     probe.setAutoTransform(true);
-    if (!svgOk && !carrierOk && !probe.size().isValid()) {
+    if (!svgOk && !mergeableOk && !probe.size().isValid()) {
         if (errorOut) *errorOut = QStringLiteral("图片解码失败");
         return false;
     }
@@ -2655,7 +2661,7 @@ bool StickerStore::importStickerFile(const QString& packId,
     QFileInfo fi(dst);
     StickerRow row;
     // 载体用稳定业务 rel 作 id，与 packmeta::ensureCarrierRow 对齐
-    row.id = carrierOk ? qToStdString(rel) : qToStdString(fileIdFor(dst));
+    row.id = mergeableOk ? qToStdString(rel) : qToStdString(fileIdFor(dst));
     row.pack_id = pack->id;
     row.file_path = qToStdString(rel);
     row.emoji = "";

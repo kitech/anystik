@@ -43,7 +43,13 @@ QMap<QString, QJsonObject> parse(const std::string& data);
 // 序列化为 JSONL（每行 Compact + '\n'；QMap 有序 → 输出确定性）。
 std::string serialize(const QMap<QString, QJsonObject>& m);
 
-// 原子整写（QSaveFile；自动建父目录）。成功返回 true。
+// 逐条 LWW 合并两段 JSONL：parse(local) + foldInto(cloud) + serialize。
+// 作为注册表默认 MergeFn（本地原始字节 + 云端原始字节 → 合并后字节）。
+std::string merge(const std::string& local, const std::string& cloud);
+
+// 原子整写原始字节（QSaveFile；自动建父目录）。成功返回 true。
+bool writeFileRaw(const QString& absPath, const std::string& data);
+// 便捷：序列化后再整写。
 bool writeFile(const QString& absPath, const QMap<QString, QJsonObject>& m);
 
 } // namespace jsonl_lww
