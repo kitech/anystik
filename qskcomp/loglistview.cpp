@@ -40,8 +40,8 @@ LogListView::LogListView(QQuickItem* parent)
     m_scrollArea = new QskScrollArea(layout);
     m_scrollArea->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
     m_scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_scrollArea->setFlickableOrientations(Qt::Vertical);
+    m_scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    m_scrollArea->setFlickableOrientations(Qt::Horizontal | Qt::Vertical);
     m_scrollArea->setPreferredHeight(340);
 
     // 桌面 Fusion：滚动条“滚动时短暂显现→空闲淡出”（其他皮肤自动忽略）
@@ -196,7 +196,7 @@ void LogListView::addRow(const RowItem& item)
     row->setText(item.text);
     if (item.color.isValid())
         row->setTextColor(item.color);
-    row->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    row->setSizePolicy(QskSizePolicy::Minimum, QskSizePolicy::Preferred);
     m_rows.append(row);
 }
 
@@ -217,9 +217,8 @@ void LogListView::scrollToBottom()
 {
     if (!m_scrollArea)
         return;
-    m_scrollArea->setScrollPos(QPointF(0, 0));
     const QSizeF size = m_scrollArea->scrollableSize();
-    m_scrollArea->scrollTo(QPointF(0, size.height()));
+    m_scrollArea->scrollTo(QPointF(m_scrollArea->scrollPos().x(), size.height()));
 }
 
 void LogListView::updateCount()

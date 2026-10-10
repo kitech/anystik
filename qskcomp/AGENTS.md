@@ -5,8 +5,10 @@
 - `logmodel.{h,cpp}` 与 `loglistview.{h,cpp}` 自包含于 qskcomp（曾驻 anystik/src，`git mv` 迁入）
 - LogModel 用法不变：`instance()` 单例 / 私有 `new LogModel(this)` / `append/clear` / `entryAdded/cleared`
 - LogListView = 过滤条(级别+搜索) + 滚动列表 + 工具行(计数/复制/清空)；取消/关闭由宿主自摆
-- ✅ 两个滚动坑已固化在组件内：`setScrolledItem(m_listBox)`（滚动内容须显式声明）、
-  内容盒 `setSizePolicy(Expanding, Minimum)`（可长不可缩→内容超视口出滚动条/否则填满）
+- ✅ 三个滚动坑已固化在组件内：`setScrolledItem(m_listBox)`（滚动内容须显式声明）、
+  内容盒 `setSizePolicy(Expanding, Minimum)`（可长不可缩→内容超视口出滚动条/否则填满）、
+  行 `QskTextLabel` 水平策略 `Minimum`（可长不可缩→内容盒最小宽=最宽行），配合
+  `setHorizontalScrollBarPolicy(AsNeeded)` + `setFlickableOrientations(Horizontal|Vertical)` → 长日志行横向滚动
 - 宿主仅需 `buildRow(LogModel::Entry)` → `LogListView::RowItem`（level/tag/message/text/color），
   `appendItem` / `clearItems`，`copyClicked(text)`（复制）与 `clearClicked()` 只发信号由宿主处理
 - 计数文案/级别下拉文案经 `setCountLabelFormat("..%1 / %2..")`、`setLevelComboOptions()` 配置
