@@ -70,6 +70,8 @@ test_qzipreader_shim.cpp
 test_qimagereader_shim.cpp
 test_qcoreapplication_shim.cpp
 test_qnam_shim.cpp
+test_jsonl_lww_store.cpp
+test_pack_meta_store.cpp
 "
 
 # ── 被测产品代码：链接 run_tests 所需的 stikcommon/qlcomp/qldox 部分 ──
@@ -90,6 +92,8 @@ dav207pugi.cpp
 qsavefile_shim.cpp
 qjson_shim.cpp
 qstandardpaths_shim.cpp
+jsonl_lww_store.cpp
+pack_meta_store.cpp
 qzipreader_shim.cpp
 qimagereader_shim.cpp
 qimagesmoothscale.cpp

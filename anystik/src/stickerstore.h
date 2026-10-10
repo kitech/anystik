@@ -111,6 +111,11 @@ public:
     QVector<StickerBrief> recent(int limit = 60);
     QVector<StickerBrief> search(const QString& query);
     int countStickers(const QString& packId);
+    // 剔除内部载体（_stikmeta.svg）与冲突文件（*.conflict<digits>）后的列表。
+    QVector<StickerBrief> uiStickers(const QString& packId,
+                                     const char* orderby = "rowid DESC",
+                                     int limit = 0, int offset = 0,
+                                     int deleted = 0, const char* emoji = nullptr);
 
     // ── 写操作 ──
     bool importDirectory(const QString& dir, QString* errorOut = nullptr);
@@ -130,6 +135,9 @@ public:
     bool setStickerDescription(const QString& stickerId,
                                const QString& description);
     void touchSticker(const QString& stickerId);
+    // 同步收尾：各包描述载体回写 DB；合并 *.conflict* 内容（保留冲突文件）。
+    void applyAllPackMetas();
+    void resolveCarrierConflicts();
 
     // 复制图片到剪贴板（Desktop: QClipboard 位图；Android: FileProvider content URI(image/*) + toast）
     bool copyStickerToClipboard(const QString& filePath);

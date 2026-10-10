@@ -2,6 +2,7 @@
 #include "stickerclipboard.h"     // 复制管线真身（§18）：保动画、保原格式
 #include "storage.h"              // Storage::instance().stickerDb()
 #include "sticker_db.h"           // StickerDbSyncInterface
+#include "pack_meta_store.h"      // 描述载体（_stikmeta.svg）读写
 #include "qimagereader_shim.h"    // Qt3 的完整 QImageReader + imageCount 垫片
 #include "qmimedatabase_shim.h"   // Qt3/Qt4 的 QMimeDatabase 垫片（Qt5+ 走原生）
 #include "qdatetime_shim.h"       // qDateTimeEpochSecs / qFormatDateTime
@@ -238,7 +239,18 @@ bool StickerOps::setDescription(const QString& id, const QString& desc)
     if (!db) {
         return false;
     }
-    return db->update_sticker_description(TextArg(id), TextArg(desc));
+    const bool ok = db->update_sticker_description(TextArg(id), TextArg(desc));
+    if (ok) {
+        // 同步落一份云端描述载体（同包同行）；失败不影响本地库写入
+        const std::unique_ptr<StickerRow> row = db->get_sticker(TextArg(id));
+        if (row) {
+            packmeta::setDescQ(*db, Storage::instance().dataDir(),
+                               row->pack_id,
+                               packmeta::basenameOf(row->file_path),
+                               desc, packmeta::nowMsec());
+        }
+    }
+    return ok;
 }
 
 bool StickerOps::touch(const QString& id)
@@ -266,5 +278,13 @@ bool StickerOps::remove(const QString& id)
     }
     // 软删（sticker_db.cpp:174 是 UPDATE stickers SET deleted=1），不删文件 ——
     // 与 anysk stickerstore.cpp 的 deleteSticker 逐字一致。
-    return db->delete_sticker(TextArg(id));
+    // 删前取行：定位该包描述载体并移除对应行。
+    const std::unique_ptr<StickerRow> row = db->get_sticker(TextArg(id));
+    const bool ok = db->delete_sticker(TextArg(id));
+    if (ok && row) {
+        packmeta::removeDesc(*db, Storage::instance().dataDir(),
+                             row->pack_id,
+                             packmeta::basenameOf(row->file_path));
+    }
+    return ok;
 }

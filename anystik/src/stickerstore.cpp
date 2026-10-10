@@ -18,6 +18,9 @@
 #include "eifreader.h"
 #include "storage.h"
 #include "sticker_db.h"
+// 贴纸描述跨端同步：JSONL 载体 + 包级描述元数据（stikcommon，随本 target 编译）
+#include "jsonl_lww_store.h"
+#include "pack_meta_store.h"
 // androidutils.h 是 Android 专用（头内用大写 <QString>，Qt3 只认小写
 // <qstring.h>，故 Qt3 桌面包含它会直接编译失败）。本文件用到它的 4 处符号
 // （androidPicturesStickerBaseDir / showAndroidToast ×3）全在 Q_OS_ANDROID
@@ -2744,8 +2747,19 @@ bool StickerStore::deleteSticker(const QString& stickerId)
     if (!ensureInit()) {
         return false;
     }
+    // 删前取行：据此定位该包描述载体并移除对应行
+    const std::unique_ptr<StickerRow> row =
+        stickerDb().get_sticker(qUtf8Printable(stickerId));
     const bool ok = stickerDb().delete_sticker(qUtf8Printable(stickerId));
-    if (ok) emit dataChanged();
+    if (ok) {
+        emit dataChanged();
+        if (row) {
+            packmeta::removeDesc(stickerDb(),
+                                 qToStdString(stickerBaseDir()),
+                                 row->pack_id,
+                                 packmeta::basenameOf(row->file_path));
+        }
+    }
     return ok;
 }
 
@@ -2767,8 +2781,59 @@ bool StickerStore::setStickerDescription(const QString& stickerId,
     }
     const bool ok = stickerDb().update_sticker_description(
         qUtf8Printable(stickerId), qUtf8Printable(description));
-    if (ok) emit dataChanged();
+    if (ok) {
+        emit dataChanged();
+        // 同步落一份云端描述载体（同包同行）；失败不影响本地库写入
+        const std::unique_ptr<StickerRow> row =
+            stickerDb().get_sticker(qUtf8Printable(stickerId));
+        if (row) {
+            packmeta::setDescQ(stickerDb(),
+                               qToStdString(stickerBaseDir()),
+                               row->pack_id,
+                               packmeta::basenameOf(row->file_path),
+                               description,
+                               packmeta::nowMsec());
+        }
+    }
     return ok;
+}
+
+void StickerStore::applyAllPackMetas()
+{
+    if (!ensureInit()) {
+        return;
+    }
+    if (packmeta::applyAll(stickerDb(), qToStdString(stickerBaseDir())) > 0) {
+        emit dataChanged();
+    }
+}
+
+void StickerStore::resolveCarrierConflicts()
+{
+    if (!ensureInit()) {
+        return;
+    }
+    if (packmeta::resolveAllConflicts(stickerDb(),
+                                      qToStdString(stickerBaseDir())) > 0) {
+        emit dataChanged();
+    }
+}
+
+QVector<StickerBrief> StickerStore::uiStickers(const QString& packId,
+                                               const char* orderby, int limit,
+                                               int offset, int deleted,
+                                               const char* emoji)
+{
+    const QVector<StickerBrief> in =
+        stickers(packId, orderby, limit, offset, deleted, emoji);
+    QVector<StickerBrief> out;
+    for (int i = 0; i < in.size(); ++i) {
+        if (packmeta::isInternalRel(qToStdString(in[i].filePath))) {
+            continue;
+        }
+        out.push_back(in[i]);
+    }
+    return out;
 }
 
 void StickerStore::touchSticker(const QString& stickerId)

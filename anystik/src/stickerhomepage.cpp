@@ -479,6 +479,9 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
                     [this](int exitCode, const QString& summary) {
                         m_syncBtn->setText(tr("同步"));
                         if (exitCode == davbisync::FinishOk) {
+                            // 同步收尾：描述载体回写 DB + 合并冲突载体（保留冲突文件）
+                            StickerStore::instance()->applyAllPackMetas();
+                            StickerStore::instance()->resolveCarrierConflicts();
                             showToast(tr("同步完成"));
                         } else if (exitCode == davbisync::FinishCancelled) {
                             showToast(tr("已取消"));
@@ -750,7 +753,7 @@ void StickerHomePage::loadAllStickers()
 {
     QVector<StickerBrief> all;
     for (const auto& pack : m_packs) {
-        all += StickerStore::instance()->stickers(pack.id);
+        all += StickerStore::instance()->uiStickers(pack.id);
     }
     m_grid->setStickers(all);
     updateStickerCount();
@@ -764,7 +767,7 @@ void StickerHomePage::loadRecentStickers()
 
 void StickerHomePage::loadPackStickers(const QString& packId)
 {
-    m_grid->setStickers(StickerStore::instance()->stickers(packId));
+    m_grid->setStickers(StickerStore::instance()->uiStickers(packId));
     updateStickerCount();
 }
 

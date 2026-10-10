@@ -84,6 +84,14 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qcoreapplication_shim.h \
 STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/davbisync_baseline.cpp
 STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/davbisync_baseline.h
 
+# ══ 批次 2c：贴纸描述跨端同步（JSONL 载体 + 包级描述元数据）══
+# 纯 QtCore（QJson/QFile/QSaveFile/QMap）+ StickerDbSyncInterface 窄接口，
+# 无新外部依赖；QJson/QSaveFile 复用批次 2a 的跨版本垫片。
+STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/jsonl_lww_store.cpp \
+                       $$STIKCOMMON_DIR/pack_meta_store.cpp
+STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/jsonl_lww_store.h \
+                       $$STIKCOMMON_DIR/pack_meta_store.h
+
 # ══ 批次 2b：phonedb（QNAM 消费端：QNetworkRequest/Manager/Reply +
 #     qconnect_slots 新式 connect + cookie jar）══
 # Qt4 原生 QNAM 有硬限制：QNetworkReply::finished 是 protected Q_SIGNAL
@@ -177,8 +185,6 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qjson_shim.h \
                        $$STIKCOMMON_DIR/qdebug_shim.h \
                        $$STIKCOMMON_DIR/qbytearray_shim.h \
                        $$STIKCOMMON_DIR/qwebdavtransport.h \
-                       $$STIKCOMMON_DIR/qwebdavlite.h \
-                       $$STIKCOMMON_DIR/qwebdavdirparserlite.h \
                        $$STIKCOMMON_DIR/qwebdavitemlite.h \
                        $$STIKCOMMON_DIR/qsslprobe.h \
                        $$STIKCOMMON_DIR/qcabundle.h \
@@ -194,8 +200,25 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qjson_shim.h \
 # e2e 实测（改造前）：9 个请求服务端全部收到 GET，PUT 的 9 字节 body 变 0。
 # qldox 不可改（项目约束），故 qlstik 侧自带 curl_multi 泵并由
 # QNetworkAccessManager::issue() 分流；GET/POST 仍走 EventPoller（那边本来就对）。
-STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qwebdavlite.cpp \
-                      $$STIKCOMMON_DIR/qwebdavtransport.cpp
+STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qwebdavtransport.cpp
+
+# ⚠ Qt4 跳过（既定约定，同 phonedb/imageaiutil/sitelistclient，见 §6.3b）：
+#   qwebdavlite.cpp 用 **PMF/lambda 版 connect**（`connect(x, &Cls::sig, this, [..])`）
+#   且 connect 目标是 errorOccurred（Qt≥5.15 才有）；qwebdavdirparserlite.cpp 同样用
+#   `QObject::connect(m_reply, &QNetworkReply::finished, [..])`。这套语法 Qt4 根本
+#   没有（Qt4 只有 SIGNAL()/SLOT() 字符串版），且 qwebdavlite.h 还依赖 <string>/<vector>/
+#   <functional> 的显式包含。davlocalsource/davbisync 依赖前者，一并排除。
+#   Qt3 走 qnam_shim + qconnect_slots（垫片把 connect 做成自由函数重载）；
+#   Qt5+/Qt6 走原生新式 connect。qwebdavtransport.cpp 纯 curl + Qt3 垫片、无新式
+#   connect，故不排除（qlstik/src/main.cpp 的 QWebdavTransport::start/isReady/stop
+#   依赖它，Qt4 也保留）。
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/qwebdavlite.cpp
+    STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qwebdavlite.h
+} else:!lessThan(QT_VERSION, 5.0.0) {
+    STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/qwebdavlite.cpp
+    STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qwebdavlite.h
+}
 
 # ⚠ 2026-09-30 补记：qwebdavdirparserlite.cpp **原先根本没挂载**——上面
 # STIKCOMMON_HEADERS 只登记了 .h，.cpp 漏了，于是 qlstik 应用构建里从没有这个
@@ -209,14 +232,28 @@ STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qwebdavlite.cpp \
 # （实测 4 处全挂，见 qwebdavdirparserlite.h 顶部「为何现在有 QObject 基类」）。
 # moc 由 qlstik.pro 的 CONFIG += moc 生成，头已在上面 HEADERS 段登记。
 # 无条件挂载的前提是本 .cpp 已跨版本：其头已按 QT3_BUILD 条件包含小写/驼峰头。
-STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qwebdavdirparserlite.cpp
+# 但 Qt4 跳过：本 .cpp 用 `QObject::connect(m_reply, &QNetworkReply::finished, [..])`
+# 新式 connect，Qt4 无此语法（同 qwebdavlite，见上）。
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/qwebdavdirparserlite.cpp
+    STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qwebdavdirparserlite.h
+} else:!lessThan(QT_VERSION, 5.0.0) {
+    STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/qwebdavdirparserlite.cpp
+    STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qwebdavdirparserlite.h
+}
 
 # ── 批次 3c-2：davbisync 的本地贴纸库窄切面 ──
 # davbisync.cpp 原本 include stickerstore.h 并有约 20 处 StickerStore::instance()
 # 调用，而 stickerstore.cpp 有 4196 行且自身尚未适配 Qt3（属批次 5）。故抽出
 # 只含那 9 个方法的接口，见 davlocalsource.h 顶部的依赖面实测。
-STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/davlocalsource.cpp
-STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/davlocalsource.h
+# Qt4 跳过：davlocalsource 供 davbisync 使用，而后者依赖 qwebdavlite（Qt5 语法）。
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/davlocalsource.cpp
+    STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/davlocalsource.h
+} else:!lessThan(QT_VERSION, 5.0.0) {
+    STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/davlocalsource.cpp
+    STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/davlocalsource.h
+}
 
 # ── 批次 3c-2：davbisync 本体（SyncEngine）─────────────────────────────
 # ⚠ 这两个文件是 **stikcommon 自己的移植副本**，不是 anystik 的原件。
@@ -227,8 +264,14 @@ STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/davlocalsource.h
 # davbisync.cpp 顶部的 QT3_BUILD 分支注释里。
 # 依赖：davlocalsource（本地库窄切面）+ qwebdavlite + qwebdavdirparserlite
 #      + qwebdavitemlite（均已挂载）+ davbisync_baseline（批次 2a，引用原件）
-STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/davbisync.cpp
-STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/davbisync.h
+# Qt4 跳过：SyncEngine 依赖 qwebdavlite + 新式 connect（Qt4 无）。
+isEmpty(QT_VERSION) {
+    STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/davbisync.cpp
+    STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/davbisync.h
+} else:!lessThan(QT_VERSION, 5.0.0) {
+    STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/davbisync.cpp
+    STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/davbisync.h
+}
 
 # ── 批次 3c-1 第五阶段：207 解析层（pugixml 后端，替代 QDom）────────────
 # 注（2026-09-30）：下方 qwebdavdirparserlite.cpp 的挂载补记见「批次 3c-1 QWebdavLite」

@@ -6,6 +6,7 @@
 #include "stickerpreviewoverlay.h"  // 「预览」的放大查看层
 #include "storage.h"              // Storage::instance().init() + stickerDb()
 #include "sticker_db.h"           // StickerRow / StickerPackRow / kPacksAll
+#include "pack_meta_store.h"      // isInternalRel：隐藏 _stikmeta.svg 与 *.conflict*
 #include "qstandardpaths_shim.h"
 #include "qimagereader_shim.h"
 #include "qimage_shim.h"           // qImageSmoothScale（缩略图缩放）
@@ -463,6 +464,12 @@ static QString stickerResolvePath(const QString& stored)
         return stored;                    // 绝对路径透传
     }
     return stickerBaseDir() + "/" + stored;
+}
+
+// 隐藏内部载体（_stikmeta.svg）与冲突文件（*.conflict<digits>）。
+static bool isInternalRow(const StickerRow& r)
+{
+    return packmeta::isInternalRel(r.file_path);
 }
 
 static StickerItem makeStickerItem(const StickerRow& row)
@@ -1120,6 +1127,7 @@ void StickerListPage::loadAllStickers()
         const std::vector<StickerRow> rows =
             db->list_stickers(TextArg(qFromUtf8(packs[i].id)));
         for (size_t j = 0; j < rows.size(); j++) {
+            if (isInternalRow(rows[j])) continue;
             all.push_back(makeStickerItem(rows[j]));
         }
     }
@@ -1144,6 +1152,7 @@ void StickerListPage::loadRecentStickers()
     const std::vector<StickerRow> rows = db->list_recent_stickers(60);
     std::vector<StickerItem> items;
     for (size_t i = 0; i < rows.size(); i++) {
+        if (isInternalRow(rows[i])) continue;
         items.push_back(makeStickerItem(rows[i]));
     }
     updateCountLabelFor(items);
@@ -1169,6 +1178,7 @@ void StickerListPage::loadPackStickers(const QString& packId)
         db->list_stickers(TextArg(packId));
     std::vector<StickerItem> items;
     for (size_t i = 0; i < rows.size(); i++) {
+        if (isInternalRow(rows[i])) continue;
         items.push_back(makeStickerItem(rows[i]));
     }
     updateCountLabelFor(items);
@@ -1318,6 +1328,7 @@ void StickerListPage::applySearch(const QString& keyword)
         // ⚠ DB 侧自带 LIMIT 50（sticker_db.cpp）
         const std::vector<StickerRow> rows = db->search_stickers(q);
         for (size_t i = 0; i < rows.size(); i++) {
+            if (isInternalRow(rows[i])) continue;
             items.push_back(makeStickerItem(rows[i]));
         }
     }
