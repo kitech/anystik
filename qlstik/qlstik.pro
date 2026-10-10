@@ -213,9 +213,12 @@ LIBS += -lz
 LIBS += -lssl -lcrypto
 
 # hjson（qlcomp 的 hjson_wrap.cpp / jsonview 需要；与 qltox 同一份 vcpkg 产物）
+# webp：macOS 无系统 libwebp 及其头文件，故与 hjson 同树 x64-osx-dynamic 取 -I/-L；
+#       stikcommon.pri 的 -lwebpmux -lwebp 由这里的路径解析。Linux 走系统 libwebp/头
+#       文件，webp 的 vcpkg 路径只在 macx 分支需要。
 macx {
     INCLUDEPATH += /opt/vcpkg/installed/x64-osx-dynamic/include
-    LIBS += -L/opt/vcpkg/installed/x64-osx-dynamic/lib -Wl,-rpath,/opt/vcpkg/installed/x64-osx-dynamic/lib -lhjson
+    LIBS += -L/opt/vcpkg/installed/x64-osx-dynamic/lib -Wl,-rpath,/opt/vcpkg/installed/x64-osx-dynamic/lib -lhjson -lwebpmux -lwebp
 } else {
     INCLUDEPATH += /opt/vcpkg/installed/x64-linux-dynamic/include
     LIBS += -L/opt/vcpkg/installed/x64-linux-dynamic/lib -Wl,-rpath,/opt/vcpkg/installed/x64-linux-dynamic/lib -lhjson
