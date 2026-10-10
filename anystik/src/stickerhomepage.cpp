@@ -479,9 +479,10 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
                     [this](int exitCode, const QString& summary) {
                         m_syncBtn->setText(tr("同步"));
                         if (exitCode == davbisync::FinishOk) {
-                            // 同步收尾：描述载体回写 DB + 合并冲突载体（保留冲突文件）
-                            StickerStore::instance()->applyAllPackMetas();
+                            // 同步收尾：先合并冲突载体（保留冲突文件）再回写 DB，
+                            // 否则冲突里的描述要等下一轮同步才生效。
                             StickerStore::instance()->resolveCarrierConflicts();
+                            StickerStore::instance()->applyAllPackMetas();
                             showToast(tr("同步完成"));
                         } else if (exitCode == davbisync::FinishCancelled) {
                             showToast(tr("已取消"));

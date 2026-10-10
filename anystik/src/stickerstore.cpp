@@ -689,6 +689,9 @@ QVector<StickerBrief> StickerStore::recent(int limit)
         b.size = row.size;
         b.lastUsed = row.last_used;
         b.description = QString::fromUtf8(row.description.c_str());
+        if (packmeta::isInternalRel(qToStdString(b.filePath))) {
+            continue;                       // 隐藏描述载体/冲突载体
+        }
         result.append(b);
     }
     return result;
@@ -712,6 +715,9 @@ QVector<StickerBrief> StickerStore::search(const QString& query)
         b.size = row.size;
         b.lastUsed = row.last_used;
         b.description = QString::fromUtf8(row.description.c_str());
+        if (packmeta::isInternalRel(qToStdString(b.filePath))) {
+            continue;                       // 隐藏描述载体/冲突载体
+        }
         result.append(b);
     }
     return result;
@@ -1932,9 +1938,12 @@ bool StickerStore::importDirectory(const QString& dir, QString* errorOut)
         // 其它格式解析不出尺寸（损坏/截断/不支持）→ 跳过，不复制不入库。
         const bool svgOk = qToLower(qFileInfoSuffix(QFileInfo(file)))
                            == QLatin1String("svg");
+        // 描述载体/冲突载体为文本非图，跳过解码预检后按普通行入库。
+        const bool carrierOk = packmeta::isCarrierBase(
+            qToStdString(QFileInfo(file).fileName()));
         QImageReader probe(file);
         probe.setAutoTransform(true);
-        if (!svgOk && !probe.size().isValid()) {
+        if (!svgOk && !carrierOk && !probe.size().isValid()) {
             continue;
         }
         const QSize imgSize = probe.size();   // 预检通过的尺寸，直接入库
@@ -2609,12 +2618,15 @@ bool StickerStore::importStickerFile(const QString& packId,
         }
     }
 
-    // 解码预检（保持 importDirectory 的 svg 例外：QVariant 依赖平台 qsvg 插件）
-    const bool svgOk = qToLower(qFileInfoSuffix(QFileInfo(srcAbs)))
+    // 解码预检（保持 importDirectory 的 svg 例外：QVariant 依赖平台 qsvg 插件）。
+    // 判据用逻辑文件名（不再依赖临时文件名后缀）；描述载体/冲突载体为文本非图，
+    // 跳过图片解码预检，按普通行入库供同步收尾的 packmeta 消费。
+    const bool svgOk = qToLower(qFileInfoSuffix(QFileInfo(fileName)))
                        == QLatin1String("svg");
+    const bool carrierOk = packmeta::isCarrierBase(qToStdString(fileName));
     QImageReader probe(srcAbs);
     probe.setAutoTransform(true);
-    if (!svgOk && !probe.size().isValid()) {
+    if (!svgOk && !carrierOk && !probe.size().isValid()) {
         if (errorOut) *errorOut = QStringLiteral("图片解码失败");
         return false;
     }
@@ -2642,7 +2654,8 @@ bool StickerStore::importStickerFile(const QString& packId,
 
     QFileInfo fi(dst);
     StickerRow row;
-    row.id = qToStdString(fileIdFor(dst));
+    // 载体用稳定业务 rel 作 id，与 packmeta::ensureCarrierRow 对齐
+    row.id = carrierOk ? qToStdString(rel) : qToStdString(fileIdFor(dst));
     row.pack_id = pack->id;
     row.file_path = qToStdString(rel);
     row.emoji = "";
