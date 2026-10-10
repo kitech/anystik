@@ -32,8 +32,10 @@
  *     （blk0 字节序交换 + blk 消息扩展写回）——默认会覆盖传入的内存。
  *
  * 适配：删除 OpenSSH 脚手架 includes.h / WITH_OPENSSL 门控 / 4 处 DEF_WEAK；
- *   加 <endian.h>（Linux glibc 定义 BYTE_ORDER/LITTLE_ENDIAN）；
- *   保留 explicit_bzero（glibc >= 2.25 提供，本机 2.44）。
+ *   字节序改用编译器内建 __BYTE_ORDER__/__ORDER_LITTLE_ENDIAN__（gcc/clang
+ *   在所有平台均预定义，Linux/macOS/Android/BSD 通用，不再依赖 glibc 专有的
+ *   <endian.h>，后者在 macOS SDK 不存在）；
+ *   保留 explicit_bzero（glibc >= 2.25 / macOS 10.12+/bionic 均提供）。
  * 改名：sha1.c -> sha1_ossh.c，规避与现仓 stikcommon/sha1.c、qlcomp/sha1.c
  *   的 qmake 目标 ./sha1.o 同名冲突（见 qlstik/build-qt3/Makefile:1019、
  *   build-qt6/Makefile:20686）。
@@ -42,7 +44,6 @@
 
 #include <sys/types.h>
 #include <string.h>
-#include <endian.h>
 
 #include "sha1_ossh.h"
 
@@ -52,7 +53,7 @@
  * blk0() and blk() perform the initial expand.
  * I got the idea of expanding during the round function from SSLeay
  */
-#if BYTE_ORDER == LITTLE_ENDIAN
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
 # define blk0(i) (block->l[i] = (rol(block->l[i],24)&0xFF00FF00) \
     |(rol(block->l[i],8)&0x00FF00FF))
 #else

@@ -92,9 +92,6 @@ A million repetitions of "a"
 #include "config.h"
 #endif
 
-#ifndef __FreeBSD__
-#include <endian.h>
-#endif
 #include <stdio.h>
 #include <string.h>
 
@@ -107,7 +104,7 @@ void SHA1_Transform(uint32_t state[5], const uint8_t buffer[64]);
 /* blk0() and blk() perform the initial expand. */
 /* I got the idea of expanding during the round function from SSLeay */
 /* FIXME: can we do this in an endian-proof way? */
-#if BYTE_ORDER == BIG_ENDIAN
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 #define blk0(i) block->l[i]
 #else
 #define blk0(i) (block->l[i] = (rol(block->l[i],24)&0xFF00FF00) \
