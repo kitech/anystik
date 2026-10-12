@@ -2,6 +2,7 @@
 set(QLCOMP_DIR ${CMAKE_CURRENT_LIST_DIR}/../qlcomp)
 
 set(QLCOMP_SOURCES
+    ${QLCOMP_DIR}/tagutil.cpp
     ${QLCOMP_DIR}/compatcore34.cpp
     ${QLCOMP_DIR}/limelog.cpp
     ${QLCOMP_DIR}/assertf.cpp
@@ -9,6 +10,7 @@ set(QLCOMP_SOURCES
     ${QLCOMP_DIR}/qthooks.cpp
     ${QLCOMP_DIR}/tagutil.cpp
     ${QLCOMP_DIR}/md5.c
+    ${QLCOMP_DIR}/cJSON.c
     ${QLCOMP_DIR}/qcrc64.cpp
 )
 

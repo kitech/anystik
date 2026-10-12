@@ -2,7 +2,7 @@
 set(QLAPP_DIR ${CMAKE_CURRENT_LIST_DIR}/../qldox)
 
 set(QLAPP_SOURCES
-    ${QLAPP_DIR}/cJSON.c
+    #${QLAPP_DIR}/cJSON.c
     ${QLAPP_DIR}/message_db.cpp
     ${QLAPP_DIR}/storage.cpp
     ${QLAPP_DIR}/channel_db.cpp
