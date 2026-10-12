@@ -4,6 +4,16 @@
 
 EventPoller* EventPoller::s_instance = nullptr;
 
+std::string webUrlEncode(const std::string& str) {
+    CURL* curl = curl_easy_init();
+    if (!curl) { return str; }
+    char* encoded = curl_easy_escape(curl, str.c_str(), (int)str.length());
+    std::string result = encoded ? encoded : str;
+    if (encoded) { curl_free(encoded); }
+    curl_easy_cleanup(curl);
+    return result;
+}
+
 static size_t writeCb(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t total = size * nmemb;
     static_cast<std::string*>(userp)->append(static_cast<char*>(contents), total);

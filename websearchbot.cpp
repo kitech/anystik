@@ -3,7 +3,7 @@
 #include "netproxy.h"
 #include "restapi.h"
 
-#include <qapplication.h>
+// #include <qapplication.h>
 #include <qobject.h>
 #include <qmutex.h>
 #include <qglobal.h>
@@ -581,7 +581,8 @@ void postResult(Session* s, bool ok, const std::string& err = std::string()) {
     QObject* target = s->target;
     removeSession(s);
     if (target) {
-        QApplication::postEvent(target, ev);
+        // QApplication::postEvent(target, ev);
+        qAppPostEvent(target, ev);
     } else {
         delete ev;
     }
@@ -606,7 +607,7 @@ std::map<std::string, std::string> browserHeaders(const std::string& cookies) {
 
 std::string buildSearchUrl(const WebsearchBackend& b, const WebsearchLangParam& lp,
                            const std::string& text) {
-    const std::string enc = ToxAPI::urlEncode(text);
+    const std::string enc = webUrlEncode(text); // DoxAPI::urlEncode(text);
     switch (b.id) {
     case kWebsearchGoogle: {
         return "https://www.google.com/search?gbv=1&q=" + enc

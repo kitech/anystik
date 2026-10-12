@@ -4,7 +4,7 @@
 #include "netproxy.h"
 #include "cJSON.h"
 
-#include <qapplication.h>
+//#include <qapplication.h>
 #include <qobject.h>
 #include <qmutex.h>
 #include <qglobal.h>
@@ -298,7 +298,10 @@ void postResult(Session* s, bool ok, const std::string& text,
     ev->errorMsg       = err;
     QObject* target    = s->target;
     removeSession(s);
-    if (target) { QApplication::postEvent(target, ev); }
+    if (target) { 
+		// QApplication::postEvent(target, ev);
+		qAppPostEvent(target, ev);
+	 }
     else { delete ev; }
 }
 

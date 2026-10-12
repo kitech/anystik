@@ -8,7 +8,7 @@
 #include "obsd_sha2.h"
 #include "dspow_solve.h"
 
-#include <qapplication.h>
+//#include <qapplication.h>
 #include <qobject.h>
 #include <qmutex.h>
 #include <qglobal.h>
@@ -304,7 +304,8 @@ void postResult(Session* s, bool ok, const std::string& reply,
     QObject* target  = s->target;
     removeSession(s);
     if (target) {
-        QApplication::postEvent(target, ev);
+        // QCoreApplication::postEvent(target, ev);
+        qAppPostEvent(target, ev);
     } else {
         delete ev;
     }

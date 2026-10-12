@@ -132,6 +132,8 @@ struct ContactData {
     ContactData() : id(-1), isConnected(false) {}
 };
 
+std::string webUrlEncode(const std::string& str);
+
 typedef std::vector<Event> EventList;
 
 // ── CustomEvent 基类 ──
