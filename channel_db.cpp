@@ -662,7 +662,7 @@ bool init_channel_db(SqliteDb& db) {
     bool ok = db.exec(
         "CREATE TABLE IF NOT EXISTS channels ("
         "  chanid             TEXT PRIMARY KEY,"
-        "  proto_type         TEXT DEFAULT 'tox',"
+        "  proto_type         TEXT DEFAULT 'dox',"
         "  last_message_rowid INTEGER NOT NULL DEFAULT 0,"
         "  last_read_rowid    INTEGER NOT NULL DEFAULT 0,"
         "  unread_count       INTEGER DEFAULT 0,"
