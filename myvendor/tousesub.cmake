@@ -4,6 +4,7 @@
 #   MYVENDOR_SOURCES        需要编入目标的 C 源文件
 #   MYVENDOR_INCLUDE_DIRS   配套头文件搜索目录（murmur2 内嵌自包含，由 COMPILE_OPTIONS 传 -I）
 set(myvendor_dir ${CMAKE_CURRENT_SOURCE_DIR}/../myvendor)
+set(vendor_dir ${CMAKE_CURRENT_SOURCE_DIR}/../vendor)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DBLOOM_VERSION_MAJOR=2 -DBLOOM_VERSION_MINOR=0")
 
 set(MYVENDOR_SOURCES
@@ -12,7 +13,7 @@ set(MYVENDOR_SOURCES
     ${myvendor_dir}/bloom/murmur2/MurmurHash2.c
     ${myvendor_dir}/uuid/uuid4.c
     ${myvendor_dir}/byteut/bytes2hum.c
-    ${myvendor_dir}/phoneloc/phoneloc.c
+    ${vendor_dir}/phoneloc/phoneloc.c
 )
 
 set(MYVENDOR_INCLUDE_DIRS
@@ -20,5 +21,5 @@ set(MYVENDOR_INCLUDE_DIRS
     ${myvendor_dir}/bloom/murmur2/
     ${myvendor_dir}/bloom/
     ${myvendor_dir}/uuid/
-    ${myvendor_dir}/phoneloc/
+    ${vendor_dir}/phoneloc/
 )
