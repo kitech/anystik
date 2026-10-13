@@ -1,22 +1,22 @@
 diff --git a/cmake/QskFindMacros.cmake b/cmake/QskFindMacros.cmake
-index 4b5e2149..7e8d71c7 100644
+index 88adb67..38010f8 100644
 --- a/cmake/QskFindMacros.cmake
 +++ b/cmake/QskFindMacros.cmake
-@@ -10,6 +10,9 @@ macro(qsk_setup_Qt)
-     # relying on cmake heuristics to select a specific Qt version is no good idea.
+@@ -9,6 +9,9 @@ macro(qsk_setup_Qt)
      # using -DCMAKE_PREFIX_PATH="..." is highly recommended
      find_package(QT "5.15" NAMES Qt6 Qt5 REQUIRED COMPONENTS Quick)
-+
+ 
 +    # find_package(QT NAMES ...) may not create imported targets in cross-compilation.
 +    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Quick)
- 
++
      if(QT_VERSION_MAJOR VERSION_GREATER_EQUAL 6)
- 
+         # we need the qsb tool for Qt6
+         find_package(Qt6 REQUIRED COMPONENTS ShaderTools)
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index d8a03ed4..a7fd0fa6 100644
+index a8ed5d7..aa2f9e5 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -528,11 +528,18 @@ target_include_directories(${target}
+@@ -510,11 +510,18 @@ target_include_directories(${target}
      INTERFACE
          $<INSTALL_INTERFACE:${QSK_INSTALL_HEADERS}>)
  

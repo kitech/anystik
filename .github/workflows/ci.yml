@@ -52,13 +52,13 @@ jobs:
         id: cache-qskinny
         with:
           path: /opt/qt/qskinny
-          key: qskinny-linux-${{ hashFiles('anystik/plan.md') }}
+          key: qskinny-linux-${{ hashFiles('anystik/plan.md', '.github/workflows/ci.yml') }}
       - name: Build and install QSkinny
         if: steps.cache-qskinny.outputs.cache-hit != 'true'
         run: |
           git clone https://github.com/uwerat/qskinny.git /tmp/qskinny
           cd /tmp/qskinny
-          git checkout a46557b
+          git checkout a91dcd5a5622fec37badb4a30181ee88c97be5e2
           cmake -B build \
             -DCMAKE_PREFIX_PATH="$QTDIR" \
             -DQt6_DIR="$QTDIR/lib/cmake/Qt6" \
@@ -178,7 +178,7 @@ jobs:
         run: |
           git clone https://github.com/uwerat/qskinny.git /tmp/qskinny-arm64
           cd /tmp/qskinny-arm64
-          git checkout a46557b
+          git checkout a91dcd5a5622fec37badb4a30181ee88c97be5e2
           git apply "$GITHUB_WORKSPACE/anystik/patches/qskinny-qt6.patch"
           "$QT_ANDROID/bin/qt-cmake" -S . -B build \
             -DCMAKE_INSTALL_PREFIX=/opt/qt/qskinny-arm64 \
@@ -242,13 +242,13 @@ jobs:
         id: cache-qskinny
         with:
           path: ~/qt/qskinny
-          key: qskinny-macos-${{ hashFiles('anystik/plan.md') }}
+          key: qskinny-macos-${{ hashFiles('anystik/plan.md', '.github/workflows/ci.yml') }}
       - name: Build and install QSkinny
         if: steps.cache-qskinny.outputs.cache-hit != 'true'
         run: |
           git clone https://github.com/uwerat/qskinny.git /tmp/qskinny
           cd /tmp/qskinny
-          git checkout a46557b
+          git checkout a91dcd5a5622fec37badb4a30181ee88c97be5e2
           cmake -B build \
             -DCMAKE_PREFIX_PATH="$QTDIR" \
             -DCMAKE_INSTALL_PREFIX="$HOME/qt/qskinny" \
