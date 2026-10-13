@@ -290,7 +290,7 @@ jobs:
           path: bin/
           retention-days: 30
 
-  build-qlstik-qt3:
+  build-qlstik-qt3-linux:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -334,11 +334,11 @@ jobs:
       - name: Upload qlstik binary as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: qlstik-qt3-frontend
+          name: qlstik-qt3-linux-frontend
           path: bin/
           retention-days: 30
 
-  build-qlstik-qt6:
+  build-qlstik-qt6-linux:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -394,12 +394,55 @@ jobs:
       - name: Upload qlstik binary as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: qlstik-qt6-frontend
+          name: qlstik-qt6-linux-frontend
+          path: bin/
+          retention-days: 30
+
+  build-qlstik-qt5-osx:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Install Qt5
+        run: |
+          brew install qt@5 freetype pkg-config openssl@3
+          echo "/usr/local/opt/qt@5/bin" >> $GITHUB_PATH
+          echo "LIBRARY_PATH=$(brew --prefix openssl@3)/lib" >> $GITHUB_ENV
+      - name: Verify Qt5 installation
+        run: |
+          qmake -v
+          which qmake
+      - name: Install vcpkg and hjson-cpp + libwebp
+        run: |
+          sudo mkdir -p /opt/vcpkg
+          sudo chown "$(whoami)" /opt/vcpkg
+          git clone --depth 1 https://github.com/Microsoft/vcpkg.git /opt/vcpkg
+          /opt/vcpkg/bootstrap-vcpkg.sh
+          /opt/vcpkg/vcpkg install hjson-cpp libwebp --triplet x64-osx-dynamic
+      - name: Generate sources from templates
+        run: |
+          cp anystik/src/version_config.h.tmpl anystik/src/version_config.h
+          cp stikcommon/davobfus.cpp.tmpl stikcommon/davobfus.cpp
+      - name: Build qlstik with Qt5
+        run: |
+          cd qlstik
+          qmake qlstik.pro CONFIG-=app_bundle
+          make -j$(sysctl -n hw.logicalcpu)
+      - name: Prepare frontend artifact
+        run: |
+          mkdir -p bin
+          cp qlstik/qlstik bin/qlstik
+          chmod +x bin/qlstik
+      - name: Upload qlstik binary as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qlstik-qt5-macos-frontend
           path: bin/
           retention-days: 30
 
   package-release:
-    needs: [build-anystik-linux, build-anystik-android, build-anystik-osx, build-qlstik-qt3, build-qlstik-qt6]
+    needs: [build-anystik-linux, build-anystik-android, build-anystik-osx, build-qlstik-qt3-linux, build-qlstik-qt6-linux, build-qlstik-qt5-osx]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -423,23 +466,32 @@ jobs:
       - name: Download qlstik Qt3 binary
         uses: actions/download-artifact@v4
         with:
-          name: qlstik-qt3-frontend
+          name: qlstik-qt3-linux-frontend
           path: release/qlstik-qt3/
       - name: Download qlstik Qt6 binary
         uses: actions/download-artifact@v4
         with:
-          name: qlstik-qt6-frontend
+          name: qlstik-qt6-linux-frontend
           path: release/qlstik-qt6/
+      - name: Download qlstik Qt5 macOS binary
+        uses: actions/download-artifact@v4
+        with:
+          name: qlstik-qt5-macos-frontend
+          path: release/qlstik-qt5/
       - name: Organize files for packaging
         run: |
           mkdir -p release/bin
-          mv release/linux/anystik release/linux/libgoso.so release/bin/
-          mv release/macos/anystik release/macos/libgoso.dylib release/bin/
+          mv release/linux/anystik release/bin/anystik-linux
+          mv release/linux/libgoso.so release/bin/
+          mv release/macos/anystik release/bin/anystik-macos
+          mv release/macos/libgoso.dylib release/bin/
           find release/android -name '*.apk' -exec mv {} release/bin/ \;
           cp release/qlstik-qt3/qlstik release/bin/qlstik-qt3
           cp release/qlstik-qt6/qlstik release/bin/qlstik-qt6
-          chmod +x release/bin/anystik release/bin/libgoso.so release/bin/libgoso.dylib \
-            release/bin/qlstik-qt3 release/bin/qlstik-qt6
+          cp release/qlstik-qt5/qlstik release/bin/qlstik-qt5-macos
+          chmod +x release/bin/anystik-linux release/bin/anystik-macos \
+            release/bin/libgoso.so release/bin/libgoso.dylib \
+            release/bin/qlstik-qt3 release/bin/qlstik-qt6 release/bin/qlstik-qt5-macos
           ls -lhR release/
       - name: Create tarball
         run: |
