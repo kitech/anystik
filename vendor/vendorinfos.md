@@ -111,11 +111,28 @@
   - `lib/arm64-v8a/libcurl.so` (SHA256: `5ceb34ff92d9f6cd6b28901cc220bc2917a53e2614e8c9f6764af18c89063b88`)
   - `lib/arm64-v8a/libssl.so` (SHA256: `96d844acd9b264face6529b3502269577c1c14843cef4b55031deb114db8f0a7`)
   - `lib/arm64-v8a/libcrypto.so` (SHA256: `953e2c534771b09e022bf4ef3d7d3ff4c18ba10241fb430036d1147399a28a90`)
+- Qt 6 Android TLS 后端（QtNetwork dlopen 优先探测带 `_3` 后缀的 OpenSSL 3 库）：
+  - 来源：与上列裸名 `libssl.so`/`libcrypto.so` **同构建同源** —— 同为 XDcobra v8.19.0-1
+    （`libcurl-openssl` 变体）OpenSSL 3.6.1 产物。**不入库**，由 CI 于构建时经
+    `scripts/ci_prebuild_anystik_vendor.sh` 就地自产（`cp` + `patchelf`）。
+  - 自产配方：`libcrypto_3.so` = 裸名 `libcrypto.so` 改 SONAME；`libssl_3.so` =
+    裸名 `libssl.so` 改 SONAME **并** `--replace-needed libcrypto.so libcrypto_3.so`
+    （二者 NEEDED 不同，仅改 SONAME 会误加载裸名 libcrypto）。
+  - 证据（2026-10-13 核验，针对维护者本地副本）：`.text` 段与裸名库逐字节一致
+    （`cmp` 按段归因 0 命中）、`built on: Wed Mar 25 04:56:33 2026 UTC`（秒级与裸名库相同）、
+    NDK r29、phdr 3→4 + `.dynstr` 移位至文件尾（patchelf 追加段特征）
+  - 维护者本地副本 SHA256（历史记录；CI 产物因 patchelf 版本不同字节可能不同，
+    改以 `readelf -d` 校验 SONAME/NEEDED）：
+    `libssl_3.so`=`9e70b6a95b4c496acb12ae2f3b134e85718e5f144a265777239384c4ccbc68fd`、
+    `libcrypto_3.so`=`01140076452f505408cad0a33b052dfa1c0dd4c6e86f1919275076501ab5cb70`
+  - 与 libcurl NEEDED 的裸名 libssl.so/libcrypto.so 二者并存不冲突（见 build-android.sh）
 - Headers:
   - `include/curl/` (curl 头文件)
   - 注：v8.19.0-1 包内不含 OpenSSL 头，本地 `include/openssl/` 为另行放置；
-    qsktox 无直接 `#include <openssl/>`，CI 缺此头不影响编译链接
-- 此目录不入库：CI 于构建时经 `scripts/ci_prebuild_qsktox_vendor.sh` 自动下载归位并校验 SHA256
+    anystik 无直接 `#include <openssl/>`，CI 缺此头不影响编译链接
+  - anystik 亦无 `#include <sqlite3.h>`，sqlite3.h 不随仓库提供也不在 CI 下载之列
+- 此目录全部不入库：CI 于构建时经 `scripts/ci_prebuild_anystik_vendor.sh`
+  自动下载/自产并校验（裸名库校验 SHA256，`_3` 库校验 SONAME/NEEDED）
 
 ## UnifiedPush android-connector
 

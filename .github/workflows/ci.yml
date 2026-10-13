@@ -1,0 +1,463 @@
+---
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+    branches: ['**']
+  workflow_dispatch:
+
+jobs:
+  build-anystik-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install aqtinstall
+        run: pip install aqtinstall==3.3.0
+      - name: Cache Qt
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/aqtinstall
+          key: qt-linux-6.7.3-gcc_64
+      - name: Install Qt 6.7.3
+        run: |
+          aqt install-qt linux desktop 6.7.3 linux_gcc_64 \
+            -m qtshadertools \
+            --outputdir /opt/qt
+          echo "=== Installed Qt directories ==="
+          ls -la /opt/qt/6.7.3/
+          HOST_DIR=$(find /opt/qt/6.7.3 -maxdepth 1 -type d \( -name 'linux*' -o -name 'gcc*' \) | head -1)
+          echo "Detected host Qt dir: $HOST_DIR"
+          echo "QTDIR=$HOST_DIR" >> $GITHUB_ENV
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config
+          sudo apt-get install -y libgl-dev libegl-dev libfontconfig-dev libxkbcommon-dev
+          sudo apt-get install -y libcurl4-openssl-dev libssl-dev libsqlite3-dev
+      - name: Cache QSkinny
+        uses: actions/cache@v4
+        id: cache-qskinny
+        with:
+          path: /opt/qt/qskinny
+          key: qskinny-linux-${{ hashFiles('anystik/plan.md') }}
+      - name: Build and install QSkinny
+        if: steps.cache-qskinny.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/uwerat/qskinny.git /tmp/qskinny
+          cd /tmp/qskinny
+          git checkout a46557b
+          cmake -B build \
+            -DCMAKE_PREFIX_PATH="$QTDIR" \
+            -DQt6_DIR="$QTDIR/lib/cmake/Qt6" \
+            -DCMAKE_INSTALL_PREFIX=/opt/qt/qskinny \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+          cmake --install build
+      - name: Generate i18n .qm
+        run: |
+          cd anystik/i18n
+          for f in anystik_en anystik_zh_CN anystik_zh_TW; do
+            "$QTDIR/bin/lrelease" "$f.ts" -qm "$f.qm"
+          done
+      - name: Generate sources from templates
+        run: |
+          cp anystik/src/version_config.h.tmpl anystik/src/version_config.h
+          cp stikcommon/davobfus.cpp.tmpl stikcommon/davobfus.cpp
+      - name: Configure
+        run: |
+          cd anystik
+          mkdir -p build-x64
+          "$QTDIR/bin/qt-cmake" -S . -B build-x64 \
+            -DQt6_DIR="$QTDIR/lib/cmake/Qt6" \
+            -DCMAKE_PREFIX_PATH="$QTDIR;/opt/qt/qskinny" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_VERBOSE_MAKEFILE=on
+      - name: Hotfix link flags
+        run: |
+          sed -i 's/-lQt6Qml -lQt6Quick -lQt6OpenGL//g' \
+            anystik/build-x64/CMakeFiles/anystik.dir/link.txt
+      - name: Build
+        run: cmake --build anystik/build-x64 -j$(nproc)
+      - name: Prepare artifact
+        run: |
+          mkdir -p bin
+          cp anystik/build-x64/anystik bin/
+          cp anystik/build-x64/libgoso.so bin/
+          chmod +x bin/anystik bin/libgoso.so
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anystik-linux-x64
+          path: bin/
+          retention-days: 30
+
+  build-anystik-android:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+          packages: 'build-tools;34.0.0 platforms;android-34'
+      - name: Align toolchain paths with local build-android.sh
+        run: |
+          # JDK 17.0.13+11 → /opt/jdk-17.0.13+11（与本地一致）
+          cd /opt && sudo wget -q https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz
+          sudo tar xzf OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz && sudo rm OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz
+          # NDK r26b → /opt/android-ndk-r26b
+          sudo apt-get update && sudo apt-get install -y unzip
+          sudo wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+          sudo unzip -q android-ndk-r26b-linux.zip && sudo rm android-ndk-r26b-linux.zip
+          # SDK 软链到本地同款路径
+          sudo ln -sfn "$ANDROID_HOME" /opt/android-sdk
+          # 补装 platforms;android-33（build-android.sh: androidCompileSdkVersion=android-33）
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-33" >/dev/null || true
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install aqtinstall
+        run: pip install aqtinstall==3.3.0 patchelf==0.19.1.0
+      - name: Cache Qt
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/aqtinstall
+          key: qt-android-6.7.3-arm64+gcc_64
+      - name: Install Qt 6.7.3
+        run: |
+          aqt install-qt linux android 6.7.3 android_arm64_v8a --autodesktop \
+            -m qtshadertools \
+            --outputdir /opt/qt
+          echo "=== Installed Qt directories ==="
+          ls -la /opt/qt/6.7.3/
+          HOST_DIR=$(find /opt/qt/6.7.3 -maxdepth 1 -type d \( -name 'linux*' -o -name 'gcc*' \) | head -1)
+          echo "Detected host Qt dir: $HOST_DIR"
+          echo "QT_ANDROID=/opt/qt/6.7.3/android_arm64_v8a" >> $GITHUB_ENV
+          echo "QT_HOST=$HOST_DIR" >> $GITHUB_ENV
+          # Qt host 目录对齐本地命名（build-android.sh 硬编码 gcc_64）
+          ln -sfn "$HOST_DIR" /opt/qt/6.7.3/gcc_64
+      - name: Install EGL dependencies
+        run: sudo apt-get update && sudo apt-get install -y libegl1-mesa-dev
+      - name: Download vendor prebuilt libs (curl/openssl/sqlite for arm64)
+        run: bash scripts/ci_prebuild_anystik_vendor.sh
+      - name: Cache QSkinny arm64
+        uses: actions/cache@v4
+        id: cache-qskinny-arm64
+        with:
+          path: /opt/qt/qskinny-arm64
+          key: qskinny-android-arm64-v4-${{ hashFiles('anystik/patches/qskinny-qt6.patch', '.github/workflows/ci.yml') }}
+      - name: Build and install QSkinny arm64
+        if: steps.cache-qskinny-arm64.outputs.cache-hit != 'true'
+        env:
+          ANDROID_NDK_ROOT: /opt/android-ndk-r26b
+        run: |
+          git clone https://github.com/uwerat/qskinny.git /tmp/qskinny-arm64
+          cd /tmp/qskinny-arm64
+          git checkout a46557b
+          git apply "$GITHUB_WORKSPACE/anystik/patches/qskinny-qt6.patch"
+          "$QT_ANDROID/bin/qt-cmake" -S . -B build \
+            -DCMAKE_INSTALL_PREFIX=/opt/qt/qskinny-arm64 \
+            -DQT_HOST_PATH="$QT_HOST" \
+            -DANDROID_SDK_ROOT="$ANDROID_HOME" \
+            -DANDROID_NDK_ROOT="$ANDROID_NDK_ROOT" \
+            -DQT_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DBUILD_TOOLS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_PLAYGROUND=OFF \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(nproc)
+          cmake --install build
+      - name: Generate davobfus.cpp (copy template)
+        run: cp stikcommon/davobfus.cpp.tmpl stikcommon/davobfus.cpp
+      - name: Build APK (build-android.sh)
+        working-directory: anystik
+        env:
+          ANDROID_HOME: /opt/android-sdk
+          ANDROID_SDK_ROOT: /opt/android-sdk
+        run: bash build-android.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anystik-android-arm64-debug
+          path: anystik/build-android/android-build/build/outputs/apk/debug/*.apk
+          retention-days: 30
+
+  build-anystik-osx:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install aqtinstall
+        run: pip install aqtinstall==3.3.0
+      - name: Cache Qt
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/aqtinstall
+          key: qt-macos-6.7.3-clang_64
+      - name: Install Qt 6.7.3
+        run: |
+          mkdir -p "$HOME/qt"
+          aqt install-qt mac desktop 6.7.3 clang_64 \
+            -m qtshadertools \
+            --outputdir "$HOME/qt"
+          echo "QTDIR=$HOME/qt/6.7.3/macos" >> $GITHUB_ENV
+      - name: Install system dependencies (OpenSSL headers for FindOpenSSL)
+        run: brew install openssl
+      - name: Cache QSkinny
+        uses: actions/cache@v4
+        id: cache-qskinny
+        with:
+          path: ~/qt/qskinny
+          key: qskinny-macos-${{ hashFiles('anystik/plan.md') }}
+      - name: Build and install QSkinny
+        if: steps.cache-qskinny.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/uwerat/qskinny.git /tmp/qskinny
+          cd /tmp/qskinny
+          git checkout a46557b
+          cmake -B build \
+            -DCMAKE_PREFIX_PATH="$QTDIR" \
+            -DCMAKE_INSTALL_PREFIX="$HOME/qt/qskinny" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j$(sysctl -n hw.logicalcpu)
+          cmake --install build
+      - name: Generate i18n .qm
+        run: |
+          cd anystik/i18n
+          for f in anystik_en anystik_zh_CN anystik_zh_TW; do
+            "$QTDIR/bin/lrelease" "$f.ts" -qm "$f.qm"
+          done
+      - name: Generate sources from templates
+        run: |
+          cp anystik/src/version_config.h.tmpl anystik/src/version_config.h
+          cp stikcommon/davobfus.cpp.tmpl stikcommon/davobfus.cpp
+      - name: Configure
+        run: |
+          cd anystik
+          mkdir -p build-osx
+          "$QTDIR/bin/qt-cmake" -S . -B build-osx \
+            -DQt6_DIR="$QTDIR/lib/cmake/Qt6" \
+            -DCMAKE_PREFIX_PATH="$QTDIR;$HOME/qt/qskinny" \
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl)" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_VERBOSE_MAKEFILE=on
+      - name: Build
+        run: cmake --build anystik/build-osx -j$(sysctl -n hw.logicalcpu)
+      - name: Prepare artifact
+        run: |
+          mkdir -p bin
+          cp anystik/build-osx/anystik bin/
+          cp anystik/build-osx/libgoso.dylib bin/
+          chmod +x bin/anystik bin/libgoso.dylib
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anystik-macos-arm64
+          path: bin/
+          retention-days: 30
+
+  build-qlstik-qt3:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential pkg-config \
+            libcurl4-openssl-dev libfreetype-dev libopenal-dev \
+            libx11-dev libxext-dev uuid-dev libxss-dev \
+            libssl-dev libsqlite3-dev zlib1g-dev libwebp-dev libtiff-dev
+      - name: Download and extract precompiled Qt3
+        run: |
+          sudo ln -sv /opt /opu
+          curl -sL "https://github.com/qtchina/qt_build_scripts/releases/download/qt4.8/tde-qt338sh-linux-cjkinput-x64.tar.gz" \
+            | sudo tar xzf - -C /opt
+      - name: Install vcpkg and hjson-cpp
+        run: |
+          sudo mkdir -p /opt/vcpkg
+          sudo chown "$(whoami)" /opt/vcpkg
+          git clone --depth 1 https://github.com/Microsoft/vcpkg.git /opt/vcpkg
+          /opt/vcpkg/bootstrap-vcpkg.sh
+          /opt/vcpkg/vcpkg install hjson-cpp --triplet x64-linux-dynamic
+      - name: Generate sources from templates
+        run: |
+          cp anystik/src/version_config.h.tmpl anystik/src/version_config.h
+          cp stikcommon/davobfus.cpp.tmpl stikcommon/davobfus.cpp
+      - name: Build qlstik with Qt3
+        run: |
+          export PATH=/opt/qt338sh/bin:$PATH
+          export QMAKESPEC=linux-g++
+          cd qlstik
+          /opt/qt338sh/bin/qmake -makefile
+          make -j$(nproc)
+      - name: Prepare frontend artifact
+        run: |
+          mkdir -p bin
+          cp qlstik/qlstik bin/qlstik
+          chmod +x bin/qlstik
+      - name: Upload qlstik binary as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qlstik-qt3-frontend
+          path: bin/
+          retention-days: 30
+
+  build-qlstik-qt6:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install aqtinstall
+        run: pip install aqtinstall==3.3.0
+      - name: Cache Qt
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/aqtinstall
+          key: qt-linux-6.7.3-gcc_64
+      - name: Install Qt 6.7.3
+        run: |
+          aqt install-qt linux desktop 6.7.3 linux_gcc_64 \
+            -m qtshadertools \
+            --outputdir /opt/qt
+          HOST_DIR=$(find /opt/qt/6.7.3 -maxdepth 1 -type d \( -name 'linux*' -o -name 'gcc*' \) | head -1)
+          echo "QTDIR=$HOST_DIR" >> $GITHUB_ENV
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config \
+            libgl-dev libegl-dev libfontconfig-dev libxkbcommon-dev \
+            libcurl4-openssl-dev libfreetype-dev libopenal-dev \
+            libx11-dev libxext-dev uuid-dev libxss-dev \
+            libssl-dev libsqlite3-dev zlib1g-dev libwebp-dev libtiff-dev
+      - name: Install vcpkg and hjson-cpp
+        run: |
+          sudo mkdir -p /opt/vcpkg
+          sudo chown "$(whoami)" /opt/vcpkg
+          git clone --depth 1 https://github.com/Microsoft/vcpkg.git /opt/vcpkg
+          /opt/vcpkg/bootstrap-vcpkg.sh
+          /opt/vcpkg/vcpkg install hjson-cpp --triplet x64-linux-dynamic
+      - name: Generate sources from templates
+        run: |
+          cp anystik/src/version_config.h.tmpl anystik/src/version_config.h
+          cp stikcommon/davobfus.cpp.tmpl stikcommon/davobfus.cpp
+      - name: Build qlstik with Qt6
+        run: |
+          cd qlstik
+          "$QTDIR/bin/qmake" -makefile
+          make -j$(nproc)
+      - name: Prepare frontend artifact
+        run: |
+          mkdir -p bin
+          cp qlstik/qlstik bin/qlstik
+          chmod +x bin/qlstik
+      - name: Upload qlstik binary as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qlstik-qt6-frontend
+          path: bin/
+          retention-days: 30
+
+  package-release:
+    needs: [build-anystik-linux, build-anystik-android, build-anystik-osx, build-qlstik-qt3, build-qlstik-qt6]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: anystik-linux-x64
+          path: release/linux/
+      - name: Download macOS binary
+        uses: actions/download-artifact@v4
+        with:
+          name: anystik-macos-arm64
+          path: release/macos/
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: anystik-android-arm64-debug
+          path: release/android/
+      - name: Download qlstik Qt3 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: qlstik-qt3-frontend
+          path: release/qlstik-qt3/
+      - name: Download qlstik Qt6 binary
+        uses: actions/download-artifact@v4
+        with:
+          name: qlstik-qt6-frontend
+          path: release/qlstik-qt6/
+      - name: Organize files for packaging
+        run: |
+          mkdir -p release/bin
+          mv release/linux/anystik release/linux/libgoso.so release/bin/
+          mv release/macos/anystik release/macos/libgoso.dylib release/bin/
+          find release/android -name '*.apk' -exec mv {} release/bin/ \;
+          cp release/qlstik-qt3/qlstik release/bin/qlstik-qt3
+          cp release/qlstik-qt6/qlstik release/bin/qlstik-qt6
+          chmod +x release/bin/anystik release/bin/libgoso.so release/bin/libgoso.dylib \
+            release/bin/qlstik-qt3 release/bin/qlstik-qt6
+          ls -lhR release/
+      - name: Create tarball
+        run: |
+          cd release
+          tar czvf ../anystik-${{ github.ref_name }}.tar.gz bin/
+          cd ..
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anystik-release
+          path: anystik-*.tar.gz
+          retention-days: 90
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --generate-notes \
+            ${{ contains(github.ref_name, '-') && '--prerelease' || '' }} \
+            anystik-*.tar.gz
