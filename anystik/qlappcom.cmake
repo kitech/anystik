@@ -1,5 +1,5 @@
 # qldox（qlapp 应用库）供应子文件：供任意工程 include 复用
-set(QLAPP_DIR ${CMAKE_CURRENT_LIST_DIR}/../qldox)
+set(QLAPP_DIR ${CMAKE_CURRENT_LIST_DIR}/../qlappcom)
 
 set(QLAPP_SOURCES
     #${QLAPP_DIR}/cJSON.c

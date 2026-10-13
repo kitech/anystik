@@ -4,7 +4,7 @@
 #   * 本文件**只列"已验证通过"的共享件**。未按批次迁入的模块不允许出现在这里，
 #     qlstik 侧一律用 stikcommon.pri 的空骨架（模块清单按批追加，每批一处 git mv）。
 #   * 每个迁入的模块对 anystik 都是零逻辑改动（阈值见 移植计划 §7）。
-#   * 折叠 myvendor.pri（vendor 源）与 qldox.pri（qltox 的 cJSON / EventPoller）。
+#   * 折叠 myvendor.pri（vendor 源）与 qlappcom.pri（qltox 的 cJSON / EventPoller）。
 #
 # 输出：STIKCOMMON_SOURCES / STIKCOMMON_HEADERS / STIKCOMMON_INCLUDES / STIKCOMMON_CFLAGS
 
@@ -31,11 +31,11 @@ STIKCOMMON_INCLUDES = $$STIKCOMMON_DIR
 #   STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/myi18n.h
 
 include($$STIKCOMMON_DIR/../myvendor/myvendor.pri)
-include($$STIKCOMMON_DIR/qldox.pri)
+include($$STIKCOMMON_DIR/qlappcom.pri)
 
-STIKCOMMON_SOURCES  += $$MYVENDOR_SOURCES $$QLDOX_SOURCES
-STIKCOMMON_HEADERS  += $$QLDOX_HEADERS
-STIKCOMMON_INCLUDES += $$MYVENDOR_INCLUDES $$QLDOX_INCLUDES
+STIKCOMMON_SOURCES  += $$MYVENDOR_SOURCES $$QLAPPCOM_SOURCES
+STIKCOMMON_HEADERS  += $$QLAPPCOM_HEADERS
+STIKCOMMON_INCLUDES += $$MYVENDOR_INCLUDES $$QLAPPCOM_INCLUDES
 
 # ══ 批次 1：myi18n / davobfus / eifreader ══
 # eifreader 原为 1c 暂缓项（「Qt 3.5 的 QByteArray 是 typedef QMemArray<char>，
@@ -193,12 +193,12 @@ STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/qjson_shim.h \
                        $$STIKCOMMON_DIR/qglobaltype_shim.h
 
 # ── 批次 3c-1 QWebdavLite：自建 verb-aware 传输 + DAV 窄切面 ──
-# qwebdavtransport 为何必须存在：qldox/eventpoller.cpp 是只读依赖，全文没有
+# qwebdavtransport 为何必须存在：qlappcom/eventpoller.cpp 是只读依赖，全文没有
 # CURLOPT_CUSTOMREQUEST，仅在 `if (req.method == "POST")` 分支设 POSTFIELDS。
 # 故凡非 GET/POST 的动词（MKCOL/MOVE/DELETE/OPTIONS/HEAD/PROPFIND）经它发出
 # 都会退回 curl 默认行为 → 一律 GET，且带体请求的 body 被丢弃。
 # e2e 实测（改造前）：9 个请求服务端全部收到 GET，PUT 的 9 字节 body 变 0。
-# qldox 不可改（项目约束），故 qlstik 侧自带 curl_multi 泵并由
+# qlappcom 不可改（项目约束），故 qlstik 侧自带 curl_multi 泵并由
 # QNetworkAccessManager::issue() 分流；GET/POST 仍走 EventPoller（那边本来就对）。
 STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qwebdavtransport.cpp
 

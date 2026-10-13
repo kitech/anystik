@@ -29,34 +29,34 @@
 #   * sticker_db.cpp（485 行）Qt 符号 0 个，完全 Qt-free
 #   * SQLite 已在 qlstik.pro:153-163 配好（HAVE_SQLITE + -lsqlite3）
 #
-# 输出：QLDOX_SOURCES / QLDOX_HEADERS / QLDOX_INCLUDES
+# 输出：QLAPPCOM_SOURCES / QLAPPCOM_HEADERS / QLAPPCOM_INCLUDES
 
-QLDOX_DIR = $$PWD/../qldox
+QLAPPCOM_DIR = $$PWD/../qlappcom
 
-QLDOX_SOURCES = \
+QLAPPCOM_SOURCES = \
     $$PWD/../qlcomp/cJSON.c \
-    $$QLDOX_DIR/eventpoller.cpp \
-    $$QLDOX_DIR/storage.cpp \
-    $$QLDOX_DIR/channel_db.cpp \
-    $$QLDOX_DIR/message_db.cpp \
-    $$QLDOX_DIR/pending_db.cpp \
-    $$QLDOX_DIR/sticker_db.cpp \
-    $$QLDOX_DIR/cache_db.cpp \
-    $$QLDOX_DIR/cache_fs.cpp
+    $$QLAPPCOM_DIR/eventpoller.cpp \
+    $$QLAPPCOM_DIR/storage.cpp \
+    $$QLAPPCOM_DIR/channel_db.cpp \
+    $$QLAPPCOM_DIR/message_db.cpp \
+    $$QLAPPCOM_DIR/pending_db.cpp \
+    $$QLAPPCOM_DIR/sticker_db.cpp \
+    $$QLAPPCOM_DIR/cache_db.cpp \
+    $$QLAPPCOM_DIR/cache_fs.cpp
 
 # eventpoller.h 无 Q_OBJECT（纯 QThread 子类，无自定义信号槽），
 # 列进 HEADERS 与 qltox.pro 保持一致，moc 不会产出内容。
 # db 层 7 件的头一并列出：*.h 均无 Q_OBJECT，moc 不产出内容，但 moc 靠 HEADERS
 # 里的 .h 找 include 依赖，漏列会让 moc 看不到跨头依赖。
-QLDOX_HEADERS = \
+QLAPPCOM_HEADERS = \
     $$PWD/../qlcomp/cJSON.h \
-    $$QLDOX_DIR/eventpoller.h \
-    $$QLDOX_DIR/storage.h \
-    $$QLDOX_DIR/channel_db.h \
-    $$QLDOX_DIR/message_db.h \
-    $$QLDOX_DIR/pending_db.h \
-    $$QLDOX_DIR/sticker_db.h \
-    $$QLDOX_DIR/cache_db.h \
-    $$QLDOX_DIR/cache_fs.h
+    $$QLAPPCOM_DIR/eventpoller.h \
+    $$QLAPPCOM_DIR/storage.h \
+    $$QLAPPCOM_DIR/channel_db.h \
+    $$QLAPPCOM_DIR/message_db.h \
+    $$QLAPPCOM_DIR/pending_db.h \
+    $$QLAPPCOM_DIR/sticker_db.h \
+    $$QLAPPCOM_DIR/cache_db.h \
+    $$QLAPPCOM_DIR/cache_fs.h
 
-QLDOX_INCLUDES = $$QLDOX_DIR
+QLAPPCOM_INCLUDES = $$QLAPPCOM_DIR
