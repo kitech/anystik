@@ -26,6 +26,8 @@ constexpr const char* const kWebsearchType      = "websearch";
 constexpr const char* const kWebsearchName      = "Search·网页搜索";
 constexpr const char* const kPastebinType       = "pastebin";
 constexpr const char* const kPastebinName       = "Paste Bin·Txt";
+constexpr const char* const kTtsbotType         = "tts";
+constexpr const char* const kTtsbotName         = "Txt2Snd·文转音";
 constexpr const char* const kTranslateType      = "translate";
 constexpr const char* const kTranslateName      = "Translate·翻译";
 constexpr const char* const kMobPushType        = "mobpush";
@@ -94,6 +96,7 @@ constexpr TypeEmojiDef kTypeEmojiDefs[] = {
     { kAichatType,                0x1F916, "🤖" },
     { kWebsearchType,             0x1F50D, "🔍" },
     { kPastebinType,              0x1F4E6, "📦" },
+    { kTtsbotType,                0x1F50A, "🔊" },
     { kTranslateType,             0x1F524, "🔤" },
     { kMobPushType,               0x1F4E2, "📢" },
     { kSnapType,                  0x1F39E, "🎞" },

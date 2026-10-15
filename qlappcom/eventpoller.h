@@ -24,6 +24,7 @@ const EventType34 PastebinResultType      = toEventType34(QEvent::User + 108);
 const EventType34 FanyibotDoneType        = toEventType34(QEvent::User + 109);
 const EventType34 AigptbotDoneType        = toEventType34(QEvent::User + 110);
 const EventType34 WebsearchDoneType       = toEventType34(QEvent::User + 111);
+const EventType34 TtsbotDoneType          = toEventType34(QEvent::User + 112);
 
 // ── API 请求类型 ──
 enum ApiRequestType {
@@ -269,6 +270,24 @@ public:
     std::vector<WebSearchItem> items;  // 成功：至多 3 条结果（sogou 经 follow 解析）
     std::string backendUsed;          // 成功：实际命中的后端名
     std::string errorMsg;             // 失败：含已试后端与最后错误
+};
+
+// 文转音虚拟联系人的合成结果（客户端直连各 TTS 服务 / 本地引擎，不经后端）
+class TtsbotDoneEvent : public CustomEventBase {
+public:
+    TtsbotDoneEvent() : CustomEventBase(TtsbotDoneType) {}
+    int chatId = 0;
+    std::string chatType;
+    long long localId = 0;      // 0=朗读入口(无原消息待更新)；否则宿主 ChatElement 定位
+    bool success = false;
+    std::string providerUsed;   // 成功：实际命中的 provider 名称
+    std::string errorMsg;       // 失败：含已试 provider 与最后错误
+    std::string voice;          // 成功：音色/语言（展示用）
+    std::string text;           // 原文（气泡 caption）
+    std::string audioUrl;       // URL 型 provider：远程音频 URL
+    std::string mime;           // 音频 MIME，如 audio/mpeg
+    std::vector<uint8_t> audioData;  // 字节型/本地引擎：音频字节
+    int durationSec = 0;
 };
 
 class SelfInfoResultEvent : public ApiResultEvent {

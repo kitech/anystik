@@ -837,6 +837,8 @@ const char* const* webCredsKnownFields(size_t& count) {
         "ovh_api", "volcengine_api", "modelscope_api", "modelscope_intl_api",
         "groq_api", "huggingface_api", "gemini_api", "zai_api",
         "groq_viacf_api", "gemini_viacf_api", "aihorde_api", "meta_api",
+        // TTS：OpenAI / ElevenLabs 凭据（dashscope_api 复用上面同名键）
+        "openai_api", "elevenlabs_api",
         // web 登录字段：<slug>_web
         "deepseek_web", "gemini_web", "groq_web", "chatgpt_web", "meta_web",
     };
