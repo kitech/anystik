@@ -472,6 +472,10 @@ private:
     static CURL* buildHandle(const HttpRequest& req,
                              void (*done)(const HttpResponse& resp, void* udata),
                              void* udata);
+    // multi 级错误恢复（泵线程）：libcurl 规定 curl_multi_perform 报错后该 multi
+    // 状态不可继续，需移除全部句柄后重建；否则 perform 静默空转、在途句柄永不完成，
+    // 事件长轮询链会永久死亡（仅重启可恢复）。
+    void recoverMulti(const char* where, int mcode);
     static EventPoller* s_instance;
     bool running;
     CURLM* multi;

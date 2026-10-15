@@ -237,6 +237,49 @@ CURL* EventPoller::buildHandle(const HttpRequest& req,
     return easy;
 }
 
+// multi 级错误恢复（泵线程）：libcurl 文档规定 curl_multi_perform 返回错误后，该
+// multi 上所有传输状态不可继续保持，必须移除全部句柄后再重建；否则后续 perform
+// 不会推进，在途句柄永不完成（连 CURLOPT_TIMEOUT 也不会被处理），事件长轮询链
+// 会静默永久死亡。此处按文档顺序安全拆除（先 remove 全部句柄 → 释放 easy/头/ctx
+// → multi_cleanup），重建 multi，并逐个终态化在途请求，让上层既有重试逻辑
+// （events poll → schedulePoll(2000)）接管。句柄与内存均无泄漏。
+void EventPoller::recoverMulti(const char* where, int mcode) {
+    ALOG_ERROR("!! multi error:", where, curl_multi_strerror((CURLMcode)mcode),
+               "code=", mcode, "active=", activeHandles.size());
+    // 取出在途句柄并清空 active（此后不再有新成员进入本次拆除集合）
+    std::vector<CURL*> dead = activeHandles;
+    activeHandles.clear();
+    // 1) 先逐个从旧 multi 摘除（curl_easy_cleanup 前必须 curl_multi_remove_handle）
+    for (CURL* easy : dead) {
+        CURLMcode rc = curl_multi_remove_handle(multi, easy);
+        if (rc != CURLM_OK) {
+            ALOG_WARN("!! recover: curl_multi_remove_handle failed:",
+                      curl_multi_strerror(rc));
+        }
+    }
+    // 2) 释放旧 multi 并重建（此刻旧 multi 已无挂载句柄，可安全 cleanup）
+    if (multi) { curl_multi_cleanup(multi); }
+    multi = curl_multi_init();
+    if (!multi) {
+        ALOG_ERROR("!! curl_multi_init failed after multi error");
+    }
+    // 3) 终态化每个在途请求：释放 easy + 请求头 + ctx，回调 done（带错误）
+    for (CURL* easy : dead) {
+        HttpCtx* c = nullptr;
+        curl_easy_getinfo(easy, CURLINFO_PRIVATE, &c);
+        curl_easy_cleanup(easy);
+        if (c) {
+            if (c->requestHeaders) { curl_slist_free_all(c->requestHeaders); }
+            HttpResponse resp;
+            resp.httpCode = 0;
+            resp.curlErrStr = std::string("multi error: ")
+                            + curl_multi_strerror((CURLMcode)mcode);
+            c->done(resp, c->udata);
+            delete c;
+        }
+    }
+}
+
 void EventPoller::run() {
     TimePoint lastBeatTp = timeNowBoot();
     TimePoint lastDoneTp = timeNowBoot();
@@ -269,21 +312,48 @@ void EventPoller::run() {
             }
             while (!pendingHandles.empty()) {
                 CURL* easy = pendingHandles.front();
-                curl_multi_add_handle(multi, easy);
-                activeHandles.push_back(easy);
                 pendingHandles.pop_front();
+                CURLMcode rc = curl_multi_add_handle(multi, easy);
+                if (rc != CURLM_OK) {
+                    HttpCtx* c = nullptr;
+                    curl_easy_getinfo(easy, CURLINFO_PRIVATE, &c);
+                    ALOG_ERROR("!! curl_multi_add_handle failed:",
+                               curl_multi_strerror(rc),
+                               c ? c->urlStr : std::string("(no ctx)"));
+                    // 终态化该请求，避免 done 永不回调导致上层悬挂
+                    curl_easy_cleanup(easy);
+                    if (c) {
+                        if (c->requestHeaders) { curl_slist_free_all(c->requestHeaders); }
+                        HttpResponse resp;
+                        resp.httpCode = 0;
+                        resp.curlErrStr = std::string("add_handle: ")
+                                        + curl_multi_strerror(rc);
+                        c->done(resp, c->udata);
+                        delete c;
+                    }
+                } else {
+                    activeHandles.push_back(easy);
+                }
             }
         }
 
         // 2) 阻塞等待 I/O：curl_multi_poll 官方推荐，无事件也会休眠（最多 20ms），
         //    避免对"永远活跃"的 socket 形成无节流忙循环。
         int numfds = 0;
-        curl_multi_poll(multi, NULL, 0, 20, &numfds);
+        CURLMcode pollRc = curl_multi_poll(multi, NULL, 0, 20, &numfds);
+        if (pollRc != CURLM_OK) {
+            recoverMulti("curl_multi_poll", (int)pollRc);
+            continue;
+        }
 
         // 3) 每轮只调用一次 curl_multi_perform，绝不用废弃的
         //    `while (perform == CURLM_CALL_MULTI_PERFORM)` 忙循环。
         int stillRunning = 0;
-        curl_multi_perform(multi, &stillRunning);
+        CURLMcode perfRc = curl_multi_perform(multi, &stillRunning);
+        if (perfRc != CURLM_OK && perfRc != CURLM_CALL_MULTI_PERFORM) {
+            recoverMulti("curl_multi_perform", (int)perfRc);
+            continue;
+        }
 
         // 3.5) 停滞看门狗：任意设置 stallSec 的请求（含 event poll）连续无收发活动
         //      （boottime 时钟，休眠时间照算）→ 取证真实网络状态后中断
@@ -328,7 +398,12 @@ void EventPoller::run() {
                     HttpResponse resp;
                     resp.httpCode = (int)respCode;   // 0 = 尚未收到响应头，如实反映
                     resp.curlErrStr = reason;
-                    curl_multi_remove_handle(multi, h);
+                    CURLMcode rmRc = curl_multi_remove_handle(multi, h);
+                    if (rmRc != CURLM_OK) {
+                        ALOG_WARN("!! curl_multi_remove_handle failed:",
+                                  curl_multi_strerror(rmRc), c->urlStr,
+                                  "idx=" + std::to_string(idx));
+                    }
                     activeHandles.erase(activeHandles.begin() + idx);
                     curl_easy_cleanup(h);
                     if (c->requestHeaders) { curl_slist_free_all(c->requestHeaders); }
@@ -383,7 +458,11 @@ void EventPoller::run() {
                         resp.elapsedMs, "ms", resp.body.size(), "bytes");
                 }
 
-                curl_multi_remove_handle(multi, msg->easy_handle);
+                CURLMcode rmRc = curl_multi_remove_handle(multi, msg->easy_handle);
+                if (rmRc != CURLM_OK) {
+                    ALOG_WARN("!! curl_multi_remove_handle failed:",
+                              curl_multi_strerror(rmRc), ctx->urlStr);
+                }
                 for (auto it = activeHandles.begin(); it != activeHandles.end(); ++it) {
                     if (*it == msg->easy_handle) { activeHandles.erase(it); break; }
                 }
