@@ -463,6 +463,7 @@ public:
     static void addRequest(const HttpRequest& req,
                            void (*done)(const HttpResponse& resp, void* udata),
                            void* udata = nullptr);
+    static bool isReady();   // 泵线程与 multi 均已就绪
 
 private:
     EventPoller();

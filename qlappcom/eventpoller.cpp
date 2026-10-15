@@ -125,6 +125,8 @@ void EventPoller::stop() {
     s_instance = nullptr;
 }
 
+bool EventPoller::isReady() { return s_instance && s_instance->multi; }
+
 void EventPoller::addRequest(const HttpRequest& req,
                               void (*done)(const HttpResponse& resp, void* udata),
                               void* udata) {
@@ -236,7 +238,23 @@ CURL* EventPoller::buildHandle(const HttpRequest& req,
 }
 
 void EventPoller::run() {
+    TimePoint lastBeatTp = timeNowBoot();
+    TimePoint lastDoneTp = timeNowBoot();
     while (running) {
+        // 泵线程诊断心跳：每 30s 打印存活性/负载。
+        // 若心跳随日志消失 → 泵线程自身卡死；若心跳照常但 active=0 → 轮询链死（无在途请求）
+        if (elapsedMsBoot(lastBeatTp) >= 30000) {
+            size_t pendingN = 0, delayedN = 0;
+            {
+                QMutexLocker lock(&pendingMutex);
+                pendingN = pendingHandles.size();
+                delayedN = delayedReqs.size();
+            }
+            ALOG_INFO("pump alive: active=", activeHandles.size(),
+                      "pending=", pendingN, "delayed=", delayedN,
+                      "since_last_done=", elapsedMsBoot(lastDoneTp), "ms");
+            lastBeatTp = timeNowBoot();
+        }
         // 1) 泵线程内统一 add_handle —— libcurl multi 非线程安全，
         //    所有 multi 操作只能在泵线程发生，GUI 线程只入挂起队列。
         //    先处理到点的非阻塞延迟重发（HttpRequest.delayMs）
@@ -279,21 +297,22 @@ void EventPoller::run() {
                 stalled.push_back(c);
             }
             for (HttpCtx* c : stalled) {
-                for (auto it = activeHandles.begin(); it != activeHandles.end(); ++it) {
+                for (size_t idx = 0; idx < activeHandles.size(); ++idx) {
+                    CURL* h = activeHandles[idx];
                     HttpCtx* cc = nullptr;
-                    curl_easy_getinfo(*it, CURLINFO_PRIVATE, &cc);
+                    curl_easy_getinfo(h, CURLINFO_PRIVATE, &cc);
                     if (cc != c) { continue; }
                     // ── 取证真实网络状态（不凭猜测重置 UI）──
                     long respCode = 0; long long recv = 0, expect = 0;
                     double speed = 0, totalT = 0, connectT = 0, startT = 0;
-                    curl_easy_getinfo(*it, CURLINFO_RESPONSE_CODE, &respCode);
-                    curl_easy_getinfo(*it, CURLINFO_SIZE_DOWNLOAD_T, &recv);
-                    curl_easy_getinfo(*it, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &expect);
-                    curl_easy_getinfo(*it, CURLINFO_SPEED_DOWNLOAD, &speed); // dep
-                    curl_easy_getinfo(*it, CURLINFO_SPEED_DOWNLOAD_T, &speed);
-                    curl_easy_getinfo(*it, CURLINFO_TOTAL_TIME, &totalT);
-                    curl_easy_getinfo(*it, CURLINFO_CONNECT_TIME, &connectT);
-                    curl_easy_getinfo(*it, CURLINFO_STARTTRANSFER_TIME, &startT);
+                    curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &respCode);
+                    curl_easy_getinfo(h, CURLINFO_SIZE_DOWNLOAD_T, &recv);
+                    curl_easy_getinfo(h, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &expect);
+                    curl_easy_getinfo(h, CURLINFO_SPEED_DOWNLOAD, &speed); // dep
+                    curl_easy_getinfo(h, CURLINFO_SPEED_DOWNLOAD_T, &speed);
+                    curl_easy_getinfo(h, CURLINFO_TOTAL_TIME, &totalT);
+                    curl_easy_getinfo(h, CURLINFO_CONNECT_TIME, &connectT);
+                    curl_easy_getinfo(h, CURLINFO_STARTTRANSFER_TIME, &startT);
                     std::string phase = (connectT <= 0) ? "not_connected"
                         : (startT <= 0 ? "waiting_headers" : "in_body");
                     std::string reason = "stall: no data for " + std::to_string(c->stallSec) + "s"
@@ -303,14 +322,15 @@ void EventPoller::run() {
                         + " speed=" + std::to_string((long)speed) + "B/s"
                         + " elapsed=" + std::to_string((long)totalT) + "s"
                         + " phase=" + phase;
-                    ALOG_WARN("!! stall timeout", c->urlStr, reason);
+                    ALOG_WARN("!! stall timeout", c->urlStr, reason,
+                              "idx=" + std::to_string(idx) + "/" + std::to_string(activeHandles.size()));
 
                     HttpResponse resp;
                     resp.httpCode = (int)respCode;   // 0 = 尚未收到响应头，如实反映
                     resp.curlErrStr = reason;
-                    curl_multi_remove_handle(multi, *it);
-                    activeHandles.erase(it);
-                    curl_easy_cleanup(*it);
+                    curl_multi_remove_handle(multi, h);
+                    activeHandles.erase(activeHandles.begin() + idx);
+                    curl_easy_cleanup(h);
                     if (c->requestHeaders) { curl_slist_free_all(c->requestHeaders); }
                     c->done(resp, c->udata);
                     delete c;
@@ -376,6 +396,7 @@ void EventPoller::run() {
 
                 ctx->done(resp, ctx->udata);
                 delete ctx;
+                lastDoneTp = timeNowBoot();
             }
         }
     }
