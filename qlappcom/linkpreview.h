@@ -23,7 +23,8 @@ struct LinkPreviewData {
 // httpContentType 为原始 Content-Type 头（可为空）。
 QByteArray linkPreviewDecodeToUtf8(const QByteArray& raw, const QString& httpContentType);
 
-// 解析 HTML 头部元数据；不执行 JS。gumbo 解析，输入须为 UTF-8（内部先转码）。
+// 解析 HTML 头部元数据；不执行 JS。输入须为 UTF-8（内部先转码）。
+// 桌面平台用 gumbo 建 DOM；Android 无 gumbo 时用内置浅扫描器（跳过 script/style）。
 // 取得任一可用字段即返回 true。
 bool parseLinkPreviewHtml(const QByteArray& body, const QString& httpContentType,
                           const QString& urlKey, LinkPreviewData& out);

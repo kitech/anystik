@@ -2,10 +2,26 @@
 
 #include <vector>
 #include <string.h>
+#include <dlfcn.h>
+
+#ifdef Q_OS_ANDROID
+#include <QJniObject>
+#include <QJniEnvironment>
+#else
 #include <iconv.h>
 #include <errno.h>
-#include <dlfcn.h>
+#endif
+
+// 编译期选择 HTML 解析器：
+//   Android(qsktox) 无 libgumbo 预编译包 → 内置手写浅扫描器；
+//   桌面(qt3/qt4/qt6) 继续使用 gumbo。
+// -DLINKPREVIEW_FORCE_GUMBO 可在 Android 强制用 gumbo；-DLINKPREVIEW_NO_GUMBO 可在桌面测试手写路径。
+#if defined(Q_OS_ANDROID) && !defined(LINKPREVIEW_FORCE_GUMBO)
+#define LINKPREVIEW_NO_GUMBO 1
+#endif
+#ifndef LINKPREVIEW_NO_GUMBO
 #include <gumbo.h>
+#endif
 
 static inline int lpFind(const QString& s, QChar c, int from = 0) {
 #ifdef QT3_BUILD
@@ -234,6 +250,35 @@ static QString lpDetectByUchardet(const QByteArray& raw) {
     return res;
 }
 
+#ifdef Q_OS_ANDROID
+// Android bionic 无可用 iconv（API<28 无声明；API≥28 也仅支持 utf/ascii/utf16/utf32）。
+// 改用 Java java.nio.charset（ICU4J，覆盖 GBK/GB18030/Big5/Shift_JIS/windows-1252 等）。
+// Java 侧内部捕获异常，失败返回 null → 此处返回空 QByteArray，交由上层兜底。
+static QByteArray lpIconvToUtf8(const QByteArray& in, const QString& charset) {
+    if (in.isEmpty()) { return in; }
+    QJniEnvironment env;
+    JNIEnv* jenv = env.jniEnv();
+    if (!jenv) { return QByteArray(); }
+    jbyteArray jbytes = jenv->NewByteArray((jsize)in.size());
+    if (!jbytes) { return QByteArray(); }
+    jenv->SetByteArrayRegion(jbytes, 0, (jsize)in.size(), (const jbyte*)in.data());
+    QJniObject jcs = QJniObject::fromString(charset);
+    QJniObject result = QJniObject::callStaticObjectMethod(
+        "io/fedlet/mobutil/MobUtil", "convertToUtf8",
+        "([BLjava/lang/String;)[B",
+        jbytes, jcs.object<jstring>());
+    jenv->DeleteLocalRef(jbytes);
+    if (!result.isValid()) { return QByteArray(); }
+    jbyteArray jout = result.object<jbyteArray>();
+    if (!jout) { return QByteArray(); }
+    jsize len = jenv->GetArrayLength(jout);
+    if (len <= 0) { return QByteArray(); }
+    QByteArray out;
+    out.resize((int)len);
+    jenv->GetByteArrayRegion(jout, 0, len, (jbyte*)out.data());
+    return out;
+}
+#else
 static QByteArray lpIconvToUtf8(const QByteArray& in, const QString& charset) {
     if (in.isEmpty()) { return in; }
     QByteArray from = qToUtf8(charset);
@@ -270,6 +315,7 @@ static QByteArray lpIconvToUtf8(const QByteArray& in, const QString& charset) {
     out.resize(used);
     return out;
 }
+#endif
 
 static bool lpIsValidUtf8(const QByteArray& b) {
     const unsigned char* p = (const unsigned char*)b.data();
@@ -333,6 +379,134 @@ QByteArray linkPreviewDecodeToUtf8(const QByteArray& raw, const QString& httpCon
     QByteArray clean = lpIconvToUtf8(body, "utf-8");
     return clean.isEmpty() ? body : clean;
 }
+
+#ifdef LINKPREVIEW_NO_GUMBO
+
+// ── 内置浅扫描器（Android 无 gumbo 时使用）──
+// 不建 DOM；跳过 <script>/<style>，避免其中的伪 <meta>/<title> 被误取。
+static inline bool lpStartsWithChar(const QString& s, QChar c) {
+    return s.length() > 0 && s[0] == c;
+}
+
+static QString lpDecodeEntities(const QString& in) {
+    if (lpFind(in, QChar('&')) < 0) { return in; }
+    QString out;
+    out.reserve(in.length());
+    int i = 0;
+    int n = in.length();
+    while (i < n) {
+        QChar ch = in[i];
+        if (ch != QChar('&')) { out += ch; i++; continue; }
+        int semi = lpFind(in, QChar(';'), i + 1);
+        if (semi < 0 || semi - i > 12) { out += ch; i++; continue; }
+        QString ent = lpLower(in.mid(i + 1, semi - i - 1));
+        bool handled = true;
+        if (ent == "amp") { out += QChar('&'); }
+        else if (ent == "lt") { out += QChar('<'); }
+        else if (ent == "gt") { out += QChar('>'); }
+        else if (ent == "quot") { out += QChar('"'); }
+        else if (ent == "apos" || ent == "39") { out += QChar(0x27); }
+        else if (ent == "nbsp") { out += QChar(' '); }
+        else if (!ent.isEmpty() && ent[0] == QChar('#')) {
+            bool hex = ent.length() > 1 && ent[1] == QChar('x');
+            QString num = ent.mid(hex ? 2 : 1);
+            bool ok = false;
+            uint code = hex ? num.toUInt(&ok, 16) : num.toUInt(&ok, 10);
+            if (ok) { out += QChar((ushort)code); } else { handled = false; }
+        } else { handled = false; }
+        if (handled) { i = semi + 1; } else { out += ch; i++; }
+    }
+    return out;
+}
+
+static QString lpAttrValue(const QString& tag, const QString& attrName) {
+    QString lower = lpLower(tag);
+    QString key = lpLower(attrName);
+    int n = lower.length();
+    int k = key.length();
+    int i = 0;
+    while (i + k <= n) {
+        int pos = lpFind(lower, key, i);
+        if (pos < 0) { return QString(); }
+        bool beforeOk = (pos == 0)
+            || !(lower[pos - 1].isLetterOrNumber()
+                 || lower[pos - 1] == QChar('-') || lower[pos - 1] == QChar(':'));
+        int e = pos + k;
+        while (e < n && lower[e].isSpace()) { e++; }
+        if (beforeOk && e < n && lower[e] == QChar('=')) {
+            e++;
+            while (e < n && lower[e].isSpace()) { e++; }
+            if (e < n && (tag[e] == QChar('"') || tag[e] == QChar('\''))) {
+                QChar q = tag[e];
+                int end = lpFind(tag, q, e + 1);
+                if (end < 0) { return tag.mid(e + 1); }
+                return tag.mid(e + 1, end - e - 1);
+            }
+            int end = e;
+            while (end < n && !tag[end].isSpace() && tag[end] != QChar('>')) { end++; }
+            return tag.mid(e, end - e);
+        }
+        i = pos + k;
+    }
+    return QString();
+}
+
+static void lpScanPreview(const QString& s, LinkPreviewData& out) {
+    QString titleTag, ogTitle, twTitle, ogDesc, twDesc, metaDesc, site;
+    int n = s.length();
+    int i = 0;
+    while (i < n) {
+        int lt = lpFind(s, QChar('<'), i);
+        if (lt < 0) { break; }
+        int gt = lpFind(s, QChar('>'), lt + 1);
+        if (gt < 0) { break; }
+        QString tag = s.mid(lt + 1, gt - lt - 1);
+        i = gt + 1;
+
+        QString lower = lpLower(tag);
+        if (lpStartsWithChar(lower, QChar('/')) || lpStartsWithChar(lower, QChar('!'))
+            || lpStartsWithChar(lower, QChar('?'))) { continue; }
+        int p = 0;
+        while (p < lower.length() && lower[p].isLetterOrNumber()) { p++; }
+        QString name = lower.left(p);
+
+        if (name == "script" || name == "style") {
+            int close = lpFindCI(s, QString("</") + name, i);
+            if (close >= 0) { i = close; }
+            continue;
+        }
+        if (name == "title" && titleTag.isEmpty()) {
+            int close = lpFindCI(s, QString("</title"), i);
+            if (close >= 0) {
+                titleTag = lpCollapseWs(lpDecodeEntities(s.mid(i, close - i)));
+                i = close;
+            }
+            continue;
+        }
+        if (name == "meta") {
+            QString prop = lpAttrValue(tag, "property");
+            if (prop.isEmpty()) { prop = lpAttrValue(tag, "name"); }
+            QString content = lpAttrValue(tag, "content");
+            if (prop.isEmpty() || content.isEmpty()) { continue; }
+            QString key = lpLower(prop);
+            QString v = lpCollapseWs(lpDecodeEntities(content));
+            if (v.isEmpty()) { continue; }
+            if (key == "og:title") { if (ogTitle.isEmpty()) { ogTitle = v; } }
+            else if (key == "twitter:title") { if (twTitle.isEmpty()) { twTitle = v; } }
+            else if (key == "og:description") { if (ogDesc.isEmpty()) { ogDesc = v; } }
+            else if (key == "twitter:description") { if (twDesc.isEmpty()) { twDesc = v; } }
+            else if (key == "og:site_name") { if (site.isEmpty()) { site = v; } }
+            else if (key == "description") { if (metaDesc.isEmpty()) { metaDesc = v; } }
+            continue;
+        }
+    }
+    out.title = !ogTitle.isEmpty() ? ogTitle : (!twTitle.isEmpty() ? twTitle : titleTag);
+    out.description = !ogDesc.isEmpty() ? ogDesc : (!twDesc.isEmpty() ? twDesc : metaDesc);
+    out.siteName = site;
+    out.ok = !(out.title.isEmpty() && out.description.isEmpty());
+}
+
+#else  // gumbo
 
 static QString lpCollectText(const GumboNode* root) {
     QString out;
@@ -398,6 +572,8 @@ static void lpWalkPreview(const GumboNode* root, LinkPreviewData& out) {
     out.ok = !(out.title.isEmpty() && out.description.isEmpty());
 }
 
+#endif  // LINKPREVIEW_NO_GUMBO
+
 bool parseLinkPreviewHtml(const QByteArray& body, const QString& httpContentType,
                           const QString& urlKey, LinkPreviewData& out) {
     out = LinkPreviewData();
@@ -406,12 +582,18 @@ bool parseLinkPreviewHtml(const QByteArray& body, const QString& httpContentType
     QByteArray utf8 = linkPreviewDecodeToUtf8(body, httpContentType);
     if (utf8.isEmpty()) { return false; }
     if (utf8.size() > 400 * 1024) { utf8.resize(400 * 1024); }
+#ifdef LINKPREVIEW_NO_GUMBO
+    QString s = QString::fromUtf8(utf8.data(), utf8.size());
+    lpScanPreview(s, out);
+    return out.ok;
+#else
     GumboOutput* g = gumbo_parse_with_options(
         &kGumboDefaultOptions, utf8.data(), (size_t)utf8.size());
     if (!g) { return false; }
     if (g->root) { lpWalkPreview(g->root, out); }
     gumbo_destroy_output(&kGumboDefaultOptions, g);
     return out.ok;
+#endif
 }
 
 QString linkPreviewNormalizeUrl(const QString& url) {
