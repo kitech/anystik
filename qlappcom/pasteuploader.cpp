@@ -3,6 +3,7 @@
 #include "eventpoller.h"
 #include "netproxy.h"
 #include "cJSON.h"
+#include "stdcpputil.hpp"
 
 //#include <qapplication.h>
 #include <qobject.h>
@@ -308,10 +309,7 @@ std::vector<const PasteHost*> buildCandidates(const PasteRequest& req,
             }
         }
         if (req.provider != "all" && !out.empty()) {   // any/空串：随机取序
-            for (size_t i = out.size() - 1; i > 0; i--) {
-                const size_t j = (size_t)rand() % (i + 1);
-                std::swap(out[i], out[j]);
-            }
+            randomShuffle(out.begin(), out.end());
         }
         if (out.empty()) { reason = "没有可用服务：内容类型/有效期/可用性过滤后候选为空"; }
         return out;

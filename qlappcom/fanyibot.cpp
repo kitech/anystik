@@ -3,6 +3,7 @@
 #include "eventpoller.h"
 #include "netproxy.h"
 #include "cJSON.h"
+#include "stdcpputil.hpp"
 
 //#include <qapplication.h>
 #include <qobject.h>
@@ -10,7 +11,6 @@
 #include <qglobal.h>
 
 #include <algorithm>
-#include <random>
 #include <utility>
 #include <cstdint>
 #include <cstdio>
@@ -695,10 +695,7 @@ std::vector<const FanyibotEngine*> buildCandidates(const FanyibotRequest& req,
             reason = "没有可用引擎：候选表全为不可用";
             return out;
         }
-        {   // all/any/空：每次请求随机取序
-            std::mt19937 rng((unsigned int)nowMs() ^ (unsigned int)(uintptr_t)&out);
-            std::shuffle(out.begin(), out.end(), rng);
-        }
+        randomShuffle(out.begin(), out.end());   // all/any/空：每次请求随机取序
         return out;
     }
     for (int i = 0; i < kEngineCount; i++) {

@@ -2,6 +2,7 @@
 #include "eventpoller.h"
 #include "netproxy.h"
 #include "restapi.h"
+#include "stdcpputil.hpp"
 
 // #include <qapplication.h>
 #include <qobject.h>
@@ -816,7 +817,7 @@ void websearchStart(const WebsearchRequest& req, QObject* target) {
         }
     } else {
         for (size_t i = 0; i < list.size(); ++i) { s->cands.push_back(&list[i]); }
-        std::random_shuffle(s->cands.begin(), s->cands.end());
+        randomShuffle(s->cands.begin(), s->cands.end());
     }
     {
         QMutexLocker lock(&g_mutex);

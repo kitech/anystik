@@ -7,6 +7,7 @@
 #include "cJSON.h"
 #include "obsd_sha2.h"
 #include "dspow_solve.h"
+#include "stdcpputil.hpp"
 
 //#include <qapplication.h>
 #include <qobject.h>
@@ -2491,11 +2492,7 @@ std::vector<const AigptbotProvider*> buildCandidates(const AigptbotRequest& req,
             out.push_back(&p);
         }
         if (!out.empty()) {
-            // Fisher–Yates
-            for (size_t i = out.size() - 1; i > 0; --i) {
-                const size_t j = (size_t)rand() % (i + 1);
-                std::swap(out[i], out[j]);
-            }
+            randomShuffle(out.begin(), out.end());
         } else {
             reason = "any/all：无可用候选（未配置 key 或仅含暂不支持项）";
         }

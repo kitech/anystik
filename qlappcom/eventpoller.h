@@ -25,6 +25,7 @@ const EventType34 FanyibotDoneType        = toEventType34(QEvent::User + 109);
 const EventType34 AigptbotDoneType        = toEventType34(QEvent::User + 110);
 const EventType34 WebsearchDoneType       = toEventType34(QEvent::User + 111);
 const EventType34 TtsbotDoneType          = toEventType34(QEvent::User + 112);
+const EventType34 UrlPreviewReadyType     = toEventType34(QEvent::User + 113);
 
 // ── API 请求类型 ──
 enum ApiRequestType {
@@ -63,6 +64,7 @@ enum ApiRequestType {
     ApiMediaDownload,
     ApiAvatarDownload,
     ApiRedactMessage,
+    ApiUrlPreview,
 };
 
 // ── 数据类型（事件契约）──
@@ -211,6 +213,18 @@ public:
     std::string chatType;
     int64_t rowid = 0;
     std::string eventId;
+};
+
+// 链接预览抓取结果（客户端直连外部站点，不经后端）
+class UrlPreviewEvent : public CustomEventBase {
+public:
+    UrlPreviewEvent() : CustomEventBase(UrlPreviewReadyType) {}
+    std::string urlKey;
+    bool success = false;
+    std::string title;
+    std::string description;
+    std::string siteName;
+    std::string errorInfo;
 };
 
 // Pastebin 虚拟联系人的上传结果（客户端直连各粘贴/临时文件服务，不经后端）
