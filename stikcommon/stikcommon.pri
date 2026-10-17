@@ -565,3 +565,9 @@ isEmpty(QT_VERSION) {
 STIKCOMMON_INCLUDES += $$STIK_VENDOR_DIR/include
 
 STIKCOMMON_CFLAGS = $$MYVENDOR_CFLAGS
+
+# ── 内置下载源唯一表（P2）────────────────────────────────────────────────
+# 纯 QtCore（QString/QChar，无 QNAM/QJson），故无条件挂载：Qt3/Qt4/Qt6 均编。
+# 该表是「唯一改源点」，供 anystik（StickerStore）与 qlstik DavLocalSource 共用。
+STIKCOMMON_SOURCES  += $$STIKCOMMON_DIR/builtinsources.cpp
+STIKCOMMON_HEADERS  += $$STIKCOMMON_DIR/builtinsources.h

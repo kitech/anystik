@@ -36,6 +36,8 @@ typedef QStringVariantMap QVariantMap;
 #include <QDateTime>
 #endif
 
+#include "builtinsources.h"   // 内置下载源唯一表（共享单一实现，qlstik 共用）
+
 class QFile;
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -77,19 +79,8 @@ struct StickerMeta {
 // 拼成多行展示/拷贝文本（类型/大小/尺寸/帧数/更新时间），预览与菜单共用
 QString formatStickerMeta(const StickerMeta& meta);
 
-// 内置下载源唯一表。approxSize 为预告约值（静态，非运行时所得）；-1 = 无实测
-// enabled=false 表示「预留未上线」：表情包目录隐藏该行、不参与残留下载清理、不生成
-// probe 提示；isBuiltinSourcePack 识别不受开关影响（注册过的包仍识别为内置）。
-struct BuiltinSource {
-    const char* name;
-    const char* url;
-    qint64 approxSize;
-    const char* previewUrl;  // 在线预览列表页；nullptr = 无预览（不显示预览按钮）
-    const char* updated;     // 源更新时间（上游发布日期/实测首测日期）；未知填 "今日"
-    bool enabled;            // 开关：true=上线显示，false=预留隐藏
-};
-extern const BuiltinSource kBuiltinSources[];
-extern const unsigned kBuiltinSourceCount;
+// 内置下载源唯一表已迁至 stikcommon/builtinsources.h（单一实现，qlstik 共用）：
+//   struct BuiltinSource / kBuiltinSources / kBuiltinSourceCount，见该头。
 
 class StickerStore : public QObject
 {

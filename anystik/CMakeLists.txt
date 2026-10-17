@@ -114,6 +114,8 @@ qt_add_executable(anystik
     ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/jsonl_lww_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/pack_meta_store.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/pack_meta_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/builtinsources.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon/builtinsources.cpp
     src/syncprogresspopup.h
     src/syncprogresspopup.cpp
     ../vendor/qwebdav/qnaturalsort.cpp
