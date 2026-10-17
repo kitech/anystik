@@ -377,6 +377,22 @@ isEmpty(QT_VERSION) {
 # 侧整块不参与编译，故无需 .cpp。
 STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qtemporaryfile_shim.h
 
+# ── 批次 5：QSettings / QtConcurrent 分版本实现 ──────────────────────────
+# 需求：stickerstore.cpp 用 QSettings 的 QVariant 存取（value/setValue/remove/
+#   childKeys，Qt4.0 才有）持久化 storageRoot / dlProgress / downloadedPackMeta；
+#   用 QtConcurrent::run(...).then()（Qt4.4 才有）跑迁移与安装的工作线程。
+# Qt3 侧：
+#   · qsettings_shim.h —— 把 QVariant 按真实类型落到 Qt3 QSettings 的类型化
+#     readXxxEntry/writeEntry/removeEntry，读侧按期望类型选函数（自由函数，
+#     覆盖 Qt3/Qt6 两侧）。⚠ 本仓两个版本共用同一 anystik.conf 时落盘不互通，
+#     垫片只保证同版本内与 Qt6 等价（详见该头文件头注释）。
+#   · qconcurrent_shim.h —— Qt3 无 QThread 信号，改用 detached pthread + 事件
+#     投递回 context 线程；只覆盖 run+then 两处形态（详见该头文件头注释）。
+# 两个头对 Qt4+ 均为空/走原生，故无条件登记（依赖扫描）。⚠ qconcurrent_shim.h
+# 的 Qt3 分支依赖 pthread（glibc 2.34+ 已在 libc 内，无需显式 -lpthread）。
+STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qsettings_shim.h \
+                      $$STIKCOMMON_DIR/qconcurrent_shim.h
+
 # ── 批次 5：QDirIterator 分版本实现 ──────────────────────────────────────
 # 需求：stickerstore.cpp:3822 用 QDirIterator 递归收集 *.eif / *.EIF
 # （「zip 里再套一层 eif」的兼容展开）。QDirIterator 随 Qt 4.2 引入，Qt3.5 无。

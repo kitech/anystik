@@ -74,6 +74,17 @@ static uint8_t  g_gifClosestIdx[1u << G_GIF_CC_BITS];
 #define GIF_FREE free
 #endif
 
+// ── qlstik：把 gif-h 实现整体收进匿名命名空间 ──
+//   stickerclipboard.cpp 与 stickerstore.cpp 会各自 include 本头；若这些函数保持
+//   外部链接，链接期会重复定义。又因本地 O3 副本与 vendor/ 原件算法不同，不能靠
+//   inline 合并，故整体放入匿名命名空间：每个 TU 各持内部链接副本，互不冲突。
+//   类型（GifPalette/GifWriter）经匿名命名空间的隐式 using 声明，在本 TU 内仍可
+//   不限定名引用。上面两个 g_gifClosest* 已是 static，保持在外即可。
+namespace {
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
+
 const int kGifTransIndex = 0;
 
 typedef struct
@@ -893,6 +904,8 @@ bool GifEnd( GifWriter* writer )
 
     return true;
 }
+
+} // namespace（qlstik：gif-h 实现内部链接封装收尾）
 
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC pop_options

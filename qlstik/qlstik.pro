@@ -20,6 +20,16 @@ TARGET = qlstik
 # 且 elementsByTagName 只比本地名忽略命名空间，实测把 /dir/笔记.txt 污染成
 # /dir/笔记.txt<U+006C>。故摘掉 xml 模块，少一个 Qt 依赖。
 QT = core gui widgets network
+# QtConcurrent：stickerstore 的迁移/安装异步任务用（Qt4.4 引入）。但 stickerstore
+# 仅在 Qt3/Qt≥5 挂载（Qt4 语法不兼容，见下），Qt3 侧走 stikcommon/qconcurrent_shim.h
+# 的等价实现，故只在 Qt≥5 追加真实模块。Qt3 的 qmake 会把 QT += concurrent 当未知
+# 模块报错；Qt4 加了也无人使用、徒增 -lQtConcurrent 依赖。见移植计划批次 5。
+!lessThan(QT_VERSION, 5.0.0): QT += concurrent
+# Qt 私有模块：stickerstore.cpp 的 Qt4+ 分支直接 include 原件
+# <QtCore/private/qzipreader_p.h>（Qt3 走 stikcommon/qzipreader_shim.h）。anystik
+# 侧链接 Qt6::CorePrivate（CMakeLists:156）。core-private 模块 Qt5 起可用，且
+# stickerstore 仅 Qt3/Qt≥5 挂载，故 ≥5 时补上。
+!lessThan(QT_VERSION, 5.0.0): QT += core-private
 CONFIG += moc
 CONFIG += sdk_no_version_check
 
@@ -61,6 +71,10 @@ SOURCES += \
     src/stickerclipboard.cpp \
     src/stickerpreviewoverlay.cpp \
     src/stickerpaste.cpp \
+    # 批次 5：StickerStore（贴纸库门面）——整文件从 anystik/src 平移。见下方
+    # Qt3/Qt≥5 条件块挂载（Qt4 语法不兼容：PMF connect / errorOccurred /
+    # QtConcurrent .then）。依赖 stikcommon 批次 5 垫片与 eifreader/
+    # pack_meta_store/jsonl_lww_store/builtinsources。
     # OpenSSH openbsd-compat sha1（BSD API SHA1Init/Update/Final，与现有
     # SHA1_* 不同名零冲突）。双实现并存、只编不接，供后续切换/对照。
     # 默认不覆盖传入内存（无条件栈拷贝）；现用 qlcomp/qlcomp 侧 sha1 默认会
@@ -90,11 +104,17 @@ HEADERS += \
 # 弹窗：SyncEngine）。stickerlistpage.cpp 里引用 SyncEngine 的段亦同闸。
 # davsource 无 Q_OBJECT 不需 moc；syncprogressdialog 有 Q_OBJECT，由 qmake moc。
 isEmpty(QT_VERSION) {
-    SOURCES += src/davsource.cpp src/syncprogressdialog.cpp
-    HEADERS += src/davsource.h src/syncprogressdialog.h
+    SOURCES += src/davsource.cpp src/syncprogressdialog.cpp src/stickerstore.cpp
+    HEADERS += src/davsource.h src/syncprogressdialog.h src/stickerstore.h
 } else:!lessThan(QT_VERSION, 5.0.0) {
-    SOURCES += src/davsource.cpp src/syncprogressdialog.cpp
-    HEADERS += src/davsource.h src/syncprogressdialog.h
+    SOURCES += src/davsource.cpp src/syncprogressdialog.cpp src/stickerstore.cpp
+    HEADERS += src/davsource.h src/syncprogressdialog.h src/stickerstore.h
+    # stickerstore.cpp 的 Qt4+ 分支直接 include 原件 qnaturalsort.h（Qt3 走
+    # stikcommon/qnaturalsort_shim.h）；列表页 pack 标题排序也用它。故补原件
+    # 的搜索路径并编译其 .cpp（anystik 侧同样编此文件，见 CMakeLists:121）。
+    INCLUDEPATH += $$PWD/../vendor/qwebdav
+    SOURCES += $$PWD/../vendor/qwebdav/qnaturalsort.cpp
+    HEADERS += $$PWD/../vendor/qwebdav/qnaturalsort.h
 }
 
 # src/main.cpp 与 src/mainwindow.cpp 都 #include "app_icon.xpm"（内嵌 XPM，

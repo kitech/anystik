@@ -1,0 +1,303 @@
+#ifndef STICKER_STORE_H
+#define STICKER_STORE_H
+
+#ifdef QT3_BUILD
+// Qt3.5.0 无同名驼峰头，且三个类型名不同：
+//   * QByteArray 是 typedef QMemArray<char>，实用面在 <qcstring.h>；
+//   * QVariantMap 在 Qt3 叫 QStringVariantMap（qvariant.h:87 已 typedef 到
+//     QMap<QString,QVariant>，QVariant::toMap() / QVariant(QMap) 都在）；
+//   * QHash 由 stikcommon/qhash_shim.h 提供。
+// ⚠ 语义漂移点：Qt3 的 QMap 是**有序**（按 key 排序），Qt6 的 QVariantMap 基于
+// QHash 是**无序**。packMeta() 的返回值若被按遍历顺序消费，两侧顺序会不同。
+#include <qobject.h>
+#include <qstring.h>
+#include <qstringlist.h>
+#include <qcstring.h>
+#include <qvector.h>
+#include <qmap.h>
+#include <qvariant.h>
+#include <qdatetime.h>
+
+#include "qhash_shim.h"
+#include "qstring_shim.h"
+// qint64/qreal 是 Qt4 引入的类型别名，Qt3 只有 Q_LONG；由本垫片提供
+// （qglobaltype_shim.h:43,51）。
+#include "qglobaltype_shim.h"
+
+typedef QStringVariantMap QVariantMap;
+#else
+#include <QObject>
+#include <QString>
+#include <QStringList>
+#include <QByteArray>
+#include <QVector>
+#include <QHash>
+#include <QVariantMap>
+#include <QDateTime>
+#endif
+
+#include "builtinsources.h"   // 内置下载源唯一表（共享单一实现，qlstik 共用）
+
+class QFile;
+class QNetworkAccessManager;
+class QNetworkReply;
+class QNetworkRequest;
+class QUrl;
+
+struct StickerPackBrief {
+    QString id;
+    QString title;
+    QString author;
+    QString coverPath;
+    int     position = 0;
+};
+
+struct StickerBrief {
+    QString id;
+    QString packId;
+    QString filePath;
+    QString emoji;
+    int     width  = 0;
+    int     height = 0;
+    int     size   = 0;
+    qint64  lastUsed = 0;
+    QString description;   // 图片描述，不超过 140 字
+    int     isPublic = 0;   // 是否公开（默认不公开）
+};
+
+// 贴纸图片元信息（由文件探测：类型/大小/长宽/帧数/更新时间）
+struct StickerMeta {
+    QString typeLabel;     // 人类可读类型，如 "GIF (image/gif)"
+    QString mime;          // 原始 MIME，如 "image/gif"
+    bool    animated = false;
+    int     frames = 0;    // >1 即动画
+    int     width = 0;
+    int     height = 0;
+    qint64  sizeBytes = 0; // 文件字节数
+    QDateTime modified;    // 文件修改时间
+};
+// 拼成多行展示/拷贝文本（类型/大小/尺寸/帧数/更新时间），预览与菜单共用
+QString formatStickerMeta(const StickerMeta& meta);
+
+// 内置下载源唯一表已迁至 stikcommon/builtinsources.h（单一实现，qlstik 共用）：
+//   struct BuiltinSource / kBuiltinSources / kBuiltinSourceCount，见该头。
+
+class StickerStore : public QObject
+{
+    Q_OBJECT
+public:
+    static StickerStore* instance();
+
+    // 惰性初始化 Storage（message.db/cache.db + sticker 表），线程安全单次执行
+    bool ensureInit();
+
+    // ── 查询（全部走 StickerDbSyncInterface，GUI 线程直接调用）──
+    QVector<StickerPackBrief> packs(int installed = 1,
+                                    const char* orderby = "created_at DESC",
+                                    int limit = 0, int offset = 0);
+    QVector<StickerBrief> stickers(const QString& packId,
+                                   const char* orderby = "rowid DESC",
+                                   int limit = 0, int offset = 0,
+                                   int deleted = 0, const char* emoji = nullptr);
+    QVector<StickerBrief> recent(int limit = 60);
+    QVector<StickerBrief> search(const QString& query);
+    int countStickers(const QString& packId);
+    // 剔除内部载体（_stikmeta.svg）与冲突文件（*.conflict<digits>）后的列表。
+    QVector<StickerBrief> uiStickers(const QString& packId,
+                                     const char* orderby = "rowid DESC",
+                                     int limit = 0, int offset = 0,
+                                     int deleted = 0, const char* emoji = nullptr);
+
+    // ── 写操作 ──
+    bool importDirectory(const QString& dir, QString* errorOut = nullptr);
+    bool pasteFromClipboard(QString* errorOut = nullptr, bool* dup = nullptr,
+                            QString* resurrectId = nullptr);
+    // 由任意字节源（桌面剪贴板 PNG / Android 剪贴板或分享读取的原始图片字节）入库到「粘贴板」，
+    // 内部按内容探测格式、sha1 幂等去重
+    // dup: 内容已在「粘贴板」（文件幂等命中）; resurrectId: 非空=该行被软删、可弹窗询问还原
+    bool importImageBytes(const QByteArray& bytes, QString* errorOut = nullptr,
+                          bool* dup = nullptr, QString* resurrectId = nullptr);
+    // 还原一张被移除（软删）的贴纸，保留原 emoji/描述/位置/最近用；成功发 dataChanged
+    bool restoreSticker(const QString& stickerId);
+    bool renamePack(const QString& packId, const QString& newTitle);
+    bool deletePack(const QString& packId);
+    bool deleteSticker(const QString& stickerId);
+    // 更新贴纸描述（简介）；成功发 dataChanged
+    bool setStickerDescription(const QString& stickerId,
+                               const QString& description);
+    void touchSticker(const QString& stickerId);
+    // 同步收尾：各包描述载体回写 DB；合并 *.conflict* 内容（保留冲突文件）。
+    void applyAllPackMetas();
+    void resolveCarrierConflicts();
+
+    // 复制图片到剪贴板（Desktop: QClipboard 位图；Android: FileProvider content URI(image/*) + toast）
+    bool copyStickerToClipboard(const QString& filePath);
+    // FM复制：按文件管理器复制机制发布「路径+元信息」
+    // （Desktop: text/uri-list + x-special/gnome-copied-files + text/plain；Android: 纯文本路径+元信息）
+    bool copyPathAndMetaToClipboard(const QString& filePath);
+    // 由文件探测元信息（类型/大小/长宽/帧数/更新时间）
+    StickerMeta stickerMeta(const QString& filePath) const;
+    // 按 scale 缩放后复制（静态→QImage scaled 位图；动画帧逐帧缩放，GIF 源保 GIF
+    // 经 gif-h 重编码、其余动画源转 APNG；放大结果最长边 >4096 等比封顶）
+    bool copyStickerScaledToClipboard(const QString& filePath, qreal scale);
+    // 出向分享：Android 经 ShareActivity 拉起系统分享面板（ACTION_SEND + FileProvider）；
+    // 非 Android 返回 false（调用方 toast 提示）
+    bool shareStickerFile(const QString& filePath);
+
+    // ── 下载包（自带地址）──
+    // 成品落 dataDir/packs/<标题>/**；元数据(url/版本commit/MD5)持久化在
+    // QSettings: downloadedPacks(QStringList) + downloadedPackMeta/<packId>(map)；
+    // 下载中磁盘仅留唯一的 <md5(url)16>.part，无临时元文件。
+    bool setPackInstalled(const QString& packId, bool installed);
+    bool uninstallPack(const QString& packId, bool removeFiles);
+    qint64 packDiskSize(const QString& packId);
+    QVariantMap packMeta(const QString& packId) const;
+    // 是否为「内置下载源」的包：downloadedPackMeta/<id>.url 命中 kBuiltinSources
+    // （归一化匹配，去 gh-proxy 前缀），或标题命中 kBuiltinSources[].name
+    // （dav 云下载/导入建的包无 url 元数据，靠自带 name 判据兜底）。
+    bool isBuiltinSourcePack(const QString& packId,
+                             const QString& title) const;
+    // 诊断辅助（只读、不改判定）：返回该包的 url/标题 相对内置源表的比对结果，
+    // 供定位「内置源包为何未被排除上传」。格式：
+    //   id=.. title=.. meta.url=.. urlNorm=.. urlHit=YES/NO builtinTitleHit=YES/NO
+    QString builtinSourceDiag(const QString& packId, const QString& title) const;
+    // 全部内置源包对应的云端目录名集合（sanitizeDirName(title)）：
+    // 供同步两侧统一排除——上传侧整包不列出、下载侧对命中的云目录跳过拉取
+    QStringList builtinSourceCloudDirs();
+
+    void probeRemote(const QString& url);
+    // 动态精确大小：获取 HEAD 成功且带 Content-Length 时写入的 realSize；无则 -1
+    qint64 cachedRealSize(const QString& url) const;
+    // 预告填入的约值大小：seedBuiltinApproxSizes 预写入的 approxSize；无则 -1
+    qint64 cachedApproxSize(const QString& url) const;
+    // 预告填入：首启把内置源 approxSize(含 -1) 缺省写入元数据，零网络、幂等
+    void seedBuiltinApproxSizes();
+    void downloadPack(const QString& url);
+    void cancelDownload(const QString& url);
+    bool hasPartialDownload(const QString& url) const;
+    // 清理下载区残留：删除指纹不属于 knownUrls 的 *.part，并清除对应 dlProgress 死条目
+    void cleanupAbandonedDownloads(const QStringList& knownUrls);
+
+    // 图片描述长度上限（140 字）；写入/编辑描述时按此截断
+    static constexpr int MaxDescriptionLength = 140;
+
+    // ── 贴纸存储根（base）切换 ──
+    // AppPrivate = AppLocalDataLocation；Pictures = 平台相册/anystik 目录。
+    // 注意：切到 Pictures 仅当作「文件存储位置」，不主动触发系统相册索引
+    //       刷新（MediaScanner），因此新图片不会立即出现在系统相册中。
+    enum class StorageRoot { AppPrivate, Pictures };
+    bool   switchStorageRoot(StorageRoot target, QString* errorOut = nullptr);
+    QString storageRootPath(StorageRoot r) const;
+    bool   isCurrentStoragePictures() const;
+    QString currentStickerBaseDir() const { return stickerBaseDir(); }
+    // 由 DB 存储的相对路径还原为绝对路径（相对 stickerBase()，绝对路径透传）
+    QString resolveStickerPath(const QString& stored);
+    // resolveStickerPath 的反向：绝对路径还原为相对 stickerBase() 的相对路径
+    // （base 外/绝对路径原样返回）
+    QString relativeToBase(const QString& abs);
+
+    // ── 双向同步的下行落地接口（只增改、不做删除方向）──
+    // 云端目录名净化（同 davbisync 旧 normalizeDirName；包标题 → 合法目录名）
+    static QString sanitizeDirName(const QString& name);
+    // 按标题复用或新建贴纸包，返回 packId；失败返回空串
+    QString ensurePack(const QString& title);
+    // 把云端 get 落地的临时文件移入目标目录并入库。
+    // targetRel 非空时落盘到该相对路径（= 业务 dbRel，与下载侧键一致）：
+    //   例 pastes/<f>     → base/pastes/<f>（剪贴板顶层，避免误入 packs/）
+    //       packs/<T>/<f> → base/packs/<T>/<f>
+    // 为空时沿用 base/packs/<title>/<fileName>（按包标题）。
+    // dstName 非空时用其作为目标文件名（下载侧传云端原始 basename，避免
+    // 以临时文件名落盘）；为空则沿用 srcAbs 文件名。幂等：目标相对路径已有
+    // sticker 行则直接返回 true（不动字节）。
+    bool importStickerFile(const QString& packId, const QString& srcAbs,
+                           QString* errorOut = nullptr,
+                           const QString& dstName = QString(),
+                           const QString& targetRel = QString());
+    // 冲突改名：重命名本地文件并对 DB 迁移 file_path（packId + 旧文件名）
+    bool renameStickerFile(const QString& packId, const QString& oldFileName,
+                           const QString& newFileName);
+
+signals:
+    void dataChanged();
+    // 迁移进度：进度按「文件数」计算（done/total）；copiedBytes 为已拷贝字节，
+    // 仅用于展示、不参与进度计算。copiedFiles/skippedFiles 分别为实际拷贝和
+    // CRC64+大小校验一致跳过的文件数。工作线程发出。
+    void migrationProgress(int done, int total, qint64 copiedBytes,
+                           int copiedFiles, int skippedFiles,
+                           const QString& current);
+    // 迁移结束（GUI 线程发出）。ok=false 时 detail 为失败原因。
+    void migrationFinished(bool ok, const QString& detail);
+    // size: -1 = 未知(如 zip 整包源无 Content-Length)
+    // version/versionRaw: commit sha / ETag / Last-Modified / 未知
+    void probeDone(const QString& url, qint64 size, const QString& version,
+                   const QString& versionRaw, bool ok, const QString& error);
+    void progressChanged(const QString& url, qint64 done, qint64 total);
+    void downloadFinished(const QString& url, bool ok, const QString& error);
+
+private:
+    StickerStore(QObject* parent = nullptr);
+
+    void dropLegacyChatTables();
+
+    struct DownloadTask {
+        QString url;
+        QString partPath;
+        QFile* out = nullptr;
+        QNetworkReply* reply = nullptr;
+        qint64 offset = 0;
+        qint64 total = -1;
+        QString name;
+        bool cancelled = false;
+        bool installing = false;   // 安装阶段（工作线程），期间不可取消
+    };
+
+    // install 工作线程的返回结果；GUI 线程收尾时据此写元数据并发信号
+    struct InstallResult {
+        bool ok = false;
+        QString message;           // 成功=标题；失败=错误文案
+        QString packId;
+        QString note;              // 成功附加提示（如「远端内容已变化」）
+        QString dir;               // dataDir/packs/<sanitized 标题>
+        qint64  total = 0;         // zip 字节数
+        QString md5Hex;
+    };
+
+    QNetworkRequest makeRequest(const QUrl& url);
+    QString downloadPartPath(const QString& url) const;
+    void ensureNam();
+    void startDownload(const QString& url, bool noRange);
+    void handleDownloadFinished(DownloadTask* task);
+    void finishIfComplete(DownloadTask* task);
+    // 安装三段式：runInstall(GUI 线程启动) → runInstallWork(工作线程执行)
+    // → finalizeInstall(GUI 线程收尾：QSettings + 信号 + task 清理)
+    void runInstall(DownloadTask* task);
+    InstallResult runInstallWork(DownloadTask* task);
+    void finalizeInstall(DownloadTask* task, const InstallResult& r);
+    void closeOut(DownloadTask* task);
+    // eif 直链安装（工作线程；文件已重命名为 zipPath，仅头部魔数已判别）
+    InstallResult runInstallEif(DownloadTask* task, const QString& eifPath,
+                                const QByteArray& md5);
+    // tgs 直链安装（工作线程；单文件 gzip Lottie，头部魔数已判别）
+    InstallResult runInstallTgs(DownloadTask* task, const QString& tgsPath,
+                                const QByteArray& md5);
+
+    // 贴纸存储根目录（macOS/Android 通用；默认 = AppLocalDataLocation）。
+    // DB 的 file_path/cover_path 存「相对 base」的相对路径；读取时经
+    // resolveStickerPath() 拼回 base 得到绝对路径。
+    mutable QString m_stickerBaseDir;
+    QString stickerBaseDir() const;
+    // 迁移完全成功后清理旧 base 的贴纸文件（packs/、pastes/），避免两份拷贝
+    void cleanupMigrationSource(const QString& fromRoot);
+    // 迁移异步：工作线程执行「阶段一 只复制」（不碰源/DB），全部成功后才在
+    // GUI 线程执行「阶段二 DB 转换 + 持久化 + 切 base」。任一步失败仅清理
+    // 目标侧副本，绝不动旧数据与文件（详见 switchStorageRoot 实现）。
+    bool m_migrating = false;
+    StorageRoot m_pendingStorageRoot = StorageRoot::AppPrivate;
+
+    static StickerStore* s_instance;
+    bool m_initialized = false;
+    QNetworkAccessManager* m_nam = nullptr;
+    QHash<QString, DownloadTask*> m_tasks;
+};
+
+#endif // STICKER_STORE_H
