@@ -19,6 +19,25 @@
 #include "StyleParams.h"           // g_activeParams：圆钮取当前主题调色板
 #include "ThemeManager.h"          // ThemeManager::isDarkMode()
 
+// ── DAV 同步（批次 P4）──
+// 引擎（SyncEngine）、内置混淆回退（davObfusKey）、进度弹窗仅在 Qt3/Qt≥5 存在
+// （stikcommon.pri 把 davbisync.cpp 的挂载限定为 Qt3/Qt≥5，Qt4 跳过）。
+// 故本段连同 onSyncButton/onSyncFinished/ensureSyncDialog 用同一版本闸包裹，
+// 免得恒编译的 UI 文件在 Qt4 下引用到未编入的 SyncEngine 符号。
+#if defined(QT3_BUILD) || QT_VERSION >= 0x050000
+#include "davbisync.h"            // SyncEngine / davbisync::Finish*
+// ⚠ Qt3 下 davbisync.h → qmap_shim.h 会留下对象式宏 `#define QMap
+//   qlstik_qt3::QMapShim`（文本级替换，davbisync.h 只在自身末尾 #undef
+//   QMapLike，不收 QMap）。不收口会改写本文件后续所有 QMap token，破坏
+//   m_tileImageCache（真 Qt3 QMap）等既有类型。这里立即 #undef 恢复原生 QMap。
+#ifdef QT3_BUILD
+#undef QMap
+#endif
+#include "davobfus.h"             // davObfusKey()
+#include "qstring_shim.h"         // qTrimmed / qToStdString
+#include "syncprogressdialog.h"
+#endif
+
 #include <algorithm>
 
 #ifdef QT3_BUILD
@@ -842,6 +861,8 @@ StickerListPage::StickerListPage(QWidget* parent)
     , m_importBtn(0)
     , m_syncBtn(0)
     , m_moreBtn(0)
+    , m_syncEngine(0)
+    , m_syncDialog(0)
     , m_searchLine(0)
     , m_countLabel(0)
     , m_tabBarBox(0)
@@ -943,7 +964,7 @@ void StickerListPage::buildTopBar(QBoxLayout* parent)
     m_title->setAlignment(Qt::AlignCenter);
     h->addWidget(m_title, 1);    // :417 Expanding
 
-    // ⚠ 四个按钮只搬布局与文案；点击按本批范围统一接 onTopBarButton() 空处理
+    // ⚠ 四个按钮只搬布局与文案；粘贴/同步已接，导入/⋯ 暂留 onTopBarButton() 空处理
     //   （anysk 分别接 requestPasteSticker / showImportMenu / DAV 同步 / showOptionsMenu）
     static const char* kTopBtnText[4] = { "粘贴", "导入", "同步", "\xE2\x8B\xAF" };
     QPushButton** topBtns[4] = { &m_pasteBtn, &m_importBtn, &m_syncBtn, &m_moreBtn };
@@ -952,8 +973,14 @@ void StickerListPage::buildTopBar(QBoxLayout* parent)
         //   Qt3 (parent,text) / Qt4+ (text,parent) 的参数顺序差异
         QPushButton* b = new QPushButton(topBar);
         b->setText(QString::fromUtf8(kTopBtnText[i]));
-        connect(b, SIGNAL(clicked()), this,
-                (i == 0) ? SLOT(onPasteButton()) : SLOT(onTopBarButton()));
+        // index 0→粘贴 / 2→同步 / 1(导入)、3(⋯) 暂留通用占位
+        if (i == 0) {
+            connect(b, SIGNAL(clicked()), this, SLOT(onPasteButton()));
+        } else if (i == 2) {
+            connect(b, SIGNAL(clicked()), this, SLOT(onSyncButton()));
+        } else {
+            connect(b, SIGNAL(clicked()), this, SLOT(onTopBarButton()));
+        }
         // 前三个宽 68（:420/428/436），⋯ 是 44×44（:505）
         if (i < 3) {
             b->setFixedWidth(68);
@@ -1476,12 +1503,149 @@ void StickerListPage::onPasteButton()
     }
 }
 
-// 顶栏按钮：布局文案已照搬 anysk，行为按本批范围留空处理
+// 顶栏「导入」/「⋯」：布局文案已照搬 anysk，行为按本批范围留空处理
+//   （「粘贴」→onPasteButton，「同步」→onSyncButton 已接）
 void StickerListPage::onTopBarButton()
 {
-    // anysk 对应：粘贴→requestPasteSticker / 导入→showImportMenu /
-    //             同步→DAV 同步引擎 / ⋯→showOptionsMenu（:419-511）
+    // anysk 对应：导入→showImportMenu（:430-433）/ ⋯→showOptionsMenu（:512-515）
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 顶栏「同步」：DAV 双向同步（anysk stickerhomepage.cpp:439-506 的等价物）
+// ═══════════════════════════════════════════════════════════════════
+// 版本闸：仅 Qt3/Qt≥5（davbisync 未编入 Qt4）。Qt3 无 QT_VERSION，靠
+// defined(QT3_BUILD) 兜底。
+#if defined(QT3_BUILD) || QT_VERSION >= 0x050000
+
+namespace {
+// Qt3 的 QUrl 无 scheme()/userName()（只有 protocol()/user()），Qt4+ 反之。
+// scheme 用 qurl_shim 的 qUrlScheme()：Qt3 protocol() 对无 scheme 输入默认返回
+// "file"（污染），qUrlScheme 从原始串取，更可靠（qurl_shim.h:192-203）。
+inline QString syncUrlScheme(const QUrl& u)
+{
+#ifdef QT3_BUILD
+    return qUrlScheme(u);
+#else
+    return u.scheme();
+#endif
+}
+inline QString syncUrlUser(const QUrl& u)
+{
+#ifdef QT3_BUILD
+    return u.user();
+#else
+    return u.userName();
+#endif
+}
+} // namespace
+
+void StickerListPage::onSyncButton()
+{
+    // 运行中再点 → 仅把弹窗提到前面（anysk :440-443）
+    if (m_syncEngine && m_syncEngine->isRunning()) {
+        ensureSyncDialog(false);
+        return;
+    }
+
+    // ── 读连接配置（照搬 anysk :444-467）──
+    // anysk 直接读 QSettings；qlstik 走 Config（后端 QSettings34，同一 anystik.conf）。
+    QString davUrl  = qTrimmed(Config::value(QString::fromUtf8("davUrl")));
+    QString davUser = qTrimmed(Config::value(QString::fromUtf8("davUser")));
+    QString davPass = qTrimmed(Config::value(QString::fromUtf8("davPass")));
+
+    const bool settingsComplete =
+        !davUrl.isEmpty() && !davUser.isEmpty() && !davPass.isEmpty();
+    // 仅当三项齐全且地址有效（QUrl 合法且 host 非空）才用设置项，否则整体回退
+    const QUrl probe(davUrl);
+    if (!settingsComplete || !probe.isValid() || probe.host().isEmpty()) {
+        const QString key = davObfusKey();
+        const QUrl ob(key);
+        davUrl  = key;
+        davUser = syncUrlUser(ob);
+        davPass = ob.password();
+    }
+
+    const QUrl url(davUrl);
+    if (!url.isValid() || url.host().isEmpty()) {
+        ToastWidget::show(this, QString::fromUtf8("WebDAV 地址无效"), 2000);
+        return;
+    }
+    const bool https = syncUrlScheme(url).startsWith(QString::fromUtf8("https"));
+
+    if (!m_syncEngine) {
+        m_syncEngine = new SyncEngine(this);
+        connect(m_syncEngine, SIGNAL(finished(int,const QString&)),
+                this, SLOT(onSyncFinished(int,const QString&)));
+    }
+
+    ensureSyncDialog(true);                 // anysk :496
+    m_syncEngine->setConnectionSettings(
+        https ? 2 : 1, url.host(), url.path(), davUser, davPass);
+    if (m_syncEngine->startSync()) {        // anysk :503-505
+        m_syncBtn->setText(QString::fromUtf8("同步中..."));
+    }
+}
+
+void StickerListPage::onSyncFinished(int exitCode, const QString& summary)
+{
+    if (m_syncBtn) {
+        m_syncBtn->setText(QString::fromUtf8("同步"));
+    }
+    if (exitCode == davbisync::FinishOk) {
+        // 收尾：先合并冲突载体（保留冲突文件）再回写 DB（anysk :482-485）
+        StickerDbSyncInterface* db = Storage::instance().stickerDb();
+        if (db) {
+            const std::string base = qToStdString(stickerBaseDir());
+            packmeta::resolveAllConflicts(*db, base);
+            packmeta::applyAll(*db, base);
+        }
+        // ⚠ P3 适配层不 emit dataChanged → 必须显式刷新，否则下载的新贴纸不显示
+        reloadActive();
+        refreshTabBar();
+        ToastWidget::show(this, QString::fromUtf8("同步完成"), 2000);
+    } else if (exitCode == davbisync::FinishCancelled) {
+        ToastWidget::show(this, QString::fromUtf8("已取消"), 2000);
+    } else {
+        ToastWidget::show(this,
+            QString::fromUtf8("同步失败：") + summary, 3000);
+    }
+}
+
+void StickerListPage::ensureSyncDialog(bool reset)
+{
+    if (!m_syncEngine) {
+        return;
+    }
+    if (!m_syncDialog) {
+        m_syncDialog = new SyncProgressDialog(m_syncEngine, this);
+        connect(m_syncDialog, SIGNAL(closed()),
+                m_syncDialog, SLOT(deleteLater()));
+        connect(m_syncDialog, SIGNAL(closed()),
+                this, SLOT(onSyncDialogClosed()));
+    }
+    if (reset) {
+        m_syncDialog->resetForRun();
+    }
+    m_syncDialog->show();
+}
+
+void StickerListPage::onSyncDialogClosed()
+{
+    m_syncDialog = 0;      // deleteLater 已入队；立即置空防重入
+    if (m_syncEngine && !m_syncEngine->isRunning()) {
+        m_syncEngine->deleteLater();
+        m_syncEngine = 0;
+    }
+}
+
+#else // Qt4：davbisync 未编入（stikcommon.pri 跳过）→ 同步为空操作
+
+void StickerListPage::onSyncButton() {}
+void StickerListPage::onSyncFinished(int, const QString&) {}
+void StickerListPage::ensureSyncDialog(bool) {}
+void StickerListPage::onSyncDialogClosed() {}
+
+#endif
 
 void StickerListPage::onBottomButton()
 {

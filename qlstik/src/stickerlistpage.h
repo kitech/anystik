@@ -108,6 +108,8 @@ class QPushButton;
 class QComboBox;
 class QButtonGroup;
 class QTimer;
+class SyncEngine;              // stikcommon/davbisync.h（仅 Qt3/Qt≥5 编入）
+class SyncProgressDialog;      // src/syncprogressdialog.h（仅 Qt3/Qt≥5 编入）
 
 // ── 网格常量（anystik stickerlist.cpp:18-20 逐条照搬）──
 // 放文件作用域：.cpp 的 static 解码函数也要用，不能放类私有枚举。
@@ -272,7 +274,14 @@ private slots:
     void onDeferredMenuDialog();
     // 顶栏「粘贴」：读剪贴板入库「粘贴板」→ 跳转（anysk requestPasteSticker）
     void onPasteButton();
-    // 顶栏/底栏按钮：布局与文案照搬 anysk，行为按本批范围留空
+    // 顶栏「同步」：DAV 双向同步（批次 P4）。实体实现仅在 Qt3/Qt≥5（见 .cpp
+    //   版本闸）；Qt4 下为空体（davbisync 未编入，stikcommon.pri 跳过）。
+    void onSyncButton();
+    // 同步引擎 finished(exitCode,summary) 的宿主收尾（合并冲突载体 + 回写 DB + 刷新）
+    void onSyncFinished(int exitCode, const QString& summary);
+    // 同步弹窗关闭：置空指针；引擎非运行态则一并回收（anysk :1626-1633）
+    void onSyncDialogClosed();
+    // 顶栏「导入」/「⋯」：布局与文案照搬 anysk，行为按本批范围留空
     void onTopBarButton();
     void onBottomButton();
 
@@ -315,6 +324,8 @@ private:
     void buildBottomBar(class QBoxLayout* parent);
     void refreshTabBar();
     void reloadActive();
+    // DAV 同步弹窗懒建/复用（anysk ensureSyncPopup，:1618-1639）。仅 Qt3/Qt≥5。
+    void ensureSyncDialog(bool reset);
 
     // 数据加载（anystik stickerhomepage.cpp:749-769 的三个 loader）
     void loadAllStickers();
@@ -334,6 +345,11 @@ private:
     QPushButton* m_importBtn;
     QPushButton* m_syncBtn;
     QPushButton* m_moreBtn;
+    // ── DAV 同步（批次 P4）：引擎与进度弹窗均懒建 ──
+    // ⚠ 仅 Qt3/Qt≥5 使用；Qt4 下恒为 0（onSyncButton 空体）。前置声明指针，
+    //   头文件不需完整类型，故 Qt4 也能编。
+    SyncEngine*         m_syncEngine;
+    SyncProgressDialog* m_syncDialog;
 
     // ── searchRow（:519-528）：搜索框 + 右侧计数，同一行 ──
     // ⚠ 类型必须是 PlaceholderLineEdit 而非 QLineEdit：Qt3 QLineEdit 没有

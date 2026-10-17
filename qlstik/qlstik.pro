@@ -80,17 +80,19 @@ HEADERS += \
     src/stickerpaste.h \
     $$STIKCOMMON_HEADERS
 
-# ── DavLocalSource 适配层（批次 P3）──
-# davsource.cpp 实现 stikcommon/davlocalsource.h 的九方法。该接口的 .cpp 在
-# stikcommon.pri:250-256 仅在 Qt3 / Qt≥5 挂载（Qt4 跳过：其上 davbisync 依赖
-# qwebdavlite 的 Qt5 语法）。故本适配层同条件挂载，否则 Qt4 链接缺基类 vtable。
-# 无 Q_OBJECT，不需 moc。
+# ── DAV 同步适配层 + 进度弹窗（批次 P3/P4）──
+# davsource.cpp 实现 stikcommon/davlocalsource.h 的九方法；syncprogressdialog.*
+# 是 qlstik 同步进度弹窗（依赖 SyncEngine）。二者依赖的 davbisync.cpp 在
+# stikcommon.pri 仅在 Qt3 / Qt≥5 挂载（Qt4 跳过：其上 davbisync 依赖 qwebdavlite
+# 的 Qt5 语法）。故同条件挂载，否则 Qt4 链接缺符号（适配层：基类 vtable；
+# 弹窗：SyncEngine）。stickerlistpage.cpp 里引用 SyncEngine 的段亦同闸。
+# davsource 无 Q_OBJECT 不需 moc；syncprogressdialog 有 Q_OBJECT，由 qmake moc。
 isEmpty(QT_VERSION) {
-    SOURCES += src/davsource.cpp
-    HEADERS += src/davsource.h
+    SOURCES += src/davsource.cpp src/syncprogressdialog.cpp
+    HEADERS += src/davsource.h src/syncprogressdialog.h
 } else:!lessThan(QT_VERSION, 5.0.0) {
-    SOURCES += src/davsource.cpp
-    HEADERS += src/davsource.h
+    SOURCES += src/davsource.cpp src/syncprogressdialog.cpp
+    HEADERS += src/davsource.h src/syncprogressdialog.h
 }
 
 # src/main.cpp 与 src/mainwindow.cpp 都 #include "app_icon.xpm"（内嵌 XPM，
