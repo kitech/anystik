@@ -326,7 +326,7 @@ void SettingsPage::buildUi()
 
     // Row14 DAV URL（真）
     {
-        QWidget* r = mkRow(body, bl, QString::fromUtf8("DAV URL"));
+        QWidget* r = mkRow(body, bl, QString::fromUtf8("DAV URL（含端口）"));
         m_davUrlEdit = new QLineEdit(r);
         rl(r)->addWidget(m_davUrlEdit, 1);
     }

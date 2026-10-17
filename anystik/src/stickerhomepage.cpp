@@ -494,12 +494,14 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
         }
 
         ensureSyncPopup();
+        const int davPort = url.port();
         m_syncEngine->setConnectionSettings(
             https ? 2 : 1,
             url.host(),
             url.path(),
             davUser,
-            davPass);
+            davPass,
+            davPort > 0 ? davPort : 0);
         if (m_syncEngine->startSync()) {
             m_syncBtn->setText(tr("同步中..."));
         }

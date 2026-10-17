@@ -1603,8 +1603,10 @@ void StickerListPage::onSyncButton()
     }
 
     ensureSyncDialog(true);                 // anysk :496
+    const int davPort = url.port();         // Qt3 无默认参、Qt5/6 默认 -1；无端口得 <=0
     m_syncEngine->setConnectionSettings(
-        https ? 2 : 1, url.host(), url.path(), davUser, davPass);
+        https ? 2 : 1, url.host(), url.path(), davUser, davPass,
+        davPort > 0 ? davPort : 0);
     if (m_syncEngine->startSync()) {        // anysk :503-505
         m_syncBtn->setText(QString::fromUtf8("同步中..."));
     }
@@ -1628,8 +1630,13 @@ void StickerListPage::onSyncFinished(int exitCode, const QString& summary)
         refreshTabBar();
         ToastWidget::show(this, QString::fromUtf8("同步完成"), 2000);
     } else if (exitCode == davbisync::FinishCancelled) {
+        // 取消前可能已建包/已下载（importStickerFile 逐件入库），显式刷新
+        reloadActive();
+        refreshTabBar();
         ToastWidget::show(this, QString::fromUtf8("已取消"), 2000);
     } else {
+        reloadActive();
+        refreshTabBar();
         ToastWidget::show(this,
             QString::fromUtf8("同步失败：") + summary, 3000);
     }

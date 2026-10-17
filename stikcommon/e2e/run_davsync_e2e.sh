@@ -19,6 +19,12 @@ export XDG_DATA_HOME="${XDG_DATA_HOME:-/tmp/opencode/e2e-data}"
 export DAVSYNC_LOG="${DAVSYNC_LOG:-/tmp/opencode/davsync_access.log}"
 PORT="${E2E_PORT:-8098}"
 
+# 本机可能设 http_proxy（如 127.0.0.1:9339）：curl 与探针内的 libcurl 会把
+# 127.0.0.1 的自检/DAV 请求也发给代理 → 代理对 loopback 返 502，服务被误判「未起」。
+# e2e 只连本机，强制绕过代理。
+export no_proxy="127.0.0.1,localhost${no_proxy:+,${no_proxy}}"
+export NO_PROXY="$no_proxy"
+
 # ── 重置目录与数据 ───────────────────────────────────────────────
 rm -rf "$SERVER_ROOT" "$LOCAL_BASE" "$XDG_DATA_HOME"
 mkdir -p "$SERVER_ROOT/anystik/pastes" "$LOCAL_BASE/pastes" "$XDG_DATA_HOME"
