@@ -22,9 +22,10 @@ mkdir -p "$OUTDIR"
 
 CXX="g++ -std=c++11 -g -O0 -w"
 # 测试与被测产品代码同在 stikcommon/，故 -I. ；doctest 在 anystik/vendor
+# eventpoller.h 现居 qlappcom/（原 qldox/ 已并入 qlcomp+qlappcom），cJSON.h 在 qlcomp/
 FLAGS="-DQT3_BUILD -DQT_NO_DEBUG -DQT_SHARED -DQT_THREAD_SUPPORT \
   -I. -I../vendor -I../vendor/libnsgif \
-  -I../vendor/uc_apng_loader -I$QTDIR/include -I../qldox -I../qlcomp"
+  -I../vendor/uc_apng_loader -I$QTDIR/include -I../qlappcom -I../qlcomp"
 
 # libtiff：与 qlstik.pro 同款 pkg-config 探测。探测到 → 给测试二进制
 # HAVE_LIBTIFF（断言 supportedImageFormats 白名单含 tiff）并链 -ltiff，与 Qt3
@@ -72,13 +73,14 @@ test_qcoreapplication_shim.cpp
 test_qnam_shim.cpp
 test_jsonl_lww_store.cpp
 test_pack_meta_store.cpp
+test_qconcurrent_shim.cpp
 "
 
-# ── 被测产品代码：链接 run_tests 所需的 stikcommon/qlcomp/qldox 部分 ──
+# ── 被测产品代码：链接 run_tests 所需的 stikcommon/qlcomp/qlappcom 部分 ──
 # 不用 qlstik/build-qt3/*.o：那些 .o 是应用构建产物，会把当时的内联/宏展开烤进去；
 # 单测要的是「当前头文件」的效果，故全源码编译（与 qldox/build_tests.sh 同理由）。
 PRODUCTS="
-../qldox/eventpoller.cpp
+../qlappcom/eventpoller.cpp
 ../qlcomp/compat34.cpp
 ../qlcomp/limelog.cpp
 qwebdavlite.cpp
@@ -116,8 +118,8 @@ for src in $PRODUCTS; do
     $CXX $FLAGS -c "$src" -o "$o"
     OBJS="$OBJS $o"
 done
-# cJSON 是 C 源（qldox/cJSON.c），qjson_shim.cpp 依赖它
-$CXX $FLAGS -c ../qldox/cJSON.c -o "$OUTDIR/prod_cJSON.o"
+# cJSON 是 C 源（qlcomp/cJSON.c），qjson_shim.cpp 依赖它
+$CXX $FLAGS -c ../qlcomp/cJSON.c -o "$OUTDIR/prod_cJSON.o"
 OBJS="$OBJS $OUTDIR/prod_cJSON.o"
 
 # libnsgif 是纯 C 源（GIF 动画后端，qimagereader_shim.cpp 依赖），用 gcc 编，

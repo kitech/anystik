@@ -47,6 +47,7 @@ inline QString S(const char* s) { return QString::fromUtf8(s); }
 // 惰性单例 QApplication；故意不销毁（见文件头说明）。
 static QApplication* ensureApp()
 {
+    if (qApp) return qApp;                 // 可能已由其它测试文件创建
     static int    s_argc = 1;
     static char   s_arg0[] = "run_tests";
     static char*  s_argv[2] = { s_arg0, 0 };
