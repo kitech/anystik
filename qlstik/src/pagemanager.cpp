@@ -1,7 +1,6 @@
 #include "pagemanager.h"
 
-#include "config.h"
-#include "cJSON.h"
+#include "qsettings34.h"
 
 // ⚠ 不 include <qdebug.h>：Qt3.5 无此文件，qDebug 由 qobject.h 提供。
 //   Qt4+ 的 <QtDebug> 已被 Qt3 门排除，故按版本分支。
@@ -166,228 +165,12 @@ int pmStackIndexOf(StackedWidget* s, QWidget* page)
 } // namespace
 
 // ═══════════════════════════════════════════════════════════════════
-// QVariantMap ↔ JSON 编解码
+// 实例状态 / 栈结构：直接走 QSettings34（与 anystik 共用 anystik.conf）
 // ═══════════════════════════════════════════════════════════════════
-// Config 后端是 cJSON（qlstik/src/config.h），且 Config::value() 只回 QString
-// （config.cpp:70-83，只认 cJSON_IsString / IsTrue / IsFalse），故把整份状态
-// 序列化成**一个 JSON 文本**再以字符串形式塞进 config.json。
-//
-// 支持的类型子集（超出即跳过，不静默写错值）：
-//   s=string  i=int  u=uint  b=bool  d=double  l=StringList  m=嵌套 Map
-// 其余（QByteArray/QDate/自定义类型等）**不支持**，save 时跳过该键。
-// 已知缺口：anystik 用 QSettings，其 value(key).toMap() 能原样存任意 QVariant；
-// qlstik 的 cJSON 路径存不了任意 QVariant，这是存储后端换来的**能力收缩**，
-// 不是移植遗漏。若将来页面需要存二进制/日期，补 "b"(base64) / "t"(ISO8601) 分支。
-//
-// ⚠ 「JSON 文本塞进 cJSON 字符串字段」的双重转义：Config::setValue 走
-//   cJSON_AddStringToObject（config.cpp:99），它会把整段 JSON 文本当**字符串值**写入，
-//   引号被转义成 \"。读回时 Config::value 用 qFromUtf8(item->valuestring)（:77），
-//   拿到的是**已还原**的原始 JSON 文本，再交给 cJSON_Parse 才解出对象。
-//   两级各有一次序列化/反序列化，不冲突，但别误以为 config.json 里是嵌套对象。
+// page_<id>_state 存 QVariantMap、pageManager_history 存 QStringList，
+// 由 QSettings34 按 Qt6 的 @Variant(...) 编码落盘，anystik（Qt6 QSettings）
+// 可原样读回；反之亦然。
 
-// 跨版本取 QVariant 的类型号：Qt3 是 type()，Qt4/5 是 userType()，Qt6 是 typeId()
-static int pmVariantType(const QVariant& v)
-{
-#ifdef QT3_BUILD
-    return int(v.type());
-#elif QT_VERSION >= 0x060000
-    return int(v.typeId());
-#else
-    return int(v.userType());
-#endif
-}
-
-// 跨版本取类型枚举值：Qt6 把 QVariant::String 之类挪到了 QMetaType
-enum PmType {
-    PmInvalid, PmString, PmInt, PmUInt, PmBool, PmDouble, PmStringList, PmMap
-};
-
-static int pmClassify(const QVariant& v)
-{
-#ifdef QT3_BUILD
-    const int t = int(v.type());
-    if (t == QVariant::Invalid)  return PmInvalid;
-    if (t == QVariant::String)  return PmString;
-    if (t == QVariant::Int)     return PmInt;
-    if (t == QVariant::UInt)    return PmUInt;
-    if (t == QVariant::Bool)    return PmBool;
-    if (t == QVariant::Double)  return PmDouble;
-    if (t == QVariant::StringList) return PmStringList;
-    if (t == QVariant::Map)     return PmMap;
-    return PmInvalid;
-#else
-    const int t = pmVariantType(v);
-    const int tStr = int(QMetaType::QString);
-    const int tStrL = int(QMetaType::QStringList);
-    const int tMap = int(QMetaType::QVariantMap);
-    if (t == tStr)   return PmString;
-    if (t == tStrL)  return PmStringList;
-    if (t == tMap)   return PmMap;
-    if (t == int(QMetaType::Int))     return PmInt;
-    if (t == int(QMetaType::UInt))    return PmUInt;
-    if (t == int(QMetaType::Bool))    return PmBool;
-    if (t == int(QMetaType::Double))  return PmDouble;
-    if (t == int(QMetaType::Void))    return PmInvalid;
-    return PmInvalid;
-#endif
-}
-
-static cJSON* pmEncodeMap(const QVariantMap& map);
-
-static cJSON* pmEncodeValue(int kind, const QVariant& v)
-{
-    switch (kind) {
-    case PmString:
-        return cJSON_CreateString(qToUtf8(v.toString()).data());
-    case PmInt:
-        return cJSON_CreateNumber(double(v.toInt()));
-    case PmUInt:
-        return cJSON_CreateNumber(double(v.toUInt()));
-    case PmBool:
-        return cJSON_CreateBool(v.toBool() ? 1 : 0);
-    case PmDouble:
-        return cJSON_CreateNumber(v.toDouble());
-    case PmStringList: {
-        cJSON* arr = cJSON_CreateArray();
-        const QStringList l = v.toStringList();
-        for (int i = 0; i < l.size(); i++) {
-            cJSON_AddItemToArray(arr, cJSON_CreateString(qToUtf8(l[i]).data()));
-        }
-        return arr;
-    }
-    case PmMap:
-        return pmEncodeMap(v.toMap());
-    default:
-        return 0;
-    }
-}
-
-static cJSON* pmEncodeMap(const QVariantMap& map)
-{
-    cJSON* obj = cJSON_CreateObject();
-    if (!obj) { return 0; }
-    QVariantMap::const_iterator it = map.constBegin();
-    for (; it != map.constEnd(); ++it) {
-        const int kind = pmClassify(pmItValue(it));
-        if (kind == PmInvalid) { continue; }  // 不支持的类型：跳过，不写错值
-        cJSON* val = pmEncodeValue(kind, pmItValue(it));
-        if (!val) { continue; }
-        // t = 类型标记，v = 值。分开存是为了区分 Int 1 与 Bool true
-        // （JSON 里都是 "1"/"true"，靠标记才不丢类型）
-        cJSON* box = cJSON_CreateObject();
-        cJSON_AddItemToObject(box, "t", cJSON_CreateNumber(double(kind)));
-        cJSON_AddItemToObject(box, "v", val);
-        cJSON_AddItemToObject(obj, qToUtf8(it.key()).data(), box);
-    }
-    return obj;
-}
-
-static QVariantMap pmDecodeMap(cJSON* obj)
-{
-    QVariantMap out;
-    if (!cJSON_IsObject(obj)) { return out; }
-    const cJSON* item = obj->child;   // qlcomp 里的 cJSON 是新版，字段名是 child
-                                    // （老版才叫 cJSON_Child）
-    for (; item; item = item->next) {
-        if (!item->string) { continue; }
-        // ⚠ 类型标记在子对象 "t" 里（见 pmEncodeMap:278-279），不是 item 自身的
-        //   valuedouble —— 那是 "v" 的数值，读它会把 String/Bool 全解成 Int。
-        const cJSON* typeBox = cJSON_GetObjectItem(item, "t");
-        if (!cJSON_IsNumber(typeBox)) { continue; }
-        const int kind = int(typeBox->valuedouble);
-        cJSON* val = cJSON_GetObjectItem(item, "v");
-        switch (kind) {
-        case PmString: {
-            if (!cJSON_IsString(val)) { break; }
-            out[qFromUtf8(item->string)] = qFromUtf8(val->valuestring);
-            break;
-        }
-        case PmInt:
-            if (cJSON_IsNumber(val)) { out[qFromUtf8(item->string)] = int(val->valuedouble); }
-            break;
-        case PmUInt:
-            if (cJSON_IsNumber(val)) { out[qFromUtf8(item->string)] = uint(val->valuedouble); }
-            break;
-        case PmBool:
-            if (val) { out[qFromUtf8(item->string)] = (cJSON_IsTrue(val) != 0); }
-            break;
-        case PmDouble:
-            if (cJSON_IsNumber(val)) { out[qFromUtf8(item->string)] = val->valuedouble; }
-            break;
-        case PmStringList: {
-            if (!cJSON_IsArray(val)) { break; }
-            // ⚠ Qt3 QVariant 无 QStringList↔QStringList 的隐式互转的**赋值**路径，
-            //   实测 v.toStringList() 在 Qt3 返回 QStringList（QValueList<QString>），
-            //   而 QVariant 的构造重载要 QStringList 显式包一层。
-            QStringList l;
-            const cJSON* e = val->child;
-            for (; e; e = e->next) { l.append(qFromUtf8(e->valuestring)); }
-            out[qFromUtf8(item->string)] = QVariant(l);
-            break;
-        }
-        case PmMap:
-            out[qFromUtf8(item->string)] = QVariant(pmDecodeMap(val));
-            break;
-        default:
-            break;
-        }
-    }
-    return out;
-}
-
-// 序列化成文本（交给 Config::setValue 当字符串存）
-static QString pmMapToText(const QVariantMap& map)
-{
-    cJSON* obj = pmEncodeMap(map);
-    if (!obj) { return QString(); }
-    char* txt = cJSON_PrintUnformatted(obj);
-    cJSON_Delete(obj);
-    if (!txt) { return QString(); }
-    const QString out = qFromUtf8(txt);
-    free(txt);
-    return out;
-}
-
-static QVariantMap pmTextToMap(const QString& text)
-{
-    if (text.isEmpty()) { return QVariantMap(); }
-    const std::string raw = qToUtf8(text).data();
-    cJSON* obj = cJSON_Parse(raw.c_str());
-    if (!obj) { return QVariantMap(); }   // 坏 JSON：按空状态处理，不崩
-    const QVariantMap out = pmDecodeMap(obj);
-    cJSON_Delete(obj);
-    return out;
-}
-
-static QString pmStringListToText(const QStringList& l)
-{
-    cJSON* arr = cJSON_CreateArray();
-    if (!arr) { return QString(); }
-    for (int i = 0; i < l.size(); i++) {
-        cJSON_AddItemToArray(arr, cJSON_CreateString(qToUtf8(l[i]).data()));
-    }
-    char* txt = cJSON_PrintUnformatted(arr);
-    cJSON_Delete(arr);
-    if (!txt) { return QString(); }
-    const QString out = qFromUtf8(txt);
-    free(txt);
-    return out;
-}
-
-static QStringList pmTextToStringList(const QString& text)
-{
-    QStringList out;
-    if (text.isEmpty()) { return out; }
-    const std::string raw = qToUtf8(text).data();
-    cJSON* arr = cJSON_Parse(raw.c_str());
-    if (!arr) { return out; }
-    const cJSON* e = arr->child;
-    for (; e; e = e->next) {
-        if (cJSON_IsString(e)) { out.append(qFromUtf8(e->valuestring)); }
-    }
-    cJSON_Delete(arr);
-    return out;
-}
 
 // QStringList 去重值删除。⚠ Qt3 QStringList 没有 removeAll()（Qt4+ 才有），
 //   也没有 indexOf()（用 findIndex()）。倒序遍历 + erase 才能安全边查边删。
@@ -618,15 +401,20 @@ void PageManager::removeFromStack(Page* page)
     pmStackRemove(m_stackBox, page);
 }
 
-// ── 实例状态存取（走 Config/cJSON，不用 QSettings，见类注释偏差 a）──
+// ── 实例状态存取（QSettings34 原生 map，与 anystik 共用 anystik.conf）──
 QVariantMap PageManager::loadSavedState(const QString& id) const
 {
-    return pmTextToMap(Config::value("page_" + id + "_state"));
+    QSettings34 s;
+    return s.value(QString::fromLatin1("page_") + id
+                   + QString::fromLatin1("_state")).toMap();
 }
 
 void PageManager::storeSavedState(const QString& id, const QVariantMap& state)
 {
-    Config::setValue("page_" + id + "_state", pmMapToText(state));
+    QSettings34 s;
+    s.setValue(QString::fromLatin1("page_") + id
+               + QString::fromLatin1("_state"), state);
+    s.sync();
 }
 
 // ── 查询 ──
@@ -925,8 +713,10 @@ void PageManager::saveAllStates()
     }
 
     // 保存栈结构
-    Config::setValue("pageManager_history", pmStringListToText(m_history));
-    Config::setValue("pageManager_currentId", currentPageId());
+    QSettings34 s;
+    s.setValueStringList(QString::fromLatin1("pageManager_history"), m_history);
+    s.setValue(QString::fromLatin1("pageManager_currentId"), currentPageId());
+    s.sync();
 
     pmLog("[PageManager] saved " + pmNum(m_pages.size()) + " pages, history:"
           + pmStrList(m_history));
@@ -935,8 +725,9 @@ void PageManager::saveAllStates()
 // ── 状态恢复（进程死亡后重建）──
 void PageManager::restoreAllStates()
 {
+    QSettings34 s;
     const QStringList history =
-        pmTextToStringList(Config::value("pageManager_history"));
+        s.valueStringList(QString::fromLatin1("pageManager_history"));
     if (history.isEmpty()) { return; }
 
     pmLog("[PageManager] restoreAllStates, history:" + pmStrList(history));

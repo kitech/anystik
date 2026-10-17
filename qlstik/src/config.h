@@ -1,13 +1,16 @@
 #ifndef QLSTIK_CONFIG_H
 #define QLSTIK_CONFIG_H
 
-// qlstik 壳配置：uilang / style / dark 三键
-// 存储：~/.config/qlstik/config.json（cJSON，只用 qldox 带来的 cJSON，不引 hjson）
-// 模式参照 qltox/config.cpp（只读参考），差异：
-//   * 目录名 qlstik（不碰 qltox 的 ~/.config/qltox）
-//   * 纯 cJSON 读写（qltox 的 value/setValue 走 hjson，loadRoot/saveRoot 走 cJSON，
-//     两套并存；qlstik 这里只留 cJSON 一条路径）
-//   * 带默认值回退，缺键/坏文件都不崩
+// qlstik 壳配置：language / darkMode / style
+// 存储：与 anystik 共用 ~/.config/fedlet/anystik.conf（QSettings34 = Qt3 版高版本
+//       QSettings，落盘格式/键序/@Variant 编解码对齐 Qt6，故两程序能互读）。
+// 键名对齐 anystik：
+//   language    共享（qlstik 值域 zh-CN/zh-TW/en-US；落盘 en-US→en，读回 en→en-US）
+//   darkMode    共享 bool
+//   storageRoot 共享（stickerlistpage 用）
+//   page_*      共享（page_<id>_state=map / pageManager_history=StringList /
+//                     pageManager_currentId=str，与 anystik pagemanager 同名同型）
+//   style       qlstik 私有（anystik 无此键；其皮肤是 QSkinny 的 "skin" 整数）
 #include "compat34.h"
 
 class Config {
@@ -19,10 +22,12 @@ public:
 
     // 便捷读取：语言（zh-CN / zh-TW / en-US）
     static QString uiLang();
+    static bool setUiLang(const QString& lang);
     // 便捷读取：皮肤 id（qtFusion / macOS / windows / material / github）
     static QString styleId();
     // 便捷读取：深色模式
     static bool darkMode();
+    static bool setDarkMode(bool on);
 
     static QString configDir();
     static QString configFilePath();

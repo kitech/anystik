@@ -58,9 +58,10 @@ struct PageRegistration {
 //   4. 进程死亡保护（saveAllStates/restoreAllStates）
 //   5. 栈容器的 add/remove/raise
 //
-// 与 anystik 的三处**有意**偏差（移植计划 §6.3l L.2 已记）：
-//   a. QSettings → Config（cJSON）。qlstik 的配置后端是 cJSON 不是 QSettings
-//      （qlstik/src/config.h），且 qsettings_shim.h 尚未登记进任何 .pri。
+// 与 anystik 的偏差（移植计划 §6.3l L.2 已记）：
+//   a. 存储走 QSettings34（qlcomp/qsettings34.h）读写 ~/.config/fedlet/anystik.conf，
+//      与 anystik 共用同一份：page_<id>_state=QVariantMap、pageManager_history=
+//      QStringList、pageManager_currentId=QString，键名/类型与 anystik 一致。
 //   b. **没有** 250ms 延迟销毁/移除（anystik 靠 m_destroyTimer 等淡入淡出动画跑完再
 //      removeItem，避免 animator item 悬空）。本批砍掉动画（§6.3l L.2 表），
 //      故 destroyPage / removeWidget 同步执行 —— 动画没了，延迟也没有存在理由。

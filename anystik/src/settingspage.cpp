@@ -554,7 +554,7 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     trace_settings("settings-restore");
     m_transitionCombo->setCurrentIndex(settings.value("transition", 3).toInt());
     m_skinCombo->setCurrentIndex(settings.value("skin", 0).toInt());
-    m_darkSwitch->setChecked(settings.value("darkMode", false).toBool());
+    m_darkSwitch->setChecked(settings.value("darkMode", true).toBool());
     m_fontScaleCombo->setCurrentIndex(settings.value("fontScale", 1).toInt());
     m_debugBgSwitch->setChecked(settings.value("debugBackground", false).toBool());
     m_phoneAnswerCombo->setCurrentIndex(settings.value("phoneAnswer", 0).toInt());

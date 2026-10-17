@@ -447,7 +447,7 @@ static void qComboSetCurrent(QComboBox* combo, int index) {
 static QString stickerBaseDir()
 {
     // anysk：显式配置的根优先，非法则回落 AppLocalDataLocation。
-    // qlstik 用 Config（cJSON）而非 QSettings。
+    // qlstik 走 Config（现为 QSettings34，与 anystik 共用 anystik.conf）。
     const QString saved = Config::value(QString::fromUtf8("storageRoot"));
     if (!saved.isEmpty() && QDir(saved).exists()) {
         return saved;

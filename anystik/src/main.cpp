@@ -314,7 +314,7 @@ int main(int argc, char* argv[]) {
                 qskSkinManager->setSkin(names[skinIdx]);
             }
         }
-        bool dark = s.value("darkMode", false).toBool();
+        bool dark = s.value("darkMode", true).toBool();
         if (dark) {
             auto* skin = qskSkinManager->skin();
             if (skin) skin->setColorScheme(QskSkin::DarkScheme);

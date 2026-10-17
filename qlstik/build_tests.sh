@@ -11,8 +11,9 @@
 #   * 测试文件在 qlstik/test/（该目录原本已存在且为空），故 -I../stikcommon 之外
 #     还要能解析 config.h —— 它在 qlstik/src/，故加 -Isrc。
 #   * 被测产品只 config.cpp 一个；mainwindow/main 是 GUI，不进单测。
-#     但 config.cpp 依赖 stikcommon 的 qMkdir（qglobaltype_shim.h，纯头）
-#     与 cJSON（qldox/cJSON.c）。
+#     但 config.cpp 现走 QSettings34（qlcomp/qsettings34.cpp）读写
+#     ~/.config/fedlet/anystik.conf，故需一并编译 qsettings34.cpp；
+#     qMkdir 仍来自 stikcommon 的 qglobaltype_shim.h（纯头）。
 #   * 不需要 moc：qlstik/src 下无 Q_OBJECT 类。
 set -e
 cd "$(dirname "$0")"
@@ -24,11 +25,10 @@ mkdir -p "$OUTDIR"
 CXX="g++ -std=c++11 -g -O0 -w"
 # -Isrc  : config.h
 # -I../stikcommon : qglobaltype_shim.h（qMkdir）、qstring_shim.h 等垫片
-# -I../qldox      : cJSON.h
-# -I../qlcomp      : compat34.h
-# -I../anystik/vendor : doctest
+# -I../qlcomp      : compat34.h、qsettings34.h
+# -I../vendor : doctest（仓库根 vendor/）
 FLAGS="-DQT3_BUILD -DQT_NO_DEBUG -DQT_SHARED -DQT_THREAD_SUPPORT \
-  -I. -Itest -Isrc -I../stikcommon -I../qldox -I../qlcomp \
+  -I. -Itest -Isrc -I../stikcommon -I../qlcomp \
   -I../vendor -I$QTDIR/include"
 
 # ── 测试文件（新增一个就在这里加一行）────────────────────────────────
@@ -39,10 +39,11 @@ test/test_config.cpp
 # ── 被测产品代码 ────────────────────────────────────────────────────
 # compat34.cpp 带来 qMkdir / qToUtf8 / qFromUtf8 / toEventType34 的定义
 # （config.cpp 与测试脚手架都要用；qglobaltype_shim.h 只是纯头，无需编译）
+# qsettings34.cpp 是 config.cpp 的存储后端（Qt3 版高版本 QSettings）
 PRODUCTS="
 src/config.cpp
 ../qlcomp/compat34.cpp
-../qldox/cJSON.c
+../qlcomp/qsettings34.cpp
 "
 
 echo "=== 编译产品代码 ==="

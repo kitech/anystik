@@ -633,7 +633,7 @@ void MainWindow::onTitleUilang(int index)
 {
     if (index < 0 || index > 2) { return; }
     QString langCode = qFromUtf8(kLangCodes[index]);
-    Config::setValue("uilang", langCode);
+    Config::setUiLang(langCode);   // 共享键 language，落盘 en-US→en
     // loadLanguage 内部发 languageChanged → retranslateUi()
     Translator::instance().loadLanguage(langCode);
     QtappSetup::installQtTranslations(langCode);
@@ -653,7 +653,7 @@ void MainWindow::onTitleDark(bool on)
 {
     if (on == ThemeManager::isDarkMode()) { return; }
     ThemeManager::applyTheme(on);
-    Config::setValue("dark", on ? "true" : "false");
+    Config::setDarkMode(on);   // 共享键 darkMode（bool）
     updateAppearanceTooltips();
     refreshMenuTexts();   // 深色开关项文案随状态变
 }
