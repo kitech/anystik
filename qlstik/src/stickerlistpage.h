@@ -281,7 +281,10 @@ private slots:
     void onSyncFinished(int exitCode, const QString& summary);
     // 同步弹窗关闭：置空指针；引擎非运行态则一并回收（anysk :1626-1633）
     void onSyncDialogClosed();
-    // 顶栏「导入」/「⋯」：布局与文案照搬 anysk，行为按本批范围留空
+    // 顶栏「⋯」：弹选项菜单（anysk showOptionsMenu:1240-1312 的条目）。
+    //   ⚠ 必须放 slots 区：Qt3 moc 只收集本区的槽。
+    void onMoreButton();
+    // 顶栏「导入」：布局与文案照搬 anysk，行为按本批范围留空
     void onTopBarButton();
     void onBottomButton();
 
@@ -326,6 +329,8 @@ private:
     void reloadActive();
     // DAV 同步弹窗懒建/复用（anysk ensureSyncPopup，:1618-1639）。仅 Qt3/Qt≥5。
     void ensureSyncDialog(bool reset);
+    // 顶栏「⋯」选项菜单：建菜单并 popup（anysk showOptionsMenu:1240-1312）。
+    void showOptionsMenu(const QPoint& globalPos);
 
     // 数据加载（anystik stickerhomepage.cpp:749-769 的三个 loader）
     void loadAllStickers();
@@ -410,6 +415,9 @@ private:
     //   findChildren（只有 const char* 版，返回 QObjectList），且 Qt3 的
     //   QObjectList::operator[] 非 const。改用成员指针显式持有。
     Menu34* m_ctxMenu;
+    // 顶栏「⋯」选项菜单。同「成员显式持有 + 重开前 deleteLater」回收方式
+    //   （Qt3 无模板 findChildren），说明见 m_ctxMenu 处。
+    Menu34* m_moreMenu;
     // 待执行的延迟弹窗动作。⚠ 见 onDeferredMenuDialog() 处说明：Qt3 的
     //   QTimer::singleShot 收不了 lambda，只能把参数存成员再连真槽。
     //   ⚠ 早先这里只有裸字面量 1/2（switch 内），加预览删除时已是第三个调用方，

@@ -443,6 +443,26 @@ static Menu34* insertSubMenu(Menu34* menu, const QString& text)
 //   insertSeparator() 会占用一个 item id —— 但本文件不依赖 id（payload 走
 //   LambdaSlot 闭包），所以加分隔条不会打乱动作下标。
 
+// 插一个分隔条（anysk showOptionsMenu:1262/1268 的两处 addSeparator）。
+//   Qt3: QMenuData::insertSeparator(int index=-1)（qmenudata.h:206）
+//   Qt4+: QMenu::addSeparator()（qmenu.h:117）
+static void insertSeparator(Menu34* menu)
+{
+#ifdef QT3_BUILD
+    menu->insertSeparator();
+#else
+    menu->addSeparator();
+#endif
+}
+
+// 「⋯」菜单里本批尚未实现的项：点击弹 Toast（用户裁定：占位项弹提示，
+//   不做实际页面跳转）。后续接真页面时，把调用点换成对应 onXxx 槽即可。
+static void todoToast(QWidget* parent, const char* what)
+{
+    ToastWidget::show(parent,
+        QString::fromUtf8("尚未实现：") + QString::fromUtf8(what), 2000);
+}
+
 // ── QComboBox 跨版本助手：逐条照搬 qltox/qldox/logindialog.cpp:23-53 ──
 //   Qt3: insertItem(text) / setCurrentItem(i)
 //   Qt4+: addItem(text) / setCurrentIndex(i)
@@ -883,6 +903,7 @@ StickerListPage::StickerListPage(QWidget* parent)
     , m_imageUploader(0)
     , m_searchEngine(0)
     , m_ctxMenu(0)
+    , m_moreMenu(0)
     , m_pendingMenuDialog(0)
 {
     for (int i = 0; i < 3; i++) {
@@ -964,7 +985,7 @@ void StickerListPage::buildTopBar(QBoxLayout* parent)
     m_title->setAlignment(Qt::AlignCenter);
     h->addWidget(m_title, 1);    // :417 Expanding
 
-    // ⚠ 四个按钮只搬布局与文案；粘贴/同步已接，导入/⋯ 暂留 onTopBarButton() 空处理
+    // ⚠ 四个按钮只搬布局与文案；粘贴/同步/⋯ 已接，导入暂留 onTopBarButton() 空处理
     //   （anysk 分别接 requestPasteSticker / showImportMenu / DAV 同步 / showOptionsMenu）
     static const char* kTopBtnText[4] = { "粘贴", "导入", "同步", "\xE2\x8B\xAF" };
     QPushButton** topBtns[4] = { &m_pasteBtn, &m_importBtn, &m_syncBtn, &m_moreBtn };
@@ -973,11 +994,13 @@ void StickerListPage::buildTopBar(QBoxLayout* parent)
         //   Qt3 (parent,text) / Qt4+ (text,parent) 的参数顺序差异
         QPushButton* b = new QPushButton(topBar);
         b->setText(QString::fromUtf8(kTopBtnText[i]));
-        // index 0→粘贴 / 2→同步 / 1(导入)、3(⋯) 暂留通用占位
+        // index 0→粘贴 / 2→同步 / 3→⋯ 选项菜单 / 1(导入) 暂留通用占位
         if (i == 0) {
             connect(b, SIGNAL(clicked()), this, SLOT(onPasteButton()));
         } else if (i == 2) {
             connect(b, SIGNAL(clicked()), this, SLOT(onSyncButton()));
+        } else if (i == 3) {
+            connect(b, SIGNAL(clicked()), this, SLOT(onMoreButton()));
         } else {
             connect(b, SIGNAL(clicked()), this, SLOT(onTopBarButton()));
         }
@@ -1646,6 +1669,76 @@ void StickerListPage::ensureSyncDialog(bool) {}
 void StickerListPage::onSyncDialogClosed() {}
 
 #endif
+
+// 顶栏「⋯」：弹选项菜单（anysk showOptionsMenu:1240-1312 的条目结构）。
+void StickerListPage::onMoreButton()
+{
+    // ⚠ 重开前清上一次（同 showStickerMenu:1745-1747）。必须 deleteLater：
+    //   此刻若上一次菜单仍在事件派发栈内，delete 会当场析构。
+    if (m_moreMenu) {
+        m_moreMenu->deleteLater();
+    }
+    // anysk 菜单挂在 ⋯ 按钮正下方（showOptionsMenu 的 origin）；换算成屏幕全局坐标。
+    showOptionsMenu(m_moreBtn->mapToGlobal(QPoint(0, m_moreBtn->height())));
+}
+
+void StickerListPage::showOptionsMenu(const QPoint& globalPos)
+{
+    // parent=this：与页面同生命周期；LambdaSlot 挂菜单上，随菜单回收。
+    Menu34* menu = new Menu34(this);
+    m_moreMenu = menu;
+#ifdef QT3_BUILD
+    // Qt3 的 QPopupMenu 不继承父字体、也无 setMinimumWidth
+    //   （同 showStickerMenu:1757-1763）
+    menu->setFont(font());
+    menu->setMinimumWidth(180);
+#endif
+
+    // 顺序**逐条**对齐 anysk showOptionsMenu:1255-1271。
+    // 本批：仅「粘贴添加」接线（复用已实现的 onPasteButton），其余为占位 Toast。
+    insertActionItem(menu, QString::fromUtf8("导入表情包文件夹"), [this]() {
+        todoToast(this, "导入表情包文件夹");            // anysk requestImportFolder
+    });
+    insertActionItem(menu, QString::fromUtf8("表情包目录"), [this]() {
+        todoToast(this, "表情包目录");                  // anysk open("bundledpacks")
+    });
+    insertActionItem(menu, QString::fromUtf8("粘贴添加"), [this]() {
+        onPasteButton();                                // anysk requestPasteSticker（已实现）
+    });
+    // 「分组管理」仅当存在普通分组时出现（anysk :1258 `!m_packs.isEmpty()`；
+    //   本页 m_packIds 已排除「粘贴板」，语义最近）
+    if (!m_packIds.isEmpty()) {
+        insertActionItem(menu, QString::fromUtf8("分组管理"), [this]() {
+            todoToast(this, "分组管理");                // anysk showPackManageMenu
+        });
+    }
+    insertSeparator(menu);
+
+    insertActionItem(menu, QString::fromUtf8("号码归属地"), [this]() {
+        todoToast(this, "号码归属地");                  // anysk open("phoneq")
+    });
+    insertActionItem(menu, QString::fromUtf8("IP 信息"), [this]() {
+        todoToast(this, "IP 信息");                     // anysk open("ipinfo")
+    });
+    insertActionItem(menu, QString::fromUtf8("App Log"), [this]() {
+        todoToast(this, "App Log");                     // anysk open("logs")
+    });
+    insertActionItem(menu, QString::fromUtf8("Settings"), [this]() {
+        todoToast(this, "Settings");                    // anysk open("settings")
+    });
+    insertActionItem(menu, QString::fromUtf8("About"), [this]() {
+        todoToast(this, "About");                       // anysk open("about")
+    });
+    insertSeparator(menu);
+
+    // Keep Screen On：anysk 是移动端切换（jniKeepScreenOn:1296）。桌面无意义，
+    //   仍列入以保持菜单结构一致，点击走占位 Toast（裁定：列入并占位）。
+    insertActionItem(menu, QString::fromUtf8("Keep Screen On"), [this]() {
+        todoToast(this, "Keep Screen On");              // anysk keepScreenOn 切换（移动端）
+    });
+
+    menu->popup(globalPos);
+}
 
 void StickerListPage::onBottomButton()
 {
