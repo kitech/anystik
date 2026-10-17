@@ -80,6 +80,19 @@ HEADERS += \
     src/stickerpaste.h \
     $$STIKCOMMON_HEADERS
 
+# ── DavLocalSource 适配层（批次 P3）──
+# davsource.cpp 实现 stikcommon/davlocalsource.h 的九方法。该接口的 .cpp 在
+# stikcommon.pri:250-256 仅在 Qt3 / Qt≥5 挂载（Qt4 跳过：其上 davbisync 依赖
+# qwebdavlite 的 Qt5 语法）。故本适配层同条件挂载，否则 Qt4 链接缺基类 vtable。
+# 无 Q_OBJECT，不需 moc。
+isEmpty(QT_VERSION) {
+    SOURCES += src/davsource.cpp
+    HEADERS += src/davsource.h
+} else:!lessThan(QT_VERSION, 5.0.0) {
+    SOURCES += src/davsource.cpp
+    HEADERS += src/davsource.h
+}
+
 # src/main.cpp 与 src/mainwindow.cpp 都 #include "app_icon.xpm"（内嵌 XPM，
 # 托盘/任务栏图标不依赖 exe 旁的外部文件），故把工程根目录加进搜索路径
 INCLUDEPATH += \
