@@ -55,6 +55,7 @@ SOURCES += \
     src/config.cpp \
     src/page.cpp \
     src/pagemanager.cpp \
+    src/settingspage.cpp \
     src/stickerlistpage.cpp \
     src/stickerops.cpp \
     src/stickerclipboard.cpp \
@@ -73,6 +74,7 @@ HEADERS += \
     src/buildinfo.h \
     src/page.h \
     src/pagemanager.h \
+    src/settingspage.h \
     src/stickerlistpage.h \
     src/stickerops.h \
     src/stickerclipboard.h \

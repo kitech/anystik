@@ -15,6 +15,7 @@
 #include "appsetup.h"
 #include "pagemanager.h"
 #include "stickerlistpage.h"
+#include "settingspage.h"
 
 #include <qpixmap.h>
 #include <qevent.h>
@@ -225,6 +226,10 @@ void MainWindow::buildCentralWidget()
     reg.policy = CachePolicy::LRU;
     pageMgr->registerPage(QString::fromUtf8("stickerList"),
                           []() -> Page* { return new StickerListPage(); },
+                          reg);
+    // 设置页：⋯ 菜单 → Settings 打开（硬编码中文，UI-only，不碰 DB）
+    pageMgr->registerPage(QString::fromUtf8("settings"),
+                          []() -> Page* { return new SettingsPage(); },
                           reg);
     pageMgr->open(QString::fromUtf8("stickerList"));
 

@@ -14,6 +14,7 @@
 #include "imagetmpuploader.h"      // 「搜索相似」的临时图床（stikcommon 已编入）
 #include "lambdaslot.h"            // 菜单项零参槽代理（菜单项回调不能带参数）
 #include "translator.h"            // _() / _A()
+#include "pagemanager.h"           // pageManager()->open("settings")
 #include "placeholderlineedit.h"   // Qt3 QLineEdit 无 placeholder → qlcomp 的替代
 #include "toastwidget.h"           // 单击复制的提示（anysk stickerhomepage.cpp:578）
 #include "StyleParams.h"           // g_activeParams：圆钮取当前主题调色板
@@ -987,7 +988,7 @@ void StickerListPage::buildTopBar(QBoxLayout* parent)
 
     // ⚠ 四个按钮只搬布局与文案；粘贴/同步/⋯ 已接，导入暂留 onTopBarButton() 空处理
     //   （anysk 分别接 requestPasteSticker / showImportMenu / DAV 同步 / showOptionsMenu）
-    static const char* kTopBtnText[4] = { "粘贴", "导入", "同步", "\xE2\x8B\xAF" };
+    static const char* kTopBtnText[4] = { "粘贴", "导入", "同步", "..." };
     QPushButton** topBtns[4] = { &m_pasteBtn, &m_importBtn, &m_syncBtn, &m_moreBtn };
     for (int i = 0; i < 4; i++) {
         // ⚠ Qt3 QPushButton 无默认构造，用 (parent) + setText 避开
@@ -1724,7 +1725,7 @@ void StickerListPage::showOptionsMenu(const QPoint& globalPos)
         todoToast(this, "App Log");                     // anysk open("logs")
     });
     insertActionItem(menu, QString::fromUtf8("Settings"), [this]() {
-        todoToast(this, "Settings");                    // anysk open("settings")
+        if (pageManager()) { pageManager()->open(QString::fromUtf8("settings")); }
     });
     insertActionItem(menu, QString::fromUtf8("About"), [this]() {
         todoToast(this, "About");                       // anysk open("about")
