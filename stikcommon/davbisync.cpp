@@ -5,6 +5,8 @@
 #include "qwebdavlite.h"
 #include "qwebdavdirparserlite.h"
 #include "qwebdavitemlite.h"
+#include "pack_meta_store.h"    // 可合并边车注册表（packmeta::）
+#include "jsonl_lww_store.h"    // JSONL LWW 载体读写（jsonl_lww::）
 
 #ifdef QT3_BUILD
 // Qt 3.5 没有 QCoreApplication（qApp 在 qapplication.h），也没有独立的
@@ -72,6 +74,25 @@ QString formatDuration(qint64 msec)
     }
     return QStringLiteral("%1:%2").arg(m)
         .arg(ss, 2, 10, QLatin1Char('0'));
+}
+
+// 该 rel 的 basename 是否为已注册的可合并边车（如 _stikmeta.svg）。
+// qToStdString：Qt3 走 QString::utf8()（UTF-8 原字节），非 latin1。
+bool isMergeableRel(const QString& rel)
+{
+    return packmeta::isMergeableRel(qToStdString(rel));
+}
+
+// QByteArray → std::string（原字节）。Qt3 的 QByteArray 无 constData()，
+// 走 data()；Qt4+ 用 constData()。空体 data() 可能为 NULL。
+inline std::string qbaToStdString(const QByteArray& b)
+{
+#ifdef QT3_BUILD
+    const char* p = b.data();
+#else
+    const char* p = b.constData();
+#endif
+    return std::string(p ? p : "", static_cast<size_t>(b.size()));
 }
 
 // Qt 3.5 的 QString 只有 find()/findRev()，没有 indexOf()/lastIndexOf()；
@@ -559,6 +580,9 @@ bool SyncEngine::startSync()
     m_uploadQueue.clear();
     m_downloadQueue.clear();
     m_pendingCloudRenames.clear();
+    m_mergeQueue.clear();
+    m_mergeIndex = 0;
+    m_merged = 0;
     m_ensuredDirs.clear();
     m_uploadIndex = 0;
     m_uploadDone = 0;
@@ -831,6 +855,7 @@ void SyncEngine::buildOpQueue()
 {
     m_uploadQueue.clear();
     m_downloadQueue.clear();
+    m_mergeQueue.clear();
     m_conflictRelCloud.clear();
     m_conflictNames.clear();
 
@@ -952,6 +977,26 @@ void SyncEngine::buildOpQueue()
         }
         const bool lc = localChanged(rel, localSize, it.value().mtimeMsec);
         const bool cc = cloudChanged(rel, cloudSize, cit.value().mtimeMsec);
+        // 可合并边车（如 _stikmeta.svg）：不走 .conflictN 双保留，改按注册表
+        // 的 MergeFn 折叠合并 → 双侧皆变或仅云端变时进入合并阶段
+        //（先 GET 再 PUT，一次同步收敛）。
+        if (isMergeableRel(rel)) {
+            if (lc && cc) {
+                m_mergeQueue.append(rel);
+                continue;
+            }
+            if (lc) {                       // 仅本地变 → 照常上传
+                m_uploadQueue.append(QPair<QString, QString>(
+                    m_cloudToLocal.value(rel), rel));
+                continue;
+            }
+            if (cc) {                       // 仅云端变 → 折叠合并
+                m_mergeQueue.append(rel);
+                continue;
+            }
+            ++m_uploadSkipped;
+            continue;
+        }
         if (lc && cc) {
             // 双侧皆变且不一致 → 冲突：云端旧版改名 .conflictN 保留，本地新版本上传覆盖
             m_conflictRelCloud.append(rel);
@@ -1007,7 +1052,8 @@ void SyncEngine::buildOpQueue()
 
     m_uploadTotal = m_uploadQueue.size();
     m_totalJobs = m_uploadQueue.size()
-        + m_downloadQueue.size() + m_pendingCloudRenames.size();
+        + m_downloadQueue.size() + m_pendingCloudRenames.size()
+        + m_mergeQueue.size();
     log(davbisync::Info, QStringLiteral("scan"),
         QStringLiteral("op queue: %1 uploads, %2 downloads, %3 conflicts")
             .arg(m_uploadQueue.size()).arg(m_downloadQueue.size())
@@ -1074,7 +1120,13 @@ void SyncEngine::pushNext()
         return;
     }
 
-    // 2) 上传（目录链未就位时先逐层 mkdir）
+    // 2) 可合并边车折叠合并（先于上传/下载：必须先 GET 云端再 PUT，否则会被上传覆盖）
+    if (m_mergeIndex < m_mergeQueue.size()) {
+        mergeSpecialNext();
+        return;
+    }
+
+    // 3) 上传（目录链未就位时先逐层 mkdir）
     if (m_uploadIndex < m_uploadQueue.size()) {
         const auto& item = m_uploadQueue.at(m_uploadIndex);
         const QString localPath = item.first;
@@ -1103,7 +1155,7 @@ void SyncEngine::pushNext()
         return;
     }
 
-    // 3) 下载
+    // 4) 下载
     if (m_downloadIndex < m_downloadQueue.size()) {
         const auto& item = m_downloadQueue.at(m_downloadIndex);
         downloadFile(item.first, QString());
@@ -1464,6 +1516,112 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
             });
 }
 
+// 可合并边车折叠合并：GET 云端载体 → 按注册表 MergeFn 与本地逐条合并 →
+// 原子写回本地 → 由 uploadMerged PUT 回云端。载体为 JSONL（可合并 CRDT），
+// 普通二进制贴纸不走此路径（仍双保留 .conflictN）。
+void SyncEngine::mergeSpecialNext()
+{
+    DAV_SYNC_JOIN_CONNECT
+    const QString rel = m_mergeQueue[m_mergeIndex];
+    const packmeta::MergeableEntry* entry =
+        packmeta::findMergeableRel(qToStdString(rel));
+    if (!entry || !entry->merge) {          // 入队即已注册，防御性跳过
+        log(davbisync::Warn, QStringLiteral("merge"),
+            QStringLiteral("未注册的合并项，跳过: %1").arg(rel));
+        ++m_mergeIndex;
+        ++m_jobsDone;
+        emitProgress();
+        pushNext();
+        return;
+    }
+    m_fileStartMsec = nowMsec();
+    log(davbisync::Info, QStringLiteral("merge"),
+        QStringLiteral("合并 %1").arg(rel));
+
+    QNetworkReply* reply = m_webdav->get(cloudPath(rel));
+    m_activeReplies.append(reply);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, rel, entry]() {
+        const int status =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray body = reply->readAll();
+        const QString errStr = reply->errorString();
+        removeActiveReply(reply);
+        if (!m_running) {
+            return;
+        }
+        if (reply->error() != QNetworkReply::NoError || status >= 400) {
+            finishWithError(
+                QStringLiteral("merge get failed: %1 (%2 status %3)")
+                    .arg(rel, errStr).arg(status));
+            return;
+        }
+        const QString localAbs = davLocalSource()->resolveStickerPath(rel);
+        const std::string merged =
+            entry->merge(jsonl_lww::readFileRaw(localAbs),
+                         qbaToStdString(body));
+        if (!jsonl_lww::writeFileRaw(localAbs, merged)) {
+            finishWithError(
+                QStringLiteral("merge write failed: %1").arg(localAbs));
+            return;
+        }
+        uploadMerged(rel, localAbs);
+    });
+}
+
+void SyncEngine::uploadMerged(const QString& rel, const QString& localAbs)
+{
+    DAV_SYNC_JOIN_CONNECT
+    // ★ shared_ptr 而非 unique_ptr：Qt3 信号投递走 qconnect_slots（std::function
+    //   要求可拷贝构造）——同 uploadFile 的注释，捕获 unique_ptr 编译不过。
+    auto file = std::make_shared<QFile>(localAbs);
+    if (!file->open(DavOpenMode(qDavReadOnly))) {
+        finishWithError(QStringLiteral("cannot open merged file: %1")
+                            .arg(localAbs));
+        return;
+    }
+    QNetworkReply* reply = m_webdav->put(cloudPath(rel), file.get());
+    m_activeReplies.append(reply);
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, file, rel, localAbs]() {
+                const QByteArray lm = reply->rawHeader("Last-Modified");
+                const QString errStr = reply->errorString();
+                removeActiveReply(reply);
+                if (!m_running) {
+                    return;
+                }
+                if (reply->error() != QNetworkReply::NoError) {
+                    finishWithError(QStringLiteral("merge put failed: %1 (%2)")
+                                        .arg(rel, errStr));
+                    return;
+                }
+                const QFileInfo fi(localAbs);
+                davbisync::BaselineEntry le;
+                le.size = fi.size();
+                le.mtimeMsec = localMtimeMsec(fi);
+                m_localFiles.insert(rel, le);
+                davbisync::BaselineEntry ce;
+                ce.size = fi.size();
+                ce.mtimeMsec = 0;
+                if (!lm.isEmpty()) {
+                    const QDateTime t = parseHttpDate(QString::fromLatin1(lm));
+                    if (t.isValid()) {
+                        ce.mtimeMsec = dtMsec(t);
+                    }
+                }
+                m_cloudFiles.insert(rel, ce);
+                persistBaseline();
+                m_lastFileMs = nowMsec() - m_fileStartMsec;
+                ++m_merged;
+                ++m_mergeIndex;
+                ++m_jobsDone;
+                log(davbisync::Info, QStringLiteral("merge"),
+                    QStringLiteral("合并完成 %1 · %2 s")
+                        .arg(rel).arg(m_lastFileMs / 1000.0, 0, 'f', 1));
+                emitProgress();
+                pushNext();
+            });
+}
+
 QUrl SyncEngine::cloudUrl(const QString& dbRel) const
 {
     QUrl u;
@@ -1548,6 +1706,9 @@ QString SyncEngine::statDetail() const
     if (!m_conflictRelCloud.isEmpty()) {
         parts << QStringLiteral("冲突 %1").arg(m_conflictRelCloud.size());
     }
+    if (m_mergeIndex < m_mergeQueue.size()) {
+        parts << QStringLiteral("合并 %1").arg(m_mergeQueue.size());
+    }
 
     QString curText;
     QString curSizeText;
@@ -1574,7 +1735,8 @@ QString SyncEngine::statDetail() const
     }
 
     const int total = qMax<int>(1, m_uploadTotal + m_downloadQueue.size()
-                              + m_pendingCloudRenames.size());
+                              + m_pendingCloudRenames.size()
+                              + m_mergeQueue.size());
     const int done = m_uploadIndex + m_downloadDone;
     const qint64 now = nowMsec();
     const double elapsedSec = qMax(1.0, double(now - m_startMsec) / 1000.0);

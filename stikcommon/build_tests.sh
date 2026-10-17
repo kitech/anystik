@@ -20,7 +20,7 @@ QTDIR=/opt/qt338sh
 OUTDIR=tests-build
 mkdir -p "$OUTDIR"
 
-CXX="g++ -std=c++11 -g -O0 -w"
+CXX="g++ -std=c++14 -g -O0 -w"
 # 测试与被测产品代码同在 stikcommon/，故 -I. ；doctest 在 anystik/vendor
 # eventpoller.h 现居 qlappcom/（原 qldox/ 已并入 qlcomp+qlappcom），cJSON.h 在 qlcomp/
 FLAGS="-DQT3_BUILD -DQT_NO_DEBUG -DQT_SHARED -DQT_THREAD_SUPPORT \
@@ -74,6 +74,7 @@ test_qnam_shim.cpp
 test_jsonl_lww_store.cpp
 test_pack_meta_store.cpp
 test_qconcurrent_shim.cpp
+test_davbisync.cpp
 "
 
 # ── 被测产品代码：链接 run_tests 所需的 stikcommon/qlcomp/qlappcom 部分 ──
@@ -100,17 +101,25 @@ qzipreader_shim.cpp
 qimagereader_shim.cpp
 qimagesmoothscale.cpp
 ../vendor/pugixml/pugixml.cpp
+davbisync.cpp
+davlocalsource.cpp
+davbisync_baseline.cpp
 "
 
 echo "=== moc ==="
 # QWebdavDirParserLite 是本套件涉及的唯一 Q_OBJECT 类；缺 moc 产物会在链接期
 # 报 vtable / staticMetaObject 缺失（编译能过，极易误判为测试代码写错）
 $QTDIR/bin/moc qwebdavdirparserlite.h -o "$OUTDIR/moc_parser.cpp"
+# ⚠ 本仓的 moc（/opt/qt338sh/bin/moc）不接受 -D/-I（实测 "moc: Invalid argument"），
+# 与 qlstik 产品 Makefile 的调用形式一致：不带任何 -D/-I。davbisync.h 两分支类体
+# 相同，moc 不带 QT3_BUILD 亦可解析（产品侧同样如此，已验证）。
+$QTDIR/bin/moc davbisync.h -o "$OUTDIR/moc_davbisync.cpp"
 
-OBJS="$OUTDIR/moc_parser.o"
+OBJS="$OUTDIR/moc_parser.o $OUTDIR/moc_davbisync.o"
 # moc 只产出 .cpp，必须显式编成 .o 才能进链接（漏这一步的表现是链接期报
 # "cannot find tests-build/moc_parser.o"，而 moc 那步看着是成功的，容易误判）
 $CXX $FLAGS -c "$OUTDIR/moc_parser.cpp" -o "$OUTDIR/moc_parser.o"
+$CXX $FLAGS -c "$OUTDIR/moc_davbisync.cpp" -o "$OUTDIR/moc_davbisync.o"
 
 echo "=== 编译产品代码 ==="
 for src in $PRODUCTS; do
