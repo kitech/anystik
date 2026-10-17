@@ -1,15 +1,17 @@
 #ifndef QLSTIK_SYNCPROGRESSDIALOG_H
 #define QLSTIK_SYNCPROGRESSDIALOG_H
 
-// 同步进度弹窗（批次 P4）——anystik/src/syncprogresspopup.{h,cpp} 的 Qt3「中档」
-// 等价物：进度条 + 百分比 + 详情行 + 远程特征行 + 状态行 + 只读彩色日志 + 取消/关闭。
-// 按用户裁定裁去 anystik 的日志过滤下拉 / 关键字防抖 / 复制-清空（那是「高档」）。
+// 同步进度弹窗（批次 P4）——anystik/src/syncprogresspopup.{h,cpp} 的 Qt3/Qt6
+// 对等物：进度条 + 百分比 + 详情行 + 远程特征行 + 状态行(结果配色) + 彩色日志
+// （过滤下拉 / 关键字 150ms 防抖 / 复制 / 清空 / 计数）+ 取消/关闭 + 右上 ✕。
 //
 // 仅 Qt3/Qt≥5 编入（qlstik.pro 与 davsource 同条件；Qt4 不编——davbisync 未编入）。
 // 与宿主 StickerListPage 的对接照搬 anystik：构造时连 engine 的
 // syncLog/progressUpdated/finished/remoteFeature；关闭时 emit closed() 供宿主回收。
 
 #include "compat34.h"          // QWidget / QString / QLabel / QTextEdit / qNewBoxLayout …
+
+#include <vector>
 
 #ifdef QT3_BUILD
 #include <qdialog.h>
@@ -22,6 +24,9 @@ class SyncEngine;              // stikcommon/davbisync.h
 class QProgressBar;
 class QLabel;
 class QTextEdit;
+class QLineEdit;
+class QComboBox;
+class QTimer;
 class QPushButton;
 class QCloseEvent;
 class QKeyEvent;
@@ -49,9 +54,28 @@ private slots:
     void onFinished(int exitCode, const QString& summary);
     void onRemoteFeature(const QString& text);
     void onCancelClicked();
+    void onFilterChanged();      // 过滤/搜索变化 → 重启 150ms 防抖
+    void onDebounceTimeout();    // 防抖到期 → 重建日志视图
+    void onCopyClicked();
+    void onClearClicked();
 
 private:
+    // 一条日志（level 用 davbisync 值：0=Info 1=Warn 2=Error）
+    struct LogEntry {
+        int     level;
+        QString tag;
+        QString message;
+        QString line;       // 预格式化显示文本
+    };
+
     void appendLog(int level, const QString& tag, const QString& line);
+    void    rebuildLog();
+    void    appendRowToView(const LogEntry& e);
+    bool    match(const LogEntry& e) const;
+    QString filteredText() const;
+    int     visibleCount() const;
+    void    updateCount();
+    int     levelIndex() const;
 
     SyncEngine*   m_engine;
     QProgressBar* m_bar;
@@ -60,8 +84,18 @@ private:
     QLabel*       m_featureLabel;
     QLabel*       m_statusLabel;
     QTextEdit*    m_log;
+    QComboBox*    m_levelCombo;
+    QLineEdit*    m_searchEdit;
+    QTimer*       m_debounce;
+    QLabel*       m_countLabel;
+    QPushButton*  m_copyBtn;
+    QPushButton*  m_clearBtn;
     QPushButton*  m_cancelBtn;
     QPushButton*  m_closeBtn;
+    QPushButton*  m_cornerCloseBtn;
+
+    std::vector<LogEntry> m_entries;
+    bool m_autoScroll;
 };
 
 #endif // QLSTIK_SYNCPROGRESSDIALOG_H
