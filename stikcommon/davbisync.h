@@ -37,6 +37,10 @@
 #include <QHash>
 #endif
 
+#include <atomic>
+#include <memory>
+#include <vector>
+
 #include "davbisync_baseline.h"
 
 // 本移植版要用的 QMap 语义（value/constFind/cbegin/迭代器 value()/
@@ -58,6 +62,7 @@ class QWebdavLite;
 class QWebdavDirParserLite;
 class QWebdavItemLite;
 class QNetworkReply;
+class DavLocalSource;
 
 namespace davbisync {
 
@@ -73,6 +78,15 @@ enum FinishCode
     FinishOk = 0,        // 同步全部成功
     FinishError = 1,     // 出错中止
     FinishCancelled = 2  // 用户取消
+};
+
+// 阶段 A 工作线程产出的单条日志（worker 内收集，回 GUI 线程按序 emit）。
+// 扁平结构体承载，避免 worker 里 emit 信号 / 触碰 SyncEngine 成员。
+struct LocalListingRec
+{
+    int     level;
+    QString tag;
+    QString line;
 };
 
 struct PackPolicy
@@ -156,9 +170,32 @@ private:
     // 不含云根；云根 anystik/ 仅由 cloudPath()/cloudUrl() 在传输边界临时拼出，
     // 从不写入 DB/基线/内存键。键 = 统一 tet dbRel。
     using FileEntryMap = QMapLike<QString, davbisync::BaselineEntry>;
+    using PackPolicyMap = QMapLike<QString, davbisync::PackPolicy>;
 
-    // 阶段 A：本地清单
-    void buildLocalListing();
+    // 阶段 A：本地清单（工作线程纯计算 → applyLocalListing 在 GUI 线程落地）
+    struct LocalListingResult
+    {
+        FileEntryMap files;                       // 业务 dbRel → 本地条目
+        QMapLike<QString, QString> cloudToLocal;  // 业务 dbRel → 本地绝对路径
+        QMapLike<QString, QString> dirPacks;      // 云目录 rel → 本地 packId
+        int fileCount = 0;
+        int packCount = 0;
+        davbisync::SyncDiagnosis diagnosis;
+        davbisync::SyncBaseline  base;
+        bool failed = false;
+        QString error;
+        std::vector<davbisync::LocalListingRec> logs;
+    };
+    // 阶段 A 纯计算（静态：不捕获 this，只读入参 + 进程级 davLocalSource()
+    // 单例；DB 经 SqliteConnectionSafe 的 rwlock 跨线程安全）。异常全兜住，
+    // 保证续延一定执行，不会把同步挂死。
+    static LocalListingResult computeLocalListing(
+        DavLocalSource* src,
+        const PackPolicyMap& policies,
+        const std::shared_ptr<std::atomic<bool> >& cancel);
+    // 续延：在 GUI 线程把结果落进成员并推进阶段 B。
+    void applyLocalListing(const LocalListingResult& r);
+
     // 阶段 B：云端清单（逐目录 listDirectory 状态机；入参为业务 dbRel）
     void scanCloudDir(const QString& dbRelDir);
     void collectCloudItems();            // parser finished 后收集当前目录并调度下一目录
@@ -273,6 +310,8 @@ private:
     QStringList m_conflictNames;        // 已分配的 .conflictN 云端名
 
     bool m_running = false;
+    // 阶段 A worker 的取消旗标（abort 置真；worker 轮询早退）。每轮 startSync 重建。
+    std::shared_ptr<std::atomic<bool> > m_cancelFlag;
     bool m_finished = false;      // 已 emit finished，防重复收尾
     int m_percent = 0;
     int m_totalJobs = 0;           // 本轮总量 = 上传+下载+改名

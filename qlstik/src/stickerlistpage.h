@@ -277,6 +277,9 @@ private slots:
     // 顶栏「同步」：DAV 双向同步（批次 P4）。实体实现仅在 Qt3/Qt≥5（见 .cpp
     //   版本闸）；Qt4 下为空体（davbisync 未编入，stikcommon.pri 跳过）。
     void onSyncButton();
+    // 延后一帧真正启动同步：先让 show() 的弹窗完成映射/首帧绘制、事件循环
+    //   跑一轮，再跑 startSync（阶段 A 已异步，此处只为弹窗立即可见可点）。
+    void onSyncKickoff();
     // 同步引擎 finished(exitCode,summary) 的宿主收尾（合并冲突载体 + 回写 DB + 刷新）
     void onSyncFinished(int exitCode, const QString& summary);
     // 同步弹窗关闭：置空指针；引擎非运行态则一并回收（anysk :1626-1633）

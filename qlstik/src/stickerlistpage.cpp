@@ -1619,7 +1619,14 @@ void StickerListPage::onSyncButton()
     m_syncEngine->setConnectionSettings(
         https ? 2 : 1, url.host(), url.path(), davUser, davPass,
         davPort > 0 ? davPort : 0);
-    if (m_syncEngine->startSync()) {        // anysk :503-505
+    // 延后一帧启动：先让 show() 的弹窗完成映射/首帧绘制、事件循环跑一轮，再跑
+    // startSync（Qt3 只有 singleShot(int, QObject*, const char*) 一个重载）。
+    QTimer::singleShot(0, this, SLOT(onSyncKickoff()));
+}
+
+void StickerListPage::onSyncKickoff()
+{
+    if (m_syncEngine && m_syncEngine->startSync()) {   // anysk :503-505
         m_syncBtn->setText(QString::fromUtf8("同步中..."));
     }
 }
@@ -1684,6 +1691,7 @@ void StickerListPage::onSyncDialogClosed()
 #else // Qt4：davbisync 未编入（stikcommon.pri 跳过）→ 同步为空操作
 
 void StickerListPage::onSyncButton() {}
+void StickerListPage::onSyncKickoff() {}
 void StickerListPage::onSyncFinished(int, const QString&) {}
 void StickerListPage::ensureSyncDialog(bool) {}
 void StickerListPage::onSyncDialogClosed() {}

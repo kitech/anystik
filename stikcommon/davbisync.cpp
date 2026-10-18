@@ -15,6 +15,7 @@
 #include "qdatetime_shim.h"
 #include "qnam_shim.h"
 #include "qdebug_shim.h"
+#include "qconcurrent_shim.h"   // QtConcurrent::run + QFuture::then 的 Qt3 垫片
 #include <qapplication.h>
 #include <qdatetime.h>
 #include <qtimer.h>
@@ -35,10 +36,13 @@
 #include <QPair>
 #include <QNetworkRequest>
 #include <QNetworkReply>
+#include <QtConcurrent/QtConcurrent>
 #endif
 
 #include <memory>
 #include <vector>
+#include <atomic>
+#include <exception>
 
 #include <sys/stat.h>
 #ifdef QT3_BUILD
@@ -606,7 +610,6 @@ bool SyncEngine::startSync()
     m_localFileCount = 0;
     m_localDirPacks.clear();
     m_diagnosis = davbisync::SyncDiagnosis();
-    davbisync::baselineLoad(&m_base);
     m_uploadQueue.clear();
     m_downloadQueue.clear();
     m_pendingCloudRenames.clear();
@@ -639,12 +642,18 @@ bool SyncEngine::startSync()
     emit progressUpdated(0, QStringLiteral("scan"),
                          QStringLiteral("listing local packs"));
 
-    // 阶段 A：本地清单（同步，SQLite + stat）
-    buildLocalListing();
-
-    // 阶段 B：云端清单（异步逐目录）
-    // 扫描根 = 业务 dbRel 空串（cloudPath 拼出云根 anystik）
-    scanCloudDir(QString());
+    // 阶段 A：本地清单 + 基线改到工作线程（QtConcurrent::run 跑纯计算，续延
+    // 回 GUI 线程 applyLocalListing）。原先同步跑 = 弹窗已 show() 但事件循环
+    // 未跑 → 按钮/绘制卡死到阶段 A 结束。入参按值拷，worker 不捕获 this。
+    m_cancelFlag = std::make_shared<std::atomic<bool> >(false);
+    DavLocalSource* src = davLocalSource();
+    const PackPolicyMap policies = m_packPolicies;
+    const std::shared_ptr<std::atomic<bool> > cancel = m_cancelFlag;
+    QtConcurrent::run([src, policies, cancel]() {
+        return computeLocalListing(src, policies, cancel);
+    }).then(this, [this](const LocalListingResult& r) {
+        applyLocalListing(r);
+    });
     return true;
 }
 
@@ -652,6 +661,9 @@ void SyncEngine::abort()
 {
     if (!m_running || m_finished) {
         return;
+    }
+    if (m_cancelFlag) {
+        m_cancelFlag->store(true);   // 令阶段 A worker 轮询早退
     }
     m_running = false;
     if (m_parser) {
@@ -697,78 +709,133 @@ void SyncEngine::setRunning(bool running)
 // 阶段 A：本地清单
 // ═══════════════════════════════════════════════════════════════════
 
-void SyncEngine::buildLocalListing()
+// 阶段 A 工作线程体：不触碰 this，只读 src/policies/cancel，日志收进结果。
+// packs(1, "title ASC") → DavLocalSource 的窄接口已内置 title 升序，调用点无需
+// 再传排序串；list 容器按既定原则用 std::vector（Qt3 的 QList 只是 QPtrList
+// 指针宏，存不了值类型）。
+SyncEngine::LocalListingResult SyncEngine::computeLocalListing(
+    DavLocalSource* src,
+    const SyncEngine::PackPolicyMap& policies,
+    const std::shared_ptr<std::atomic<bool> >& cancel)
 {
-    m_localFiles.clear();
-    m_cloudToLocal.clear();
-    m_localDirPacks.clear();
-    m_localFileCount = 0;
-
-    // packs(1, "title ASC") → DavLocalSource 的窄接口已内置 title 升序，
-    // 调用点无需再传排序串；list 容器按既定原则用 std::vector（Qt3 的 QList
-    // 只是 QPtrList 指针宏，存不了值类型）。
-    const auto packs = davLocalSource()->installedPacksByTitleAsc();
-    int dirs = 0;
-    for (const auto& pack : packs) {
-        if (davLocalSource()->isBuiltinSourcePack(pack.id, pack.title)) {
-            log(davbisync::Info, QStringLiteral("pack"),
-                QStringLiteral("skip builtin-source pack: %1").arg(pack.title));
-            continue;
-        }
-        // M5：包级策略（空 map = 默认全参与）
-        const davbisync::PackPolicy policy =
-            m_packPolicies.value(pack.id);
-        if (m_packPolicies.contains(pack.id) && !policy.participates()) {
-            log(davbisync::Info, QStringLiteral("pack"),
-                QStringLiteral("skip by policy (pull&push off): %1")
-                    .arg(pack.title));
-            m_diagnosis.skipped.append(pack.title);
-            continue;
-        }
-        const auto stickers = davLocalSource()->stickersOfPack(pack.id);
-        // 云 rel = DB 存储的相对路径直通（本地存储 root ≙ 云根，1:1 透传，
-        // 不再以目录末段转译云目录名）：
-        //   file_path=pastes/x           → 业务键/云 rel = pastes/x（云上 anystik/pastes/x）
-        //   file_path=packs/<T>/x        → 业务键/云 rel = packs/<T>/x（云上 anystik/packs/<T>/x）
-        // anystik/ 前缀只在 cloudPath()/cloudUrl()（唯一入云拼根点）临时出现，不落任何持久数据。
-        QString relDir;
-        // 容器是 std::vector（无 constFirst），取首个元素
-        if (!stickers.empty()) {
-            // DavLocalSticker.filePath 为 resolve 后的绝对路径 → 归一到 dbRel 父目录
-            relDir = fileInfoPath(QFileInfo(davLocalSource()->relativeToBase(
-                                   stickers.front().filePath)));
-        }
-        if (!relDir.isEmpty()) {
-            m_localDirPacks.insert(relDir, pack.id);
-        }
-        if (m_packPolicies.contains(pack.id) && !policy.pushEnabled) {
-            continue;    // 不上传（pull 方向仍可）
-        }
-        log(davbisync::Info, QStringLiteral("diag"),
-            QStringLiteral("upload-candidate %1")
-                .arg(davLocalSource()->builtinSourceDiag(
-                         pack.id, pack.title)));
-        for (const auto& s : stickers) {
-            // 业务键 dbRel = 相对 base 的路径（StickerBrief.filePath 已是绝对路径，
-            // 勿再 resolve；用 relativeToBase 归化，与云端 canonicalRel 键对称）
-            const QString localAbsPath = s.filePath;
-            const QString rel = davLocalSource()->relativeToBase(localAbsPath);
-            const QFileInfo fi(localAbsPath);
-            if (!fi.exists() || !fi.isFile()) {
+    LocalListingResult r;
+    davbisync::baselineLoad(&r.base);
+    try {
+        const auto packs = src->installedPacksByTitleAsc();
+        int dirs = 0;
+        for (const auto& pack : packs) {
+            if (cancel && cancel->load()) {
+                break;
+            }
+            if (src->isBuiltinSourcePack(pack.id, pack.title)) {
+                davbisync::LocalListingRec rec;
+                rec.level = davbisync::Info;
+                rec.tag = QStringLiteral("pack");
+                rec.line = QStringLiteral("skip builtin-source pack: %1")
+                               .arg(pack.title);
+                r.logs.push_back(rec);
                 continue;
             }
-            davbisync::BaselineEntry e;
-            e.size = fi.size();
-            e.mtimeMsec = localMtimeMsec(fi);
-            m_localFiles.insert(rel, e);
-            m_cloudToLocal.insert(rel, localAbsPath);
+            // M5：包级策略（空 map = 默认全参与）
+            const davbisync::PackPolicy policy = policies.value(pack.id);
+            if (policies.contains(pack.id) && !policy.participates()) {
+                davbisync::LocalListingRec rec;
+                rec.level = davbisync::Info;
+                rec.tag = QStringLiteral("pack");
+                rec.line = QStringLiteral("skip by policy (pull&push off): %1")
+                               .arg(pack.title);
+                r.logs.push_back(rec);
+                r.diagnosis.skipped.append(pack.title);
+                continue;
+            }
+            const auto stickers = src->stickersOfPack(pack.id);
+            // 云 rel = DB 存储的相对路径直通（本地存储 root ≙ 云根，1:1 透传，
+            // 不再以目录末段转译云目录名）：
+            //   file_path=pastes/x     → 业务键/云 rel = pastes/x
+            //   file_path=packs/<T>/x  → 业务键/云 rel = packs/<T>/x
+            // anystik/ 前缀只在 cloudPath()/cloudUrl()（唯一入云拼根点）临时出现。
+            QString relDir;
+            // 容器是 std::vector（无 constFirst），取首个元素
+            if (!stickers.empty()) {
+                // DavLocalSticker.filePath 为 resolve 后的绝对路径 → 归一到 dbRel 父目录
+                relDir = fileInfoPath(QFileInfo(src->relativeToBase(
+                                       stickers.front().filePath)));
+            }
+            if (!relDir.isEmpty()) {
+                r.dirPacks.insert(relDir, pack.id);
+            }
+            if (policies.contains(pack.id) && !policy.pushEnabled) {
+                continue;    // 不上传（pull 方向仍可）
+            }
+            {
+                davbisync::LocalListingRec rec;
+                rec.level = davbisync::Info;
+                rec.tag = QStringLiteral("diag");
+                rec.line = QStringLiteral("upload-candidate %1")
+                               .arg(src->builtinSourceDiag(pack.id, pack.title));
+                r.logs.push_back(rec);
+            }
+            for (const auto& s : stickers) {
+                if (cancel && cancel->load()) {
+                    break;
+                }
+                // 业务键 dbRel = 相对 base 的路径（filePath 已是绝对路径，
+                // 勿再 resolve；用 relativeToBase 归化，与云端 canonicalRel 键对称）
+                const QString localAbsPath = s.filePath;
+                const QString rel = src->relativeToBase(localAbsPath);
+                const QFileInfo fi(localAbsPath);
+                if (!fi.exists() || !fi.isFile()) {
+                    continue;
+                }
+                davbisync::BaselineEntry e;
+                e.size = fi.size();
+                e.mtimeMsec = localMtimeMsec(fi);
+                r.files.insert(rel, e);
+                r.cloudToLocal.insert(rel, localAbsPath);
+            }
+            ++dirs;
         }
-        ++dirs;
+        r.fileCount = r.files.size();
+        r.packCount = dirs;
+        davbisync::LocalListingRec rec;
+        rec.level = davbisync::Info;
+        rec.tag = QStringLiteral("scan");
+        rec.line = QStringLiteral(
+            "local listing: %1 packs, %2 files (builtin-source packs excluded)")
+                       .arg(dirs).arg(r.fileCount);
+        r.logs.push_back(rec);
+    } catch (const std::exception& e) {
+        r.failed = true;
+        r.error = QString::fromUtf8(e.what());
+    } catch (...) {
+        r.failed = true;
+        r.error = QStringLiteral("local listing failed (unknown error)");
     }
-    m_localFileCount = m_localFiles.size();
-    log(davbisync::Info, QStringLiteral("scan"),
-        QStringLiteral("local listing: %1 packs, %2 files (builtin-source packs excluded)")
-            .arg(dirs).arg(m_localFileCount));
+    return r;
+}
+
+// 续延：GUI 线程落地结果、按序回放日志、推进阶段 B。
+void SyncEngine::applyLocalListing(const LocalListingResult& r)
+{
+    if (!m_running || m_finished) {
+        return;
+    }
+    if (r.failed) {
+        finishWithError(QStringLiteral("local listing failed: %1").arg(r.error));
+        return;
+    }
+    m_localFiles     = r.files;
+    m_cloudToLocal   = r.cloudToLocal;
+    m_localDirPacks  = r.dirPacks;
+    m_localFileCount = r.fileCount;
+    m_diagnosis      = r.diagnosis;
+    m_base           = r.base;
+    for (size_t i = 0; i < r.logs.size(); ++i) {
+        log(davbisync::LogLevel(r.logs[i].level), r.logs[i].tag, r.logs[i].line);
+    }
+    // 阶段 B：云端清单（异步逐目录）
+    // 扫描根 = 业务 dbRel 空串（cloudPath 拼出云根 anystik）
+    scanCloudDir(QString());
 }
 
 // ═══════════════════════════════════════════════════════════════════

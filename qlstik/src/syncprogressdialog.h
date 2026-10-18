@@ -98,6 +98,8 @@ private:
     QPushButton*  m_cornerCloseBtn;
 
     std::vector<LogEntry> m_entries;
+    // 当前匹配条数（增量维护；避免每次追加日志都全量扫描 → O(n²)）。
+    int m_visibleCount;
     bool m_autoScroll;
 };
 

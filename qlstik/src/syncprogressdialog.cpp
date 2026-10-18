@@ -174,6 +174,7 @@ SyncProgressDialog::SyncProgressDialog(SyncEngine* engine, QWidget* parent)
     , m_cancelBtn(0)
     , m_closeBtn(0)
     , m_cornerCloseBtn(0)
+    , m_visibleCount(0)
     , m_autoScroll(true)
 {
     setModal(true);                       // anysk QskPopup setModal(true)
@@ -313,6 +314,7 @@ SyncProgressDialog::~SyncProgressDialog()
 void SyncProgressDialog::resetForRun()
 {
     m_entries.clear();
+    m_visibleCount = 0;
     if (m_log) {
         m_log->clear();
     }
@@ -348,10 +350,14 @@ void SyncProgressDialog::appendLog(int level, const QString& tag, const QString&
 
     m_entries.push_back(e);
     if (m_entries.size() > 500) {
+        if (match(m_entries.front())) {
+            --m_visibleCount;                 // 淘汰的是首条；可见才减计
+        }
         m_entries.erase(m_entries.begin());   // 上限 500（对齐 anysk LogModel）
     }
     if (match(e)) {
         appendRowToView(e);
+        ++m_visibleCount;
     }
     updateCount();
 }
@@ -397,13 +403,7 @@ QString SyncProgressDialog::filteredText() const
 
 int SyncProgressDialog::visibleCount() const
 {
-    int n = 0;
-    for (size_t i = 0; i < m_entries.size(); ++i) {
-        if (match(m_entries[i])) {
-            ++n;
-        }
-    }
-    return n;
+    return m_visibleCount;
 }
 
 void SyncProgressDialog::updateCount()
@@ -427,11 +427,14 @@ void SyncProgressDialog::rebuildLog()
         return;
     }
     m_log->clear();
+    int n = 0;
     for (size_t i = 0; i < m_entries.size(); ++i) {
         if (match(m_entries[i])) {
             appendRowToView(m_entries[i]);
+            ++n;
         }
     }
+    m_visibleCount = n;
     updateCount();
 }
 
@@ -457,6 +460,7 @@ void SyncProgressDialog::onCopyClicked()
 void SyncProgressDialog::onClearClicked()
 {
     m_entries.clear();
+    m_visibleCount = 0;
     if (m_log) {
         m_log->clear();
     }
