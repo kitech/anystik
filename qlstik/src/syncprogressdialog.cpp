@@ -1,6 +1,7 @@
 #include "syncprogressdialog.h"
 #include "davbisync.h"
 #include "qdebug_shim.h"          // qInfo() 流（Qt3 垫片；Qt5/6 原生）
+#include "emojiwidgets.h"         // EmojiLabel（qlcomp；Qt3 用 WordBreak 换行）
 
 #ifdef QT3_BUILD
 #include <qcombobox.h>
@@ -118,22 +119,20 @@ inline QString statusHtml(const QColor& c, const QString& text)
          + QString::fromUtf8("</font>");
 }
 
-// 长文本行（详情/远程特征/状态）：只读 QTextEdit 替代 QLabel。
-// Qt3 QLabel 无 wordWrap，sizeHint 宽 = 全文宽（实测 199 字 → 1843px），
-// 会把 QDialog 撑到近全屏；QTextEdit 换行后 hint 宽仅 ~240px。
-// 固定 3 行高 + 关滚动条：比 QLabel 多出的内容可视区截断（可拖选拷贝完整文本）。
-inline QTextEdit* makeInfoEdit(QWidget* parent)
+// 长文本行（详情/远程特征/状态）：qlcomp EmojiLabel（QLabel）实现换行。
+// Qt3 QLabel 无 setWordWrap，用 Qt::WordBreak 对齐标志换行；Qt4+ 用 setWordWrap。
+// qSetLabelSelectable 保留可选中（Qt3 双击选、Qt4+ 拖选）。
+inline EmojiLabel* makeWrapLabel(QWidget* parent)
 {
-    QTextEdit* t = new QTextEdit(parent);
-    t->setReadOnly(TRUE);
-    qTextEditWrapNoHScroll(t);
+    EmojiLabel* l = new EmojiLabel(QString(), parent);
 #ifdef QT3_BUILD
-    t->setVScrollBarMode(QTextEdit::AlwaysOff);
+    l->setAlignment(Qt::WordBreak | Qt::AlignLeft | Qt::AlignTop);
 #else
-    t->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    l->setWordWrap(true);
+    l->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 #endif
-    t->setMinimumHeight(t->fontMetrics().lineSpacing() * 3 + 8);
-    return t;
+    qSetLabelSelectable(l);
+    return l;
 }
 
 // davbisync::LogLevel{Info,Warn,Error} → 级别标签/配色（anysk syncprogresspopup.cpp:26-44）
@@ -211,9 +210,9 @@ SyncProgressDialog::SyncProgressDialog(SyncEngine* engine, QWidget* parent)
     m_pctLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
     ph->addWidget(m_pctLabel, 0);
 
-    m_detailLabel  = makeInfoEdit(this);
-    m_featureLabel = makeInfoEdit(this);
-    m_statusLabel  = makeInfoEdit(this);
+    m_detailLabel  = makeWrapLabel(this);
+    m_featureLabel = makeWrapLabel(this);
+    m_statusLabel  = makeWrapLabel(this);
     m_statusLabel->setTextFormat(Qt::RichText);
     m_detailLabel->setText(QString::fromUtf8("第 0/0 个文件"));
     m_featureLabel->setText(QString::fromUtf8("远程特征: 检测中..."));

@@ -23,6 +23,7 @@
 class SyncEngine;              // stikcommon/davbisync.h
 class QProgressBar;
 class QLabel;
+class EmojiLabel;              // qlcomp/emojiwidgets.h
 class QTextEdit;
 class QLineEdit;
 class QComboBox;
@@ -80,12 +81,12 @@ private:
     SyncEngine*   m_engine;
     QProgressBar* m_bar;
     QLabel*       m_pctLabel;
-    // 长文本三行（详情/远程特征/状态）不用 QLabel：Qt3 QLabel 无 wordWrap，
-    // sizeHint 宽 = 全文宽（实测 199 字 → 1843px，直接把 QDialog 撑成全屏宽），
-    // 改用固定高只读 QTextEdit（换行、可选中拷贝）。
-    QTextEdit*    m_detailLabel;
-    QTextEdit*    m_featureLabel;
-    QTextEdit*    m_statusLabel;
+    // 长文本三行（详情/远程特征/状态）：qlcomp EmojiLabel（QLabel）实现换行。
+    // Qt3 用 Qt::WordBreak 对齐标志换行，Qt4+ 用 setWordWrap(true)；
+    // 经 qSetLabelSelectable 保留可选中（Qt3 双击选、Qt4+ 拖选）。
+    EmojiLabel*   m_detailLabel;
+    EmojiLabel*   m_featureLabel;
+    EmojiLabel*   m_statusLabel;
     QTextEdit*    m_log;
     QComboBox*    m_levelCombo;
     QLineEdit*    m_searchEdit;

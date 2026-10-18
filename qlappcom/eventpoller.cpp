@@ -293,7 +293,7 @@ void EventPoller::run() {
                 pendingN = pendingHandles.size();
                 delayedN = delayedReqs.size();
             }
-            ALOG_INFO("pump alive: active=", activeHandles.size(),
+            ALOG_DEBUG("pump alive: active=", activeHandles.size(),
                       "pending=", pendingN, "delayed=", delayedN,
                       "since_last_done=", elapsedMsBoot(lastDoneTp), "ms");
             lastBeatTp = timeNowBoot();
