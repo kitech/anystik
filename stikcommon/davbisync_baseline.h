@@ -25,6 +25,16 @@ struct BaselineEntry
     qint64 mtimeMsec = 0;  // 本地条目 = 文件 mtime；云端条目 = 服务端 last-modified
 };
 
+// mtime 归一到秒：HTTP-date(Last-Modified) 只有秒精度，Qt3 的
+// QFileInfo::lastModified() 也只有秒；Qt5/6 的 fs mtime 却带毫秒。两个版本
+// 共用同一份基线（org=fedlet app=anystik），毫秒尾巴会让对方的 mtimeDiffer
+// 恒真 → localChanged 全真 → 假冲突 + 全量重传
+//（实测 anystik.bak 基线 404/404 带毫秒、q3stik 基线全秒，同 404 个 key 0 个相同）。
+inline qint64 secMsec(qint64 msec)
+{
+    return msec > 0 ? msec - msec % 1000 : msec;
+}
+
 struct SyncBaseline
 {
     int schemaVersion = 1;

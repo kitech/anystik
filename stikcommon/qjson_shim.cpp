@@ -417,9 +417,15 @@ QByteArray QJsonDocument::toJson(Formatting style) const
     // cJSON_Print* 返回 cJSON 自己的 malloc 缓冲，拷进 QByteArray 后必须
     // 交回给 cJSON 的 free_fn（cJSON_free），不能直接 delete。
 #ifdef QT3_BUILD
-    // Qt3 的 QByteArray 是 QMemArray<char>，无 (const char*) 构造，用 QCString
-    //（QByteArray 子类）承载；返回时隐式转回基类。
-    const QCString out(s);
+    // Qt3 的 QByteArray 是 QMemArray<char>，无 (const char*) 构造。
+    // ⚠ 不可经 QCString 承载：其尺寸恒含尾 NUL（QCString::truncate(pos) =
+    //   resize(pos+1) 即证），隐式转回基类会把 \0 写进文件——实测
+    //   davbisync_baseline.json 末尾多 1 字节，Qt6 QJsonDocument::fromJson
+    //   有 GarbageAtEnd 错误码，可能整份拒收 → 基线加载失败 → 空基线 →
+    //   「两侧皆变」假冲突 + 全量重传。
+    QByteArray out;
+    out.resize((uint)strlen(s));
+    memcpy(out.data(), s, out.size());
 #else
     const QByteArray out(s);
 #endif

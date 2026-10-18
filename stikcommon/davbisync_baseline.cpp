@@ -75,7 +75,8 @@ QString compatRel(QString key, const QString& baseDir)
 void writeEntry(QJsonObject& obj, const BaselineEntry& e)
 {
     obj.insert(QStringLiteral("size"), double(e.size));
-    obj.insert(QStringLiteral("mtimeMsec"), double(e.mtimeMsec));
+    // 统一秒精度落盘（两 Qt 版本互写同一份基线，毫秒尾巴会害另一方误判）
+    obj.insert(QStringLiteral("mtimeMsec"), double(secMsec(e.mtimeMsec)));
 }
 
 BaselineEntry readEntry(const QJsonObject& obj)
@@ -87,7 +88,8 @@ BaselineEntry readEntry(const QJsonObject& obj)
     e.size = qint64(sv.toDouble(-1));
     const QJsonValue mv = obj.value(QStringLiteral("mtimeMsec")).isUndefined()
         ? obj.value(QStringLiteral("m")) : obj.value(QStringLiteral("mtimeMsec"));
-    e.mtimeMsec = qint64(mv.toDouble(0));
+    // 存量带毫秒基线（anystik/Qt6 所写）读入即归一，无需迁移文件
+    e.mtimeMsec = secMsec(qint64(mv.toDouble(0)));
     return e;
 }
 

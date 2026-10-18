@@ -52,6 +52,19 @@ QString formatDuration(qint64 msec)
         .arg(ss, 2, 10, QLatin1Char('0'));
 }
 
+// 与 stikcommon/davbisync.cpp 的同名垫片对齐：mtime 统一截到秒。
+// HTTP-date 仅秒精度、Qt3 节点 fs 亦仅秒；Qt6 带毫秒会与共用基线错位
+// → mtimeDiffer 恒真 → 假冲突 + 全量重传（见 davbisync_baseline.h secMsec）。
+inline qint64 dtMsec(const QDateTime& dt)
+{
+    return davbisync::secMsec(dt.isValid() ? dt.toMSecsSinceEpoch() : 0);
+}
+
+inline qint64 localMtimeMsec(const QFileInfo& fi)
+{
+    return dtMsec(fi.lastModified());
+}
+
 // rclone num 风格冲突保留文件判定：file.conflict<digits>
 bool isConflictRel(const QString& rel)
 {
@@ -379,7 +392,7 @@ void SyncEngine::buildLocalListing()
             }
             davbisync::BaselineEntry e;
             e.size = fi.size();
-            e.mtimeMsec = fi.lastModified().toMSecsSinceEpoch();
+            e.mtimeMsec = localMtimeMsec(fi);
             m_localFiles.insert(rel, e);
             m_cloudToLocal.insert(rel, localAbsPath);
         }
@@ -439,7 +452,7 @@ void SyncEngine::collectCloudItems()
         } else {
             davbisync::BaselineEntry e;
             e.size = qint64(item.size());
-            e.mtimeMsec = item.lastModified().toMSecsSinceEpoch();
+            e.mtimeMsec = dtMsec(item.lastModified());
             if (e.mtimeMsec > 0) {
                 m_cloudMtimeAvail = true;
             }
@@ -890,7 +903,7 @@ void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudRe
                     }
                     const QDateTime t = QDateTime::fromString(
                         QString::fromLatin1(lm), Qt::RFC2822Date);
-                    return t.isValid() ? t.toMSecsSinceEpoch() : 0;
+                    return dtMsec(t);   // 非法 → 0，dtMsec 内已判
                 }();
                 const qint64 baseCloudMsec =
                     m_cloudFiles.value(cloudRelPath).mtimeMsec;
@@ -906,7 +919,7 @@ void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudRe
                     cloudUnchanged = false;
                 }
                 bool localUnchanged = false;
-                const qint64 localMsec = fi.lastModified().toMSecsSinceEpoch();
+                const qint64 localMsec = localMtimeMsec(fi);
                 const auto bit = m_base.local.constFind(cloudRelPath);
                 if (!localMsec) {
                     localUnchanged = true;      // 本地 mtime 不可用 → size-only 语义
@@ -997,7 +1010,7 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRelPat
                     const QDateTime t =
                         QDateTime::fromString(QString::fromLatin1(lm), Qt::RFC2822Date);
                     if (t.isValid()) {
-                        e.mtimeMsec = t.toMSecsSinceEpoch();
+                        e.mtimeMsec = dtMsec(t);
                         m_putMtimeEcho = true;
                     }
                 }
@@ -1162,7 +1175,7 @@ void SyncEngine::downloadFile(const QString& cloudRelPath, const QString& _local
                 QFileInfo fi(localAbsPath);
                 davbisync::BaselineEntry e;
                 e.size = fi.size();
-                e.mtimeMsec = fi.lastModified().toMSecsSinceEpoch();
+                e.mtimeMsec = localMtimeMsec(fi);
                 m_localFiles.insert(cloudRelPath, e);
                 m_cloudToLocal.insert(cloudRelPath, localAbsPath);
                 persistBaseline();
@@ -1255,7 +1268,7 @@ void SyncEngine::uploadMerged(const QString& rel, const QString& localAbsPath)
                 const QFileInfo fi(localAbsPath);
                 davbisync::BaselineEntry le;
                 le.size = fi.size();
-                le.mtimeMsec = fi.lastModified().toMSecsSinceEpoch();
+                le.mtimeMsec = localMtimeMsec(fi);
                 m_localFiles.insert(rel, le);
                 davbisync::BaselineEntry ce;
                 ce.size = fi.size();
@@ -1264,7 +1277,7 @@ void SyncEngine::uploadMerged(const QString& rel, const QString& localAbsPath)
                     const QDateTime t = QDateTime::fromString(
                         QString::fromLatin1(lm), Qt::RFC2822Date);
                     if (t.isValid()) {
-                        ce.mtimeMsec = t.toMSecsSinceEpoch();
+                        ce.mtimeMsec = dtMsec(t);
                     }
                 }
                 m_cloudFiles.insert(rel, ce);

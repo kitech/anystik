@@ -341,7 +341,8 @@ inline qint64 dtMsec(const QDateTime& dt)
 #ifdef QT3_BUILD
     return qDateTimeToMsecs(dt);
 #else
-    return dt.toMSecsSinceEpoch();
+    // 截到秒：与 Qt3 节点的 fs/HTTP-date 口径对齐，防假冲突全量重传
+    return davbisync::secMsec(dt.toMSecsSinceEpoch());
 #endif
 }
 
@@ -369,7 +370,8 @@ inline qint64 localMtimeMsec(const QFileInfo& fi)
 #ifdef QT3_BUILD
     return (qint64)dt.toTime_t() * 1000LL + (qint64)dt.time().msec();
 #else
-    return dt.toMSecsSinceEpoch();
+    // Qt6 毫秒尾巴 = 与 Qt3 节点/共用基线错位的根源，统一截秒
+    return davbisync::secMsec(dt.toMSecsSinceEpoch());
 #endif
 }
 
