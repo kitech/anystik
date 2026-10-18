@@ -182,6 +182,8 @@ private:
     bool m_serverProbed = false;   // OPTIONS 预检仅触发一次
     QSet<QString> m_scannedCloudDirs;   // 已列出过的云端目录
     QString m_scanCurrentDir;           // 本次正在列的目录
+    qint64 m_cloudScanStartMsec = 0;    // 阶段 B 云端清单起始时刻
+    qint64 m_cloudListBytes = 0;        // 阶段 B 累计 PROPFIND 响应体字节
     QList<QPair<QString, QString>> m_pendingDirs; // 待展开子目录 (relDir, depthPath)
     FileEntryMap m_cloudFiles;      // cloudRelPath → 云端条目
     FileEntryMap m_localFiles;      // cloudRelPath → 本地条目

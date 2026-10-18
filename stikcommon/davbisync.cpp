@@ -728,6 +728,7 @@ SyncEngine::LocalListingResult SyncEngine::computeLocalListing(
 {
     LocalListingResult r;
     davbisync::baselineLoad(&r.base);
+    const qint64 t0 = nowMsec();
     try {
         const auto packs = src->installedPacksByTitleAsc();
         int dirs = 0;
@@ -805,12 +806,15 @@ SyncEngine::LocalListingResult SyncEngine::computeLocalListing(
         }
         r.fileCount = r.files.size();
         r.packCount = dirs;
+        r.elapsedMs = nowMsec() - t0;
         davbisync::LocalListingRec rec;
         rec.level = davbisync::Info;
         rec.tag = QStringLiteral("scan");
         rec.line = QStringLiteral(
-            "local listing: %1 packs, %2 files (builtin-source packs excluded)")
-                       .arg(dirs).arg(r.fileCount);
+            "local listing: %1 packs, %2 files in %3 ms [%4] "
+            "(builtin-source packs excluded)")
+                       .arg(dirs).arg(r.fileCount).arg(r.elapsedMs)
+                       .arg(src->baseDir());
         r.logs.push_back(rec);
     } catch (const std::exception& e) {
         r.failed = true;
@@ -843,6 +847,8 @@ void SyncEngine::applyLocalListing(const LocalListingResult& r)
     }
     // 阶段 B：云端清单（异步逐目录）
     // 扫描根 = 业务 dbRel 空串（cloudPath 拼出云根 anystik）
+    m_cloudScanStartMsec = nowMsec();
+    m_cloudListBytes = 0;
     scanCloudDir(QString());
 }
 
@@ -882,6 +888,7 @@ void SyncEngine::collectCloudItems()
     // 出参（既定接口），遍历写法不变。
     std::vector<QWebdavItemLite> items;
     m_parser->getList(items);
+    m_cloudListBytes += m_parser->lastReplyBytes();
     for (const auto& item : items) {
         const QString rel = canonicalRel(item.path());
         if (rel.isEmpty()) {
@@ -943,8 +950,10 @@ void SyncEngine::finishCloudScan()
         updateRemoteFeature();
     }
     q34log(davbisync::Info, QStringLiteral("scan"),
-        QStringLiteral("cloud listing done: %1 files in %2 dirs")
-            .arg(m_cloudFiles.size()).arg(m_scannedCloudDirs.size()));
+        QStringLiteral("cloud listing done: %1 dirs, %2 files, %3 bytes in %4 ms [%5]")
+            .arg(m_scannedCloudDirs.size()).arg(m_cloudFiles.size())
+            .arg(m_cloudListBytes).arg(nowMsec() - m_cloudScanStartMsec)
+            .arg(cloudPath(QString())));
 
     // 阶段 C：diff + 冲突处置
     buildOpQueue();

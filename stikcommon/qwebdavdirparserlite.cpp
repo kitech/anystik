@@ -137,6 +137,7 @@ void QWebdavDirParserLite::onReplyFinished(QNetworkReply* reply)
         reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 #endif
 
+    m_lastReplyBytes = 0;   // 默认无下载量；仅成功 207 分支在 parseMultiResponse 里赋值
     if (reply->error() != QNetworkReply::NoError) {
         // ⚠ 走 fromUtf8 而非 QString(const char*)：Qt3 的 QString(const char*)
         // 按 Latin-1 逐字节解释源文件里的 UTF-8 字节，中文会碎成一串 U+00xx
@@ -168,6 +169,7 @@ void QWebdavDirParserLite::onReplyFinished(QNetworkReply* reply)
 // ── parseMultiResponse ──────────────────────────────────────────────────
 void QWebdavDirParserLite::parseMultiResponse(const QByteArray& data)
 {
+    m_lastReplyBytes = (qint64)data.size();
     if (m_abort) {
         return;
     }

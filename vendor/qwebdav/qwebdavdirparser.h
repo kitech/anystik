@@ -85,6 +85,9 @@ public:
     [[nodiscard]] bool isFinished() const;
     [[nodiscard]] QString path() const;
 
+    // 最近一次成功（207）PROPFIND 响应体字节数；错误/非 207 记 0。
+    [[nodiscard]] qint64 lastReplyBytes() const { return m_lastReplyBytes; }
+
 signals:
     void finished();
     void errorChanged(QString);
@@ -110,6 +113,7 @@ private:
     QWebdav *m_webdav;
     QNetworkReply *m_reply;
     QList<QWebdavItem> m_dirList;
+    qint64 m_lastReplyBytes = 0;   // 最近一次 PROPFIND 响应体字节数
     QString m_path;
     bool m_includeRequestedURI;
     bool m_busy;

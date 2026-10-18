@@ -198,7 +198,7 @@ bool SyncEngine::startSync()
         cloudRootAbs += m_cloudRoot;
         log(davbisync::Info, QStringLiteral("dav"),
             QStringLiteral("本地base=%1 · rootPath=%2 · cloudRoot=%3 · 云根=%4")
-                .arg(StickerStore::instance()->stickerBaseDir(),
+                .arg(StickerStore::instance()->currentStickerBaseDir(),
                      m_rootPath, m_cloudRoot, cloudRootAbs));
     }
     m_finished = false;
@@ -265,6 +265,8 @@ bool SyncEngine::startSync()
 
     // 阶段 B：云端清单（异步逐目录）
     // 扫描根 = 业务 dbRel 空串（cloudPath 拼出云根 anystik）
+    m_cloudScanStartMsec = QDateTime::currentMSecsSinceEpoch();
+    m_cloudListBytes = 0;
     scanCloudDir(QString());
     return true;
 }
@@ -324,6 +326,7 @@ void SyncEngine::buildLocalListing()
     m_cloudToLocal.clear();
     m_localDirPacks.clear();
     m_localFileCount = 0;
+    const qint64 t0 = QDateTime::currentMSecsSinceEpoch();
 
     const auto packs = StickerStore::instance()->packs(1, "title ASC");
     int dirs = 0;
@@ -384,8 +387,10 @@ void SyncEngine::buildLocalListing()
     }
     m_localFileCount = m_localFiles.size();
     log(davbisync::Info, QStringLiteral("scan"),
-        QStringLiteral("local listing: %1 packs, %2 files (builtin-source packs excluded)")
-            .arg(dirs).arg(m_localFileCount));
+        QStringLiteral("local listing: %1 packs, %2 files in %3 ms [%4] (builtin-source packs excluded)")
+            .arg(dirs).arg(m_localFileCount)
+            .arg(QDateTime::currentMSecsSinceEpoch() - t0)
+            .arg(StickerStore::instance()->currentStickerBaseDir()));
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -421,6 +426,7 @@ void SyncEngine::collectCloudItems()
     m_scanCurrentDir.clear();
 
     const auto items = m_parser->getList();
+    m_cloudListBytes += m_parser->lastReplyBytes();
     for (const auto& item : items) {
         const QString rel = canonicalRel(item.path());
         if (rel.isEmpty()) {
@@ -482,8 +488,10 @@ void SyncEngine::finishCloudScan()
         updateRemoteFeature();
     }
     log(davbisync::Info, QStringLiteral("scan"),
-        QStringLiteral("cloud listing done: %1 files in %2 dirs")
-            .arg(m_cloudFiles.size()).arg(m_scannedCloudDirs.size()));
+        QStringLiteral("cloud listing done: %1 dirs, %2 files, %3 bytes in %4 ms [%5]")
+            .arg(m_scannedCloudDirs.size()).arg(m_cloudFiles.size())
+            .arg(m_cloudListBytes).arg(QDateTime::currentMSecsSinceEpoch() - m_cloudScanStartMsec)
+            .arg(cloudPath(QString())));
 
     // 阶段 C：diff + 冲突处置
     buildOpQueue();

@@ -97,6 +97,9 @@ public:
     void getList(std::vector<QWebdavItemLite>& out) const;
     void abort();
 
+    // 最近一次成功（207）PROPFIND 响应体字节数；错误/非 207 记 0。
+    qint64 lastReplyBytes() const { return m_lastReplyBytes; }
+
     // ── 垫片信号（非 moc）──
     // 原生信号（Qt4+ 走这里；moc 由 qlstik.pro 的 CONFIG += moc 生成，
     // 头已在 stikcommon.pri:143 的 STIKCOMMON_HEADERS 里登记）。
@@ -152,6 +155,7 @@ private:
     QWebdavLite* m_webdav;
     QNetworkReply* m_reply;
     std::vector<QWebdavItemLite> m_dirList;
+    qint64 m_lastReplyBytes = 0;   // 最近一次 PROPFIND 响应体字节数
     QString m_path;
     bool m_busy;
     bool m_abort;
