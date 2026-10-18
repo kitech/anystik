@@ -51,11 +51,11 @@
 
 // ── 调用点注入：q34log(level, tag, msg) ────────────────────────────────
 // 成员 logAt() 是本 TU 唯一的 qInfo/qWarning/qCritical 落点；若在它内部展开宏，
-// file:line 会全部指向 logAt() 自身。故调用点一律走本宏，由宏补上
-// __FILE__/__LINE__，再交 logAt()。宏只在本 .cpp 生效（不进头文件），不污染其它
+// file:line/func 会全部指向 logAt() 自身。故调用点一律走本宏，由宏补上
+// __FILE__/__LINE__/Q_FUNC_INFO，再交 logAt()。宏只在本 .cpp 生效（不进头文件），不污染其它
 // TU；本 TU 内没有同名符号。⚠ 必须放在所有 #include 之后，否则会重写头文件里
 // 的成员声明。
-#define q34log(LEVEL, TAG, MSG) logAt((LEVEL), (TAG), (MSG), __FILE__, __LINE__)
+#define q34log(LEVEL, TAG, MSG) logAt((LEVEL), (TAG), (MSG), __FILE__, __LINE__, Q_FUNC_INFO)
 
 namespace {
 
@@ -2038,12 +2038,12 @@ void SyncEngine::finishWithError(const QString& msg)
 }
 
 void SyncEngine::logAt(davbisync::LogLevel level, const QString& tag, const QString& line,
-                       const char* file, int lineNo)
+                       const char* file, int lineNo, const char* func)
 {
     emit syncLog(int(level), tag, line);
     // 控制台镜像：UI 日志视图之外，终端（flatpak run --devel 等）也能看到
     // 同一份同步日志。logAt 是唯一落点，调用点由 q34log 宏从调用处带进来
-    //（file/lineNo），故这里显式指定 file/lineNo —— 若直接写 qInfo()/qWarning()
+    //（file/lineNo/func），故这里显式指定三者 —— 若直接写 qInfo()/qWarning()
     // 宏，调用点会退化成 logAt 自身。
     // 级别真分流：Error→critical、Warn→warning、其余 → info（不再一律 qInfo）。
     // 处理器/UI 各自从 level 出 [ERROR]/[WARN]/[INFO]，文本里不再重复级别标签。
@@ -2055,20 +2055,20 @@ void SyncEngine::logAt(davbisync::LogLevel level, const QString& tag, const QStr
         case davbisync::Warn:  lvl = Qt34Warning;  break;
         default:               lvl = Qt34Info;     break;
     }
-    Qt34LogStream(lvl, file, lineNo, "").noquote() << "[sync]" << tag << line;
+    Qt34LogStream(lvl, file, lineNo, func).noquote() << "[sync]" << tag << line;
 #else
-    // Qt5/6：用原生的 QMessageLogger 显式带 file/lineNo（垫片在 Qt5+ 不生效）。
+    // Qt5/6：用原生的 QMessageLogger 显式带 file/lineNo/func（垫片在 Qt5+ 不生效）。
     switch (level) {
         case davbisync::Error:
-            QMessageLogger(file, lineNo, "").critical().noquote()
+            QMessageLogger(file, lineNo, func).critical().noquote()
                 << "[sync]" << tag << line;
             break;
         case davbisync::Warn:
-            QMessageLogger(file, lineNo, "").warning().noquote()
+            QMessageLogger(file, lineNo, func).warning().noquote()
                 << "[sync]" << tag << line;
             break;
         default:
-            QMessageLogger(file, lineNo, "").info().noquote()
+            QMessageLogger(file, lineNo, func).info().noquote()
                 << "[sync]" << tag << line;
             break;
     }

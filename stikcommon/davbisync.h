@@ -246,10 +246,10 @@ private:
     void finishOk(const QString& summary);
     void finishWithError(const QString& msg);
     // 带真实调用点。**不要直接调用**：调用点一律走 davbisync.cpp 顶部的
-    // q34log(level,tag,msg) 宏，由它补 __FILE__/__LINE__ 后再调本函数
-    //（否则 file:line 永远指向 logAt() 自身）。
+    // q34log(level,tag,msg) 宏，由它补 __FILE__/__LINE__/Q_FUNC_INFO 后再调本函数
+    //（否则 file:line/func 永远指向 logAt() 自身）。
     void logAt(davbisync::LogLevel level, const QString& tag, const QString& line,
-               const char* file, int lineNo);
+               const char* file, int lineNo, const char* func);
     QString statDetail() const;
     void probeServer();
     void updateRemoteFeature();

@@ -80,8 +80,55 @@ typedef void (*Qt34MessageHandler)(Qt34LogLevel level,
                                    const char* file, int line, const char* func,
                                    const char* utf8msg);
 
-// 默认处理器：统一格式 [HH:MM:SS] [LEVEL] file:line func  msg（UTF-8 直写
-// stderr）。级别各自有独立 label，info 不再落成 DEBUG。
+// ── 调用点显示：短文件名 + 限定函数名 ─────────────────────────────────
+// 处理器把 __FILE__ 收敛成 basename（与 qlcomp/limelog 一致），把
+// __PRETTY_FUNCTION__ 收敛成限定函数名；两者都放行尾，消息自身保持
+// 起始列对齐。
+inline const char* qt34BaseName(const char* file)
+{
+    if (!file) return "";
+    const char* p = file + strlen(file);
+    while (p > file && p[-1] != '/' && p[-1] != '\\') --p;
+    return p;
+}
+
+// 从完整原型裁出限定函数名（GCC 的 __PRETTY_FUNCTION__）：
+//   "virtual void {anonymous}::Pump::run()"                      → "Pump::run"
+//   "size_t {anonymous}::headerCb(char*, size_t, size_t, void*)" → "headerCb"
+//   "int main()"                                                 → "main"
+//   "Pump::Pump()"                                               → "Pump::Pump"
+// 步骤：截到首个 '(' 去形参 → 取末个空白后的 token 去返回类型 → 去前导 * / &
+//       → 跳过 {anonymous}:: 与 (anonymous namespace)::（真实命名空间保留）。
+inline const char* qt34ShortFunc(const char* pretty, char* out, size_t outSize)
+{
+    if (outSize == 0) return out;
+    out[0] = '\0';
+    if (!pretty) return out;
+    size_t n = 0;
+    while (pretty[n] != '\0' && pretty[n] != '(') ++n;
+    size_t start = 0;
+    for (size_t i = 0; i < n; ++i)
+        if (pretty[i] == ' ' || pretty[i] == '\t') start = i + 1;
+    while (start < n && (pretty[start] == '*' || pretty[start] == '&')) ++start;
+    static const char kAnon[]   = "{anonymous}::";
+    static const char kAnonNs[] = "(anonymous namespace)::";
+    size_t o = 0;
+    for (size_t i = start; i < n && o + 1 < outSize; ) {
+        if (n - i >= sizeof(kAnon) - 1 && memcmp(pretty + i, kAnon, sizeof(kAnon) - 1) == 0) {
+            i += sizeof(kAnon) - 1;
+        } else if (n - i >= sizeof(kAnonNs) - 1 && memcmp(pretty + i, kAnonNs, sizeof(kAnonNs) - 1) == 0) {
+            i += sizeof(kAnonNs) - 1;
+        } else {
+            out[o++] = pretty[i++];
+        }
+    }
+    out[o] = '\0';
+    return out;
+}
+
+// 默认处理器：消息在前，调用点 [函数名] [文件名:行号] 置于行尾。
+// 正文（消息/函数名/文件名）一律原色，只有时间戳暗、级别标签着色；
+// 级别各自有独立 label，info 不再落成 DEBUG。
 inline void qt34DefaultMessageHandler(Qt34LogLevel level,
                                       const char* file, int line, const char* func,
                                       const char* utf8msg)
@@ -99,12 +146,24 @@ inline void qt34DefaultMessageHandler(Qt34LogLevel level,
     struct tm* t = localtime(&now);
     char tbuf[16];
     strftime(tbuf, sizeof(tbuf), "%H:%M:%S", t);
+
+    char funcBuf[256];
+    qt34ShortFunc(func, funcBuf, sizeof(funcBuf));
+    const char* base = qt34BaseName(file);
+
+    // 行尾调用点块：函数名为空时只留 [file:line]，不留空 []。
+    char loc[512];
+    if (funcBuf[0] != '\0')
+        snprintf(loc, sizeof(loc), "[%s] [%s:%d]", funcBuf, base, line);
+    else
+        snprintf(loc, sizeof(loc), "[%s:%d]", base, line);
+
     const bool tty = isatty(fileno(stderr)) != 0;
-    fprintf(stderr, "%s[%s]%s %s[%s]%s %s:%d %s  %s\n",
+    fprintf(stderr, "%s[%s]%s %s[%s]%s %s %s\n",
             tty ? "\033[2m" : "", tbuf, tty ? "\033[0m" : "",
             tty ? color : "", label, tty ? "\033[0m" : "",
-            file ? file : "?", line, func ? func : "?",
-            utf8msg ? utf8msg : "");
+            utf8msg ? utf8msg : "",
+            loc);
     fflush(stderr);
     if (level == Qt34Fatal) abort();
 }

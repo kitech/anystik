@@ -304,6 +304,32 @@ TEST_CASE("qInfo(fmt, ...) 变参: 中文经 UTF-8 转发不乱码")
     CHECK(g_lastMsg == S("[中文]"));
 }
 
+TEST_CASE("qt34ShortFunc: 从 __PRETTY_FUNCTION__ 裁出限定函数名")
+{
+    char buf[256];
+    CHECK_EQ(QString::fromUtf8(qt34ShortFunc(
+                 "size_t {anonymous}::headerCb(char*, size_t, size_t, void*)",
+                 buf, sizeof(buf))), S("headerCb"));
+    CHECK_EQ(QString::fromUtf8(qt34ShortFunc(
+                 "virtual void {anonymous}::Pump::run()", buf, sizeof(buf))), S("Pump::run"));
+    CHECK_EQ(QString::fromUtf8(qt34ShortFunc("int main()", buf, sizeof(buf))), S("main"));
+    CHECK_EQ(QString::fromUtf8(qt34ShortFunc("Pump::Pump()", buf, sizeof(buf))), S("Pump::Pump"));
+    CHECK_EQ(QString::fromUtf8(qt34ShortFunc(
+                 "int ns::Cls::method(int) const", buf, sizeof(buf))), S("ns::Cls::method"));
+    CHECK_EQ(QString::fromUtf8(qt34ShortFunc("char *foo()", buf, sizeof(buf))), S("foo"));
+    CHECK(QString::fromUtf8(qt34ShortFunc(0, buf, sizeof(buf))).isEmpty());
+}
+
+TEST_CASE("qt34BaseName: 取路径最后一段")
+{
+    CHECK_EQ(QString::fromUtf8(qt34BaseName("../../stikcommon/qwebdavtransport.cpp")),
+             S("qwebdavtransport.cpp"));
+    CHECK_EQ(QString::fromUtf8(qt34BaseName("/abs/path/file.cpp")), S("file.cpp"));
+    CHECK_EQ(QString::fromUtf8(qt34BaseName("plain.cpp")), S("plain.cpp"));
+    CHECK_EQ(QString::fromUtf8(qt34BaseName("dir\\win.cpp")), S("win.cpp"));
+    CHECK(QString::fromUtf8(qt34BaseName(0)).isEmpty());
+}
+
 TEST_CASE("消息通道: 级别标志真的被析构函数用上")
 {
     // 确认 Debug 与 Warning 各自落到正确级别；曾有风险是构造参数传反。

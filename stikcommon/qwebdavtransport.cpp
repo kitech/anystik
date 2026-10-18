@@ -142,8 +142,8 @@ size_t headerCb(char* ptr, size_t sz, size_t nm, void* ud)
     }
     // curl -v 风格响应日志：状态行与每个头各一行（len 已去 \r\n）。
     // 响应体不打：207 XML/图片字节会刷屏，失败时上层 describeError 带完整 URL。
-    qInfo().noquote() << "<<"
-                      << QString::fromUtf8(ptr, (uint)len);
+    qDebug().noquote() << "<<"
+                       << QString::fromUtf8(ptr, (uint)len);
     // 每轮响应都会重发状态行（100-continue、重定向等），以它刷新 status
     if (len > 5 && strncmp(ptr, "HTTP/", 5) == 0) {
         const char* sp1 = (const char*)memchr(ptr, ' ', len);
@@ -334,10 +334,10 @@ protected:
                 t->status = (int)code;
                 // 收尾行：与 curl -v 的 "=> Recv data" 对应，给上层
                 // describeError 的失败 URL 做状态/体量对账。
-                qInfo().noquote() << "<<"
-                                  << QString::fromUtf8("status=%1 body=%2 bytes")
-                                         .arg(t->status)
-                                         .arg((qulonglong)t->respBody.size());
+                qDebug().noquote() << "<<"
+                                   << QString::fromUtf8("status=%1 body=%2 bytes")
+                                          .arg(t->status)
+                                          .arg((qulonglong)t->respBody.size());
 
                 curl_multi_remove_handle(m_multi, e);
                 remove(t);
@@ -465,9 +465,9 @@ void QWebdavTransport::send(const std::string& method,
     t->key = method + " " + url;
     // curl -v 风格请求日志（> 请求行 / > 头）。Authorization 的值不落日志
     //（凭据不进日志是项目铁律），只打 <redacted> 标记，见下方头循环。
-    qInfo().noquote() << ">>"
-                      << QString::fromUtf8(t->key.c_str(),
-                                           (uint)t->key.size());
+    qDebug().noquote() << ">>"
+                       << QString::fromUtf8(t->key.c_str(),
+                                            (uint)t->key.size());
     t->uploadBuf = body;
     t->cb = cb;
     t->ud = userdata;
@@ -566,10 +566,10 @@ void QWebdavTransport::send(const std::string& method,
         //「这个请求到底带没带 auth」（createRequest 的预挂头与 401 重发链
         // 的补头都会走到这里）。
         if (it->first == "Authorization") {
-            qInfo().noquote() << ">> Authorization <redacted>";
+            qDebug().noquote() << ">> Authorization <redacted>";
         } else {
-            qInfo().noquote() << ">>"
-                              << QString::fromUtf8(line.c_str(), (uint)line.size());
+            qDebug().noquote() << ">>"
+                               << QString::fromUtf8(line.c_str(), (uint)line.size());
         }
     }
     if (t->hdrs != 0) {
