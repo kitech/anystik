@@ -2,6 +2,7 @@
 
 #include <qbuffer.h>
 #include <qiodevice.h>
+#include "qbytearray_shim.h"   // qToBase64（Qt3 支）
 
 // ═══ 构造/析构 ═══════════════════════════════════════════════════════
 QWebdavLite::QWebdavLite(QObject* parent)
@@ -194,6 +195,22 @@ QNetworkReply* QWebdavLite::createRequest(const QString& method, QNetworkRequest
 {
     m_lastReply = 0;
     QNetworkReply* reply = 0;
+    // ★ 已设凭据则首请求直接带 Authorization，省掉 401 → 重发的一轮往返
+    //（原先不带头 → 服务器 401 → qnam_shim 的重发链补头重发，每个请求
+    //  白付一次 401。重发链保留：凭据错误时仍兜底一次。）
+    // base64 按 length() 拷贝（Qt3 QCString size() 含 NUL 的坑，同
+    // qnam_shim.cpp:308 的纪律）；凭据不进 URL、不进日志。
+    if (!m_username.isEmpty() || !m_password.isEmpty()) {
+        const QByteArray plain = qToUtf8BA(m_username + QLatin1Char(':') + m_password);
+#if !defined(QT_VERSION) || QT_VERSION < 0x040000
+        const QCString b64 = qToBase64(plain);
+        req.setRawHeader(QCString("Authorization"),
+                         QCString("Basic ") + b64);
+#else
+        req.setRawHeader(QByteArray("Authorization"),
+                         QByteArray("Basic ") + plain.toBase64());
+#endif
+    }
     // 请求体：必须在**这里**当场从 QIODevice 读出来。
     //   1. 垫片的 sendCustomRequest 收不到 QIODevice（只有 QByteArray /
     //      std::string 两种形参），原来只把设备登记进 m_inDataDevices 却从不
@@ -317,29 +334,48 @@ QString QWebdavLite::describeError(QNetworkReply* reply) const
     //   与 207 解析那个坑同源（见 移植计划.md §6.3e-1 第五阶段根因 2）。
     // 注：ContentAccessDenied 在 Qt3 垫片与 Qt6.7 原生里**同名**（都无 Error
     // 后缀），不需要版本分支；早期 Qt5 才短暂有过 ContentAccessDeniedError。
+    // 每条错误都拼上请求路径（- <url path>），便于从「404」直达缺失的 URL
+    //（凭据不进 URL，见 createRequest 的 401 链）。
+    QString base;
     switch (reply->error()) {
     case QNetworkReply::ContentAccessDenied:
-        return QString::fromUtf8("WebDAV: 认证/访问被拒（401/403）") +
-               (detail.isEmpty() ? QString() : QString::fromUtf8(" - ") + detail);
+        base = QString::fromUtf8("WebDAV: 认证/访问被拒（401/403）");
+        break;
     case QNetworkReply::ContentNotFoundError:
-        return QString::fromUtf8("WebDAV: 资源不存在（404）") +
-               (detail.isEmpty() ? QString() : QString::fromUtf8(" - ") + detail);
+        base = QString::fromUtf8("WebDAV: 资源不存在（404）");
+        break;
     case QNetworkReply::ConnectionRefusedError:
-        return QString::fromUtf8("WebDAV: 连接被拒") +
-               (detail.isEmpty() ? QString() : QString::fromUtf8(" - ") + detail);
+        base = QString::fromUtf8("WebDAV: 连接被拒");
+        break;
     case QNetworkReply::HostNotFoundError:
-        return QString::fromUtf8("WebDAV: 主机名解析失败") +
-               (detail.isEmpty() ? QString() : QString::fromUtf8(" - ") + detail);
+        base = QString::fromUtf8("WebDAV: 主机名解析失败");
+        break;
     case QNetworkReply::TimeoutError:
-        return QString::fromUtf8("WebDAV: 超时") +
-               (detail.isEmpty() ? QString() : QString::fromUtf8(" - ") + detail);
+        base = QString::fromUtf8("WebDAV: 超时");
+        break;
     case QNetworkReply::SslHandshakeFailedError:
-        return QString::fromUtf8("WebDAV: TLS 握手/证书校验失败") +
-               (detail.isEmpty() ? QString() : QString::fromUtf8(" - ") + detail);
+        base = QString::fromUtf8("WebDAV: TLS 握手/证书校验失败");
+        break;
     default:
+        base = detail.isEmpty() ? QString::fromUtf8("WebDAV: 请求失败")
+                                : QString();
         break;
     }
-    return detail.isEmpty() ? QString::fromUtf8("WebDAV: 请求失败") : detail;
+    QString msg = base;
+    if (!msg.isEmpty() && !detail.isEmpty()) {
+        msg += QString::fromUtf8(" - ") + detail;
+    } else if (msg.isEmpty()) {
+        msg = detail;   // 无已知分类时直接用原始细节，但仍要拼 URL
+    }
+    // 拼完整 DAV URL（scheme://host:port/path，非仅 path）：404 时可直接
+    // 复制排查。URL 不含凭据（buildUrl 刻意不塞 userinfo，凭据走 401 链）。
+    // Qt3 QUrl::toString 的尾斜杠规范化与 Qt6 略异（见 qurl_shim 注释），
+    // 日志场景可接受，不另做归一。
+    const QString fullUrl = reply->url().toString();
+    if (!fullUrl.isEmpty()) {
+        msg += QString::fromUtf8(" - ") + fullUrl;
+    }
+    return msg;
 }
 
 QNetworkReply* QWebdavLite::createRequest(const QString& method, QNetworkRequest& req,

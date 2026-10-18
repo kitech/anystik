@@ -80,9 +80,12 @@ private:
     SyncEngine*   m_engine;
     QProgressBar* m_bar;
     QLabel*       m_pctLabel;
-    QLabel*       m_detailLabel;
-    QLabel*       m_featureLabel;
-    QLabel*       m_statusLabel;
+    // 长文本三行（详情/远程特征/状态）不用 QLabel：Qt3 QLabel 无 wordWrap，
+    // sizeHint 宽 = 全文宽（实测 199 字 → 1843px，直接把 QDialog 撑成全屏宽），
+    // 改用固定高只读 QTextEdit（换行、可选中拷贝）。
+    QTextEdit*    m_detailLabel;
+    QTextEdit*    m_featureLabel;
+    QTextEdit*    m_statusLabel;
     QTextEdit*    m_log;
     QComboBox*    m_levelCombo;
     QLineEdit*    m_searchEdit;

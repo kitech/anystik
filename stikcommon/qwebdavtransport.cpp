@@ -11,6 +11,7 @@
 // qint64：Qt 3.5 的 qglobal.h **没有** typedef（Qt4 起才补上），项目统一由
 // qglobaltype_shim.h 在 QT_VERSION < 0x040000 分支里补。空闲计时要用它。
 #include "qglobaltype_shim.h"
+#include "qdebug_shim.h"   // curl -v 风格 >> / << 请求响应日志
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 泵线程与任务表
@@ -107,8 +108,12 @@ size_t headerCb(char* ptr, size_t sz, size_t nm, void* ud)
         --len;
     }
     if (len == 0) {
-        return total;   // 空行 = 头结束
+        return total;   // 空行 = 头结束（无内容可读，不打）
     }
+    // curl -v 风格响应日志：状态行与每个头各一行（len 已去 \r\n）。
+    // 响应体不打：207 XML/图片字节会刷屏，失败时上层 describeError 带完整 URL。
+    qInfo().noquote() << "<<"
+                      << QString::fromUtf8(ptr, (uint)len);
     // 每轮响应都会重发状态行（100-continue、重定向等），以它刷新 status
     if (len > 5 && strncmp(ptr, "HTTP/", 5) == 0) {
         const char* sp1 = (const char*)memchr(ptr, ' ', len);
@@ -297,6 +302,12 @@ protected:
                 long code = 0;
                 curl_easy_getinfo(e, CURLINFO_RESPONSE_CODE, &code);
                 t->status = (int)code;
+                // 收尾行：与 curl -v 的 "=> Recv data" 对应，给上层
+                // describeError 的失败 URL 做状态/体量对账。
+                qInfo().noquote() << "<<"
+                                  << QString::fromUtf8("status=%1 body=%2 bytes")
+                                         .arg(t->status)
+                                         .arg((qulonglong)t->respBody.size());
 
                 curl_multi_remove_handle(m_multi, e);
                 remove(t);
@@ -422,6 +433,11 @@ void QWebdavTransport::send(const std::string& method,
 
     Task* t = new Task;
     t->key = method + " " + url;
+    // curl -v 风格请求日志（> 请求行 / > 头）。Authorization 的值不落日志
+    //（凭据不进日志是项目铁律），只打 <redacted> 标记，见下方头循环。
+    qInfo().noquote() << ">>"
+                      << QString::fromUtf8(t->key.c_str(),
+                                           (uint)t->key.size());
     t->uploadBuf = body;
     t->cb = cb;
     t->ud = userdata;
@@ -445,6 +461,16 @@ void QWebdavTransport::send(const std::string& method,
     curl_easy_setopt(t->easy, CURLOPT_URL, url.c_str());
     curl_easy_setopt(t->easy, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(t->easy, CURLOPT_FOLLOWLOCATION, 1L);
+    // ★ 重定向跳必须保留 Authorization。curl ≥7.58 官方语义（CURLOPT_HTTPHEADER
+    //   文档）：跟随重定向时若主机名/协议/端口任一变化，自定义 Authorization
+    //   头会被**主动剥掉**（防凭据泄漏），除非 CURLOPT_UNRESTRICTED_AUTH=1
+    //   （默认 0）。不开的表现：301 跟随后的请求变成无认证 → 目标端回
+    //   401 + www-authenticate: Basic（实测 pan.moe 即此形态）。
+    //   本泵只服务 WebDAV（用户自配的单一端点），凭据本就要发给该端点及其
+    //   301 指向的目标（canonical 域名/端口/协议），开启是安全的。
+    curl_easy_setopt(t->easy, CURLOPT_UNRESTRICTED_AUTH, 1L);
+    // 显式跳数上限：原先未设（依赖 libcurl 内部默认），封死 301 环。
+    curl_easy_setopt(t->easy, CURLOPT_MAXREDIRS, 10L);
     curl_easy_setopt(t->easy, CURLOPT_NOPROGRESS, 1L);
     curl_easy_setopt(t->easy, CURLOPT_SSL_SESSIONID_CACHE, 0L);
     if (timeoutMsecs > 0) {
@@ -490,6 +516,16 @@ void QWebdavTransport::send(const std::string& method,
         }
         const std::string line = it->first + ": " + it->second;
         t->hdrs = curl_slist_append(t->hdrs, line.c_str());
+        // curl -v 风格请求头日志。Authorization 照发给 curl，但值不落日志
+        //（凭据不进日志是项目铁律）：只打 `<redacted>` 标记，便于核对
+        //「这个请求到底带没带 auth」（createRequest 的预挂头与 401 重发链
+        // 的补头都会走到这里）。
+        if (it->first == "Authorization") {
+            qInfo().noquote() << ">> Authorization <redacted>";
+        } else {
+            qInfo().noquote() << ">>"
+                              << QString::fromUtf8(line.c_str(), (uint)line.size());
+        }
     }
     if (t->hdrs != 0) {
         curl_easy_setopt(t->easy, CURLOPT_HTTPHEADER, t->hdrs);

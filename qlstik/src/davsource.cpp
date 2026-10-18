@@ -71,6 +71,11 @@ class QlstikDavLocalSource : public DavLocalSource
 public:
     QlstikDavLocalSource() { setDavLocalSource(this); }
 
+    QString baseDir() const
+    {
+        return stickerBaseDir();
+    }
+
     std::vector<DavLocalPack> installedPacksByTitleAsc()
     {
         std::vector<DavLocalPack> out;

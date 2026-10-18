@@ -277,6 +277,14 @@ QString StickerStore::stickerBaseDir() const
         }
         if (m_stickerBaseDir.isEmpty())
             m_stickerBaseDir = qDirTempPath();
+        // 首次解析时钉死实际生效的 base（storageRoot 覆盖后可能 ≠
+        // AppLocalDataLocation），进控制台供同步路径排障。
+        qInfo().noquote() << "[StickerStore] stickerBase=" << m_stickerBaseDir
+                          << "(source="
+                          << (saved == m_stickerBaseDir
+                                  ? "settings override"
+                                  : "AppLocalDataLocation")
+                          << ")";
     }
     return m_stickerBaseDir;
 }

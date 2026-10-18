@@ -169,11 +169,11 @@ private:
     // 阶段 D：应用
     void pushNext();
     void mkdirNextChain();          // 逐层串行 mkdir，直到完整目录链就位
-    void checkAndUpload(const QString& localPath, const QString& cloudRel);
-    void uploadFile(const QString& localPath, const QString& cloudRel);
-    void downloadFile(const QString& cloudRel, const QString& localAbs);
+    void checkAndUpload(const QString& localPath, const QString& cloudRelPath);
+    void uploadFile(const QString& localPath, const QString& cloudRelPath);
+    void downloadFile(const QString& cloudRelPath, const QString& localAbsPath);
     void mergeSpecialNext();       // 可合并边车(如 _stikmeta.svg)折叠合并
-    void uploadMerged(const QString& rel, const QString& localAbs);
+    void uploadMerged(const QString& rel, const QString& localAbsPath);
     void removeActiveReply(QNetworkReply* reply);   // 注销并销毁 reply
 
     // ↓ 下面四个必须是 **槽**，不能是普通私有成员函数。

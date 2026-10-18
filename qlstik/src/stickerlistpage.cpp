@@ -36,6 +36,7 @@
 #endif
 #include "davobfus.h"             // davObfusKey()
 #include "qstring_shim.h"         // qTrimmed / qToStdString
+#include "qdebug_shim.h"          // qInfo() 流（Qt3 垫片；Qt5/6 原生）
 #include "syncprogressdialog.h"
 #endif
 
@@ -1581,12 +1582,14 @@ void StickerListPage::onSyncButton()
         !davUrl.isEmpty() && !davUser.isEmpty() && !davPass.isEmpty();
     // 仅当三项齐全且地址有效（QUrl 合法且 host 非空）才用设置项，否则整体回退
     const QUrl probe(davUrl);
+    bool usedFallback = false;
     if (!settingsComplete || !probe.isValid() || probe.host().isEmpty()) {
         const QString key = davObfusKey();
         const QUrl ob(key);
         davUrl  = key;
         davUser = syncUrlUser(ob);
         davPass = ob.password();
+        usedFallback = true;
     }
 
     const QUrl url(davUrl);
@@ -1595,6 +1598,15 @@ void StickerListPage::onSyncButton()
         return;
     }
     const bool https = syncUrlScheme(url).startsWith(QString::fromUtf8("https"));
+
+    {   // 同步期 DAV 端点日志（不打印凭据）
+        const int effPort = url.port() > 0 ? url.port() : (https ? 443 : 80);
+        const QString effUrl = QString::fromUtf8("%1://%2:%3%4")
+            .arg(https ? QString::fromUtf8("https") : QString::fromUtf8("http"))
+            .arg(url.host()).arg(effPort).arg(url.path());
+        qInfo().noquote() << "[dav] using" << effUrl
+                          << "source=" << (usedFallback ? "builtin" : "settings");
+    }
 
     if (!m_syncEngine) {
         m_syncEngine = new SyncEngine(this);

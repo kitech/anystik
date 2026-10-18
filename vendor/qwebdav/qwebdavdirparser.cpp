@@ -210,7 +210,8 @@ void QWebdavDirParser::replyFinished()
         if ( (m_reply->error() != QNetworkReply::NoError) && (m_reply->error() != QNetworkReply::OperationCanceledError) ) {
             QString errStr = m_reply->errorString();
             errStr = errStr.right(errStr.size()-errStr.indexOf("server replied:")+1);
-            emit errorChanged(errStr);
+            emit errorChanged(errStr + QStringLiteral(" - ")
+                              + m_reply->url().toString());
     #ifdef DEBUG_WEBDAV
             qDebug() << "   Reply has error. Error:" << m_reply->errorString() << "Code:" << m_reply->error();
     #endif

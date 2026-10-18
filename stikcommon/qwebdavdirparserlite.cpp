@@ -141,13 +141,17 @@ void QWebdavDirParserLite::onReplyFinished(QNetworkReply* reply)
         // ⚠ 走 fromUtf8 而非 QString(const char*)：Qt3 的 QString(const char*)
         // 按 Latin-1 逐字节解释源文件里的 UTF-8 字节，中文会碎成一串 U+00xx
         // 假字符。三处错误文案统一按此处理（含下面两处中文）。
-        emitErrorChanged(QString::fromUtf8("webdav dir: %1")
-                             .arg(reply->errorString()));
+        // 拼上完整请求 URL（scheme://host:port/path）：404 时可直接复制排查
+        //（凭据不进 URL）。
+        emitErrorChanged(QString::fromUtf8("webdav dir: %1 - %2")
+                             .arg(reply->errorString(),
+                                  reply->url().toString()));
     } else if (status != 207) {
         // 207 Multi-Status 是 PROPFIND 列表的唯一成功状态码。其它 2xx（如某些
         // 服务器对 Depth:1 回 200）按错误处理并把真实码报出去，不静默返回空表。
-        emitErrorChanged(QString::fromUtf8("webdav dir: 期望 207 Multi-Status，实收 %1")
-                             .arg(status));
+        emitErrorChanged(QString::fromUtf8("webdav dir: 期望 207 Multi-Status，实收 %1 - %2")
+                             .arg(status)
+                             .arg(reply->url().toString()));
     } else {
         const QByteArray data = reply->readAll();
         parseMultiResponse(data);
@@ -183,7 +187,18 @@ void QWebdavDirParserLite::parseMultiResponse(const QByteArray& data)
                                (size_t)rootPathBA.size());
     if (!Dav207::parseMultiStatus(data.data(), (size_t)data.size(),
                                   rootPath, res)) {
-        emitErrorChanged(QString::fromUtf8("webdav dir: 207 响应体非合法 XML"));
+        // 无 reply 可取 URL，按连接设置手拼完整 DAV URL（与 buildUrl 同规则）
+        const QString fullUrl =
+            QString::fromUtf8("%1://%2%3%4")
+                .arg(m_webdav->isSSL() ? QString::fromUtf8("https")
+                                       : QString::fromUtf8("http"),
+                     m_webdav->hostname(),
+                     (m_webdav->port() > 0)
+                         ? (QString::fromUtf8(":") + QString::number(m_webdav->port()))
+                         : QString(),
+                     m_webdav->absolutePath(m_path));
+        emitErrorChanged(QString::fromUtf8("webdav dir: 207 响应体非合法 XML - %1")
+                             .arg(fullUrl));
         return;
     }
 

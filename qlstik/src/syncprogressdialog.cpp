@@ -1,5 +1,6 @@
 #include "syncprogressdialog.h"
 #include "davbisync.h"
+#include "qdebug_shim.h"          // qInfo() 流（Qt3 垫片；Qt5/6 原生）
 
 #ifdef QT3_BUILD
 #include <qcombobox.h>
@@ -27,6 +28,10 @@
 #include <QCloseEvent>
 #include <QKeyEvent>
 #include <QDateTime>
+#include <QFontMetrics>
+#endif
+#ifdef QT3_BUILD
+#include <qfontmetrics.h>
 #endif
 
 namespace {
@@ -113,6 +118,24 @@ inline QString statusHtml(const QColor& c, const QString& text)
          + QString::fromUtf8("</font>");
 }
 
+// 长文本行（详情/远程特征/状态）：只读 QTextEdit 替代 QLabel。
+// Qt3 QLabel 无 wordWrap，sizeHint 宽 = 全文宽（实测 199 字 → 1843px），
+// 会把 QDialog 撑到近全屏；QTextEdit 换行后 hint 宽仅 ~240px。
+// 固定 3 行高 + 关滚动条：比 QLabel 多出的内容可视区截断（可拖选拷贝完整文本）。
+inline QTextEdit* makeInfoEdit(QWidget* parent)
+{
+    QTextEdit* t = new QTextEdit(parent);
+    t->setReadOnly(TRUE);
+    qTextEditWrapNoHScroll(t);
+#ifdef QT3_BUILD
+    t->setVScrollBarMode(QTextEdit::AlwaysOff);
+#else
+    t->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+#endif
+    t->setMinimumHeight(t->fontMetrics().lineSpacing() * 3 + 8);
+    return t;
+}
+
 // davbisync::LogLevel{Info,Warn,Error} → 级别标签/配色（anysk syncprogresspopup.cpp:26-44）
 QColor levelColor(int lvl)
 {
@@ -187,10 +210,13 @@ SyncProgressDialog::SyncProgressDialog(SyncEngine* engine, QWidget* parent)
     m_pctLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
     ph->addWidget(m_pctLabel, 0);
 
-    m_detailLabel  = new QLabel(QString::fromUtf8("第 0/0 个文件"), this);
-    m_featureLabel = new QLabel(QString::fromUtf8("远程特征: 检测中..."), this);
-    m_statusLabel  = new QLabel(QString::fromUtf8("同步中..."), this);
+    m_detailLabel  = makeInfoEdit(this);
+    m_featureLabel = makeInfoEdit(this);
+    m_statusLabel  = makeInfoEdit(this);
     m_statusLabel->setTextFormat(Qt::RichText);
+    m_detailLabel->setText(QString::fromUtf8("第 0/0 个文件"));
+    m_featureLabel->setText(QString::fromUtf8("远程特征: 检测中..."));
+    m_statusLabel->setText(QString::fromUtf8("同步中..."));
 
     // ── 只读彩色日志（anysk LogListView 的「中档」替代）──
     m_log = new QTextEdit(this);
@@ -248,12 +274,15 @@ SyncProgressDialog::SyncProgressDialog(SyncEngine* engine, QWidget* parent)
     v->addWidget(toolsRow, 0);
     v->addWidget(bRow, 0);
 
-    setMinimumSize(360, 420);
+    // 宽度不再取 sizeHint()（Qt3 QTextEdit 的 sizeHint 也偏宽，曾把弹窗撑到
+    // 主窗口 3 倍）；显式设定 + 右下角缩放手柄。
+    setMinimumSize(420, 420);
+    setSizeGripEnabled(true);
     {
         const QRect scr = qScreenGeometryFor(this);
-        const int w = qMin(sizeHint().width(),  int(scr.width()  * 0.92));
-        const int h = qMin(sizeHint().height(), int(scr.height() * 0.90));
-        resize(qMax(360, w), qMax(420, h));
+        const int w = qBound(480, int(scr.width()  * 0.50), 720);
+        const int h = qBound(420, int(scr.height() * 0.70), 640);
+        resize(w, h);
     }
 
     // ── 过滤/搜索 150ms 防抖 + 复制/清空 ──
@@ -449,6 +478,8 @@ void SyncProgressDialog::onFinished(int exitCode, const QString& summary)
     m_cancelBtn->setEnabled(false);
     m_closeBtn->setEnabled(true);
     m_cornerCloseBtn->setEnabled(true);
+    // 成功/失败结果同步进控制台（UI 状态行之外的可重定向副本）
+    qInfo().noquote() << "[sync] finished exit=" << exitCode << summary;
     if (exitCode == davbisync::FinishOk) {
         m_statusLabel->setText(statusHtml(QColor(120, 210, 140),
             QString::fromUtf8("同步完成 · ") + summary));

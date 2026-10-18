@@ -180,6 +180,27 @@ bool SyncEngine::startSync()
         return false;
     }
     m_running = true;
+    {   // 同步期连接端点（进同步弹窗 syncLog；不打印凭据）
+        const bool ssl = (m_connectionType == 2);
+        const int effPort = m_port > 0 ? m_port : (ssl ? 443 : 80);
+        log(davbisync::Info, QStringLiteral("dav"),
+            QStringLiteral("连接 %1://%2:%3%4 (type=%5)")
+                .arg(ssl ? QStringLiteral("https") : QStringLiteral("http"))
+                .arg(m_host).arg(effPort).arg(m_rootPath)
+                .arg(m_connectionType));
+        // 本地/远程各根目录一次钉死（排双 anystik 前缀等路径问题的第一现场）。
+        // 云根 = rootPath + "/" + cloudRoot（QWebdav::getAbsoluteURL 同规则；
+        // 不能用 cloudPath(m_cloudRoot)，那会再叠一层 m_cloudRoot）。
+        QString cloudRootAbs = m_rootPath;
+        if (!cloudRootAbs.endsWith(QLatin1Char('/'))) {
+            cloudRootAbs += QLatin1Char('/');
+        }
+        cloudRootAbs += m_cloudRoot;
+        log(davbisync::Info, QStringLiteral("dav"),
+            QStringLiteral("本地base=%1 · rootPath=%2 · cloudRoot=%3 · 云根=%4")
+                .arg(StickerStore::instance()->stickerBaseDir(),
+                     m_rootPath, m_cloudRoot, cloudRootAbs));
+    }
     m_finished = false;
     m_percent = 0;
     m_startMsec = QDateTime::currentMSecsSinceEpoch();
@@ -270,6 +291,8 @@ void SyncEngine::abort()
         QFile::remove(t);
     }
     m_tempFiles.clear();
+    log(davbisync::Info, QStringLiteral("sync"),
+        QStringLiteral("cancelled by user"));
     emit progressUpdated(m_percent, QStringLiteral("cancelled"), QString());
     emit finished(davbisync::FinishCancelled, QStringLiteral("cancel requested"));
     m_finished = true;
@@ -342,15 +365,12 @@ void SyncEngine::buildLocalListing()
             QStringLiteral("upload-candidate %1")
                 .arg(StickerStore::instance()->builtinSourceDiag(
                          pack.id, pack.title)));
-        qInfo().noquote() << "[sync] diag upload-candidate"
-                          << StickerStore::instance()->builtinSourceDiag(
-                                 pack.id, pack.title);
         for (const auto& s : stickers) {
             // 业务键 dbRel = 相对 base 的路径（StickerBrief.filePath 已是绝对路径，
             // 勿再 resolve；用 relativeToBase 归化，与云端 canonicalRel 键对称）
-            const QString localAbs = s.filePath;
-            const QString rel = StickerStore::instance()->relativeToBase(localAbs);
-            const QFileInfo fi(localAbs);
+            const QString localAbsPath = s.filePath;
+            const QString rel = StickerStore::instance()->relativeToBase(localAbsPath);
+            const QFileInfo fi(localAbsPath);
             if (!fi.exists() || !fi.isFile()) {
                 continue;
             }
@@ -358,7 +378,7 @@ void SyncEngine::buildLocalListing()
             e.size = fi.size();
             e.mtimeMsec = fi.lastModified().toMSecsSinceEpoch();
             m_localFiles.insert(rel, e);
-            m_cloudToLocal.insert(rel, localAbs);
+            m_cloudToLocal.insert(rel, localAbsPath);
         }
         ++dirs;
     }
@@ -378,18 +398,20 @@ void SyncEngine::scanCloudDir(const QString& dbRelDir)
         return;
     }
     // 入参为业务 dbRel；供目录列表的传输路径 = cloudPath(dbRelDir)（唯一入云拼根点）
-    const QString cloudRel = cloudPath(dbRelDir);
-    QString dir = cloudRel;
+    const QString cloudRelPath = cloudPath(dbRelDir);
+    QString dir = cloudRelPath;
     if (!dir.endsWith(QLatin1Char('/'))) {
         dir += QLatin1Char('/');
     }
     m_scanCurrentDir = dir;
     emit progressUpdated(0, QStringLiteral("scan"),
-                         QStringLiteral("listing %1").arg(cloudRel));
+                         QStringLiteral("listing %1").arg(cloudRelPath));
+    log(davbisync::Info, QStringLiteral("scan"),
+        QStringLiteral("listing %1").arg(cloudRelPath));   // 进日志视图/控制台
     probeServer();   // 阶段 B 起点，轻量 OPTIONS，仅首目录触发一次
     if (!m_parser->listDirectory(m_webdav, dir, false)) {
         finishWithError(QStringLiteral("cloud listing failed to start: %1")
-                            .arg(cloudRel));
+                            .arg(cloudRelPath));
     }
 }
 
@@ -715,7 +737,11 @@ void SyncEngine::pushNext()
         const auto item = m_pendingCloudRenames.takeFirst();
         const QString from = item.first;
         const QString to = item.second;
-        QNetworkReply* reply = m_webdav->move(cloudPath(from), cloudPath(to));
+        const QString fromPath = cloudPath(from);
+        const QString toPath = cloudPath(to);
+        log(davbisync::Info, QStringLiteral("conflict"),
+            QStringLiteral("MOVE %1 → %2").arg(fromPath, toPath));
+        QNetworkReply* reply = m_webdav->move(fromPath, toPath);
         m_activeReplies.append(reply);
         connect(reply, &QNetworkReply::finished, this,
                 [this, reply, from, to]() {
@@ -752,8 +778,8 @@ void SyncEngine::pushNext()
     if (m_uploadIndex < m_uploadQueue.size()) {
         const auto& item = m_uploadQueue.at(m_uploadIndex);
         const QString localPath = item.first;
-        const QString cloudRel = item.second;
-        const QString cloudDir = cloudRel.section(QLatin1Char('/'), 0, -2);
+        const QString cloudRelPath = item.second;
+        const QString cloudDir = cloudRelPath.section(QLatin1Char('/'), 0, -2);
         if (m_mkdirChain.isEmpty() && !m_ensuredDirs.contains(cloudDir)) {
             // 构建「根目录 → cloudDir」的完整待建链，顶层在前
             m_mkdirChain.clear();
@@ -773,7 +799,7 @@ void SyncEngine::pushNext()
             mkdirNextChain();
             return;
         }
-        checkAndUpload(localPath, cloudRel);
+        checkAndUpload(localPath, cloudRelPath);
         return;
     }
 
@@ -797,7 +823,10 @@ void SyncEngine::mkdirNextChain()
         return;
     }
     const QString dir = m_mkdirChain.constFirst();
-    QNetworkReply* reply = m_webdav->mkdir(cloudPath(dir));
+    const QString dirPath = cloudPath(dir);
+    log(davbisync::Info, QStringLiteral("mkdir"),
+        QStringLiteral("MKCOL %1").arg(dirPath));
+    QNetworkReply* reply = m_webdav->mkdir(dirPath);
     m_activeReplies.append(reply);
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, dir]() {
@@ -816,24 +845,26 @@ void SyncEngine::mkdirNextChain()
             });
 }
 
-void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudRel)
+void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudRelPath)
 {
-    QNetworkRequest req(cloudUrl(cloudRel));
+    QNetworkRequest req(cloudUrl(cloudRelPath));
     QNetworkReply* reply = m_webdav->head(req);
     m_activeReplies.append(reply);
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, localPath, cloudRel]() {
+            [this, reply, localPath, cloudRelPath]() {
                 removeActiveReply(reply);
                 if (!m_running) {
                     return;
                 }
                 if (reply->error() == QNetworkReply::ContentNotFoundError) {
-                    uploadFile(localPath, cloudRel);      // 云端不存在 → 直接上传
+                    uploadFile(localPath, cloudRelPath);      // 云端不存在 → 直接上传
                     return;
                 }
                 if (reply->error() != QNetworkReply::NoError) {
-                    finishWithError(QStringLiteral("webdav check failed: %1 (%2)")
-                                        .arg(cloudRel, reply->errorString()));
+                    finishWithError(
+                        QStringLiteral("webdav check failed: %1 → %2 (%3)")
+                            .arg(cloudRelPath, cloudPath(cloudRelPath),
+                                 reply->errorString()));
                     return;
                 }
                 const qint64 remoteSize =
@@ -854,7 +885,7 @@ void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudRe
                     return t.isValid() ? t.toMSecsSinceEpoch() : 0;
                 }();
                 const qint64 baseCloudMsec =
-                    m_cloudFiles.value(cloudRel).mtimeMsec;
+                    m_cloudFiles.value(cloudRelPath).mtimeMsec;
                 if (headMsec > 0) {
                     // 服务器回 mtime：与基线一致才视为云端未变；
                     // run 中途被第三方改动（mtime 漂移）→ 需重传
@@ -868,7 +899,7 @@ void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudRe
                 }
                 bool localUnchanged = false;
                 const qint64 localMsec = fi.lastModified().toMSecsSinceEpoch();
-                const auto bit = m_base.local.constFind(cloudRel);
+                const auto bit = m_base.local.constFind(cloudRelPath);
                 if (!localMsec) {
                     localUnchanged = true;      // 本地 mtime 不可用 → size-only 语义
                 } else if (bit == m_base.local.constEnd()) {
@@ -885,11 +916,11 @@ void SyncEngine::checkAndUpload(const QString& localPath, const QString& cloudRe
                     pushNext();
                     return;
                 }
-                uploadFile(localPath, cloudRel);   // 缺失/大小不同/任一侧相对基线已变 → 上传覆盖
+                uploadFile(localPath, cloudRelPath);   // 缺失/大小不同/任一侧相对基线已变 → 上传覆盖
             });
 }
 
-void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRel)
+void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRelPath)
 {
     m_fileStartMsec = QDateTime::currentMSecsSinceEpoch();
     const QFileInfo finfo(localPath);
@@ -907,7 +938,7 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRel)
     }
     // 上传不 set Date 头（远端 last-modified 只读不改写；dt 缺省为无效
     // QDateTime，qwebdav 内部 dt.isValid() 分支跳过），云 mtime 交服务器生成
-    QNetworkReply* reply = m_webdav->put(cloudPath(cloudRel),
+    QNetworkReply* reply = m_webdav->put(cloudPath(cloudRelPath),
                                          file.get());
     m_activeReplies.append(reply);
     connect(reply, &QNetworkReply::uploadProgress, this,
@@ -918,7 +949,7 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRel)
                 }
             });
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, file = std::move(file), localPath, cloudRel]() {
+            [this, reply, file = std::move(file), localPath, cloudRelPath]() {
                 removeActiveReply(reply);
                 if (!m_running) {
                     return;
@@ -934,15 +965,18 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRel)
                             QStringLiteral("canceled after %1 ms · timeout=90000 · https=%2 · host=%3")
                                 .arg(elapsed).arg(m_connectionType == 2).arg(m_host));
                     }
-                    finishWithError(QStringLiteral("upload failed: %1 (%2 status %3, %4 ms)")
-                                        .arg(localPath, reply->errorString())
-                                        .arg(status).arg(elapsed));
+                    finishWithError(
+                        QStringLiteral("upload failed: %1 → %2 (%3 status %4, %5 ms)")
+                            .arg(localPath, cloudPath(cloudRelPath),
+                                 reply->errorString())
+                            .arg(status).arg(elapsed));
                     return;
                 }
                 m_lastFileMs = QDateTime::currentMSecsSinceEpoch() - m_fileStartMsec;
                 log(davbisync::Info, QStringLiteral("upload"),
-                    QStringLiteral("完成 %1 · 用时 %2 s")
-                        .arg(QFileInfo(localPath).fileName())
+                    QStringLiteral("完成 %1 → %2 · 用时 %3 s")
+                        .arg(QFileInfo(localPath).fileName(),
+                             cloudPath(cloudRelPath))
                         .arg(m_lastFileMs / 1000.0, 0, 'f', 1));
                 // 更新云清单，保证 finishOk 的基线反映真实云端
                 // 写后回读：PUT 响应若带 Last-Modified 头直接回填真实云 mtime
@@ -963,7 +997,7 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRel)
                     m_putEchoDecided = true;
                     updateRemoteFeature();
                 }
-                m_cloudFiles.insert(cloudRel, e);
+                m_cloudFiles.insert(cloudRelPath, e);
                 persistBaseline();
                 ++m_uploadDone;
                 ++m_uploadIndex;
@@ -973,22 +1007,22 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRel)
             });
 }
 
-void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
+void SyncEngine::downloadFile(const QString& cloudRelPath, const QString& _localAbsPath)
 {
-    Q_UNUSED(_localAbs)
+    Q_UNUSED(_localAbsPath)
     m_fileStartMsec = QDateTime::currentMSecsSinceEpoch();
-    const QString baseName = cloudRel.section(QLatin1Char('/'), -1);
+    const QString baseName = cloudRelPath.section(QLatin1Char('/'), -1);
 
     // 云端目录（StickerPacks/<title>）→ 本地包标题
-    const QString relDir = cloudRel.section(QLatin1Char('/'), 0, -2);
+    const QString relDir = cloudRelPath.section(QLatin1Char('/'), 0, -2);
     const QString title = relDir.section(QLatin1Char('/'), -1);
     // B：内置源排除不区分上传/下载侧，按云目录名对称判定（上传侧整包不列出、
     // 下载侧对属于内置源包的云目录整体跳过），在 ensurePack 前拦截，不为其建包
     if (StickerStore::instance()->builtinSourceCloudDirs().contains(title)) {
         log(davbisync::Info, QStringLiteral("pack"),
             QStringLiteral("skip download into builtin-source pack: %1")
-                .arg(cloudRel));
-        m_diagnosis.skipped.append(cloudRel);
+                .arg(cloudRelPath));
+        m_diagnosis.skipped.append(cloudRelPath);
         ++m_downloadSkipped;
         ++m_downloadIndex;
         ++m_jobsDone;
@@ -1009,7 +1043,7 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
         return;
     }
 
-    // 临时文件，下载完成后 importStickerFile 按业务 rel(cloudRel) 移入
+    // 临时文件，下载完成后 importStickerFile 按业务 rel(cloudRelPath) 移入
     //   对应目录：pastes/* → base/pastes 顶层；packs/<T>/* → base/packs/<T>
     const QString tmp = QDir::tempPath() + QLatin1Char('/')
                         + QStringLiteral("anystik_dl_")
@@ -1023,11 +1057,12 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
     m_tempFiles.append(tmp);
 
     log(davbisync::Info, QStringLiteral("download"),
-        QStringLiteral("下载 %1 · 第 %2/%3")
-            .arg(baseName).arg(m_downloadIndex + 1)
+        QStringLiteral("下载 %1 → %2 · 第 %3/%4")
+            .arg(baseName, cloudPath(cloudRelPath))
+            .arg(m_downloadIndex + 1)
             .arg(m_downloadQueue.size()));
 
-    QNetworkReply* reply = m_webdav->get(cloudPath(cloudRel));
+    QNetworkReply* reply = m_webdav->get(cloudPath(cloudRelPath));
     m_activeReplies.append(reply);
     connect(reply, &QNetworkReply::readyRead, this,
             [this, reply, out = out.get()]() {
@@ -1042,7 +1077,7 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
                 }
             });
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, out = std::move(out), tmp, packId, cloudRel]() {
+            [this, reply, out = std::move(out), tmp, packId, cloudRelPath]() {
                 removeActiveReply(reply);
                 if (out->isOpen()) {
                     out->flush();
@@ -1063,21 +1098,23 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
                             QStringLiteral("canceled after %1 ms · timeout=90000 · https=%2 · host=%3")
                                 .arg(elapsed).arg(m_connectionType == 2).arg(m_host));
                     }
-                    finishWithError(QStringLiteral("download failed: %1 (%2 status %3, %4 ms)")
-                                        .arg(cloudRel, reply->errorString())
-                                        .arg(status).arg(elapsed));
+                    finishWithError(
+                        QStringLiteral("download failed: %1 → %2 (%3 status %4, %5 ms)")
+                            .arg(cloudRelPath, cloudPath(cloudRelPath),
+                                 reply->errorString())
+                            .arg(status).arg(elapsed));
                     return;
                 }
                 QString err;
-                const QString dlName = cloudRel.section(QLatin1Char('/'), -1);
+                const QString dlName = cloudRelPath.section(QLatin1Char('/'), -1);
                 if (!StickerStore::instance()->importStickerFile(
-                        packId, tmp, &err, dlName, cloudRel)) {
+                        packId, tmp, &err, dlName, cloudRelPath)) {
                     m_tempFiles.removeOne(tmp);
                     QFile::remove(tmp);
                     // 单文件内容失败（如图片解码失败）不全盘中止：
                     // 跳过该文件，继续后续队列（网络/HTTP 错误才 finishWithError）
                     m_diagnosis.skipped
-                        .append(QStringLiteral("%1 (%2)").arg(cloudRel, err));
+                        .append(QStringLiteral("%1 (%2)").arg(cloudRelPath, err));
                     ++m_downloadFailed;
                     ++m_downloadIndex;
                     ++m_jobsDone;
@@ -1089,22 +1126,22 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
                 QFile::remove(tmp);
                 // 更新本地清单以便 finishOk 基线（落盘路径与业务 rel 一致：
                 // 剪贴板 base/pastes/<f>、普通包 base/packs/<T>/<f>）
-                const QString localAbs =
-                    StickerStore::instance()->resolveStickerPath(cloudRel);
+                const QString localAbsPath =
+                    StickerStore::instance()->resolveStickerPath(cloudRelPath);
                 // 防御：import 已成功则 dst 必存在；避免以 (size0,mtime0)
                 // 伪条目污染基线（其曾导致重跑被全判为「本地变化」而全量重传）
-                if (!QFileInfo(localAbs).isFile()) {
+                if (!QFileInfo(localAbsPath).isFile()) {
                     finishWithError(
                         QStringLiteral("imported file missing on disk: %1")
-                            .arg(localAbs));
+                            .arg(localAbsPath));
                     return;
                 }
                 // 远端 last-modified 只读：把本地副本 mtime 对齐为云端值（只改本地），
                 // 下一轮不会因下载改了本地时间戳而误判为空转上传
                 const qint64 cloudMsec =
-                    m_cloudFiles.value(cloudRel).mtimeMsec;
+                    m_cloudFiles.value(cloudRelPath).mtimeMsec;
                 if (cloudMsec > 0) {
-                    QFile f(localAbs);
+                    QFile f(localAbsPath);
                     f.setFileTime(
                         QDateTime::fromMSecsSinceEpoch(cloudMsec, Qt::UTC),
                         QFileDevice::FileModificationTime);
@@ -1112,14 +1149,14 @@ void SyncEngine::downloadFile(const QString& cloudRel, const QString& _localAbs)
                 m_lastFileMs = QDateTime::currentMSecsSinceEpoch() - m_fileStartMsec;
                 log(davbisync::Info, QStringLiteral("download"),
                     QStringLiteral("完成 %1 · 用时 %2 s")
-                        .arg(cloudRel.section(QLatin1Char('/'), -1))
+                        .arg(cloudRelPath.section(QLatin1Char('/'), -1))
                         .arg(m_lastFileMs / 1000.0, 0, 'f', 1));
-                QFileInfo fi(localAbs);
+                QFileInfo fi(localAbsPath);
                 davbisync::BaselineEntry e;
                 e.size = fi.size();
                 e.mtimeMsec = fi.lastModified().toMSecsSinceEpoch();
-                m_localFiles.insert(cloudRel, e);
-                m_cloudToLocal.insert(cloudRel, localAbs);
+                m_localFiles.insert(cloudRelPath, e);
+                m_cloudToLocal.insert(cloudRelPath, localAbsPath);
                 persistBaseline();
                 ++m_downloadDone;
                 ++m_downloadIndex;
@@ -1148,7 +1185,7 @@ void SyncEngine::mergeSpecialNext()
     }
     m_fileStartMsec = QDateTime::currentMSecsSinceEpoch();
     log(davbisync::Info, QStringLiteral("merge"),
-        QStringLiteral("合并 %1").arg(rel));
+        QStringLiteral("合并 %1 → %2").arg(rel, cloudPath(rel)));
 
     QNetworkReply* reply = m_webdav->get(cloudPath(rel));
     m_activeReplies.append(reply);
@@ -1164,36 +1201,36 @@ void SyncEngine::mergeSpecialNext()
         }
         if (err != QNetworkReply::NoError || status >= 400) {
             finishWithError(
-                QStringLiteral("merge get failed: %1 (%2 status %3)")
-                    .arg(rel, errStr).arg(status));
+                QStringLiteral("merge get failed: %1 → %2 (%3 status %4)")
+                    .arg(rel, cloudPath(rel), errStr).arg(status));
             return;
         }
-        const QString localAbs =
+        const QString localAbsPath =
             StickerStore::instance()->resolveStickerPath(rel);
         const std::string merged =
-            entry->merge(jsonl_lww::readFileRaw(localAbs),
+            entry->merge(jsonl_lww::readFileRaw(localAbsPath),
                          std::string(body.constData(), size_t(body.size())));
-        if (!jsonl_lww::writeFileRaw(localAbs, merged)) {
+        if (!jsonl_lww::writeFileRaw(localAbsPath, merged)) {
             finishWithError(
-                QStringLiteral("merge write failed: %1").arg(localAbs));
+                QStringLiteral("merge write failed: %1").arg(localAbsPath));
             return;
         }
-        uploadMerged(rel, localAbs);
+        uploadMerged(rel, localAbsPath);
     });
 }
 
-void SyncEngine::uploadMerged(const QString& rel, const QString& localAbs)
+void SyncEngine::uploadMerged(const QString& rel, const QString& localAbsPath)
 {
-    auto file = std::make_unique<QFile>(localAbs);
+    auto file = std::make_unique<QFile>(localAbsPath);
     if (!file->open(QIODevice::ReadOnly)) {
         finishWithError(QStringLiteral("cannot open merged file: %1")
-                            .arg(localAbs));
+                            .arg(localAbsPath));
         return;
     }
     QNetworkReply* reply = m_webdav->put(cloudPath(rel), file.get());
     m_activeReplies.append(reply);
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, file = std::move(file), rel, localAbs]() {
+            [this, reply, file = std::move(file), rel, localAbsPath]() {
                 const QByteArray lm = reply->rawHeader("Last-Modified");
                 const QNetworkReply::NetworkError err = reply->error();
                 const QString errStr = reply->errorString();
@@ -1202,11 +1239,12 @@ void SyncEngine::uploadMerged(const QString& rel, const QString& localAbs)
                     return;
                 }
                 if (err != QNetworkReply::NoError) {
-                    finishWithError(QStringLiteral("merge put failed: %1 (%2)")
-                                        .arg(rel, errStr));
+                    finishWithError(
+                        QStringLiteral("merge put failed: %1 → %2 (%3)")
+                            .arg(rel, cloudPath(rel), errStr));
                     return;
                 }
-                const QFileInfo fi(localAbs);
+                const QFileInfo fi(localAbsPath);
                 davbisync::BaselineEntry le;
                 le.size = fi.size();
                 le.mtimeMsec = fi.lastModified().toMSecsSinceEpoch();
@@ -1383,6 +1421,14 @@ void SyncEngine::probeServer()
         return;
     }
     m_serverProbed = true;
+    // 与 QWebdav::getAbsoluteURL 同规则拼绝对路径，便于日志核对
+    QString probePath = m_rootPath;
+    if (!probePath.endsWith(QLatin1Char('/'))) {
+        probePath += QLatin1Char('/');
+    }
+    probePath += m_cloudRoot;
+    log(davbisync::Info, QStringLiteral("probe"),
+        QStringLiteral("OPTIONS %1").arg(probePath));
     QNetworkReply* reply = m_webdav->options(m_cloudRoot);
     if (!reply) {
         return;
@@ -1519,6 +1565,12 @@ void SyncEngine::finishWithError(const QString& msg)
 void SyncEngine::log(davbisync::LogLevel level, const QString& tag, const QString& line)
 {
     emit syncLog(int(level), tag, line);
+    // 控制台镜像：UI 日志视图之外，终端也能看到同一份同步日志。
+    qInfo().noquote() << "[sync]" << tag
+                      << (level == davbisync::Warn   ? QStringLiteral("WRN")
+                        : level == davbisync::Error  ? QStringLiteral("ERR")
+                                                     : QStringLiteral("INF"))
+                      << line;
 }
 
 QString SyncEngine::canonicalRel(const QString& raw)

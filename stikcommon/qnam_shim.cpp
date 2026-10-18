@@ -291,7 +291,12 @@ void QNetworkReply::deliverResult(int httpCode, const std::string& curlErr,
     if (httpCode >= 400) {
         // 401：先给 QWebdav::provideAuthenication 一次填 authenticator 的机会，
         // 填了就补 Authorization 头重发（Qt 原生行为），不当作错误上报。
-        if (httpCode == 401 && !m_authRetried && m_manager) {
+        // 已带 Authorization 仍 401：凭据已发被拒，重发链补的是同一套凭据
+        //（provideAuthentication 读的就是 setConnectionSettings 存的），
+        // 重发只会一模一样 → 跳过，直接上报，省一个往返。
+        const bool hadAuthHeader =
+            reqExtraHeaders.find("Authorization") != reqExtraHeaders.end();
+        if (httpCode == 401 && !m_authRetried && !hadAuthHeader && m_manager) {
             QAuthenticator auth;
             m_manager->notifyAuthRequired(this, &auth);
             if (!auth.userName().isEmpty() || !auth.password().isEmpty()) {

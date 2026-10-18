@@ -29,6 +29,11 @@ DavLocalSource* davLocalSource()
 // 「无待传文件」路径；ensurePack 返回空串让调用方判失败（见 davbisync.cpp
 // 对 ensurePack 返回值的处理）；importStickerFile 写 errorOut 让上层能
 // 报出「导入失败」而不是无声吞掉。
+QString DavLocalNullSource::baseDir() const
+{
+    return QString();   // 无本地库；日志侧由调用方按空串处理
+}
+
 std::vector<DavLocalPack> DavLocalNullSource::installedPacksByTitleAsc()
 {
     return std::vector<DavLocalPack>();

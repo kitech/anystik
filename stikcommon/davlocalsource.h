@@ -80,6 +80,10 @@ public:
     virtual ~DavLocalSource();
 
     // ── 查询 ──
+    // 本地贴纸库 base 绝对路径（日志用：把「同步用的本地根」钉死在日志里）。
+    // 空对象返回空串。
+    virtual QString baseDir() const = 0;
+
     // 「已安装的包，按 title 升序」。对应 StickerStore::packs(1, "title ASC")：
     // installed=1 过滤与 title 排序是 davbisync 清单顺序的一部分，烤进方法名，
     // 免得调用点漏传又变成「全包 + 默认排序」这种静默行为变化。
@@ -143,6 +147,7 @@ DavLocalSource* davLocalSource();
 class DavLocalNullSource : public DavLocalSource
 {
 public:
+    QString baseDir() const;
     std::vector<DavLocalPack> installedPacksByTitleAsc();
     std::vector<DavLocalSticker> stickersOfPack(const QString& packId);
     bool isBuiltinSourcePack(const QString& packId, const QString& title);

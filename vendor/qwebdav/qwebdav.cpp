@@ -223,7 +223,8 @@ void QWebdav::replyError(QNetworkReply::NetworkError)
         return;
     }
 
-    emit errorChanged(reply->errorString());
+    emit errorChanged(reply->errorString()
+                      + QStringLiteral(" - ") + reply->url().toString());
 }
 
 void QWebdav::provideAuthenication(QNetworkReply *reply, QAuthenticator *authenticator)

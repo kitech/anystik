@@ -12,6 +12,7 @@ namespace {
 
 class FakeLocalSource : public DavLocalSource {
 public:
+    QString baseDir() const { return QStringLiteral("/tmp/fake-base"); }
     std::vector<DavLocalPack> installedPacksByTitleAsc() { return {}; }
     std::vector<DavLocalSticker> stickersOfPack(const QString&) { return {}; }
     bool isBuiltinSourcePack(const QString&, const QString&) { return false; }

@@ -128,15 +128,17 @@ TEST_CASE("qInfo() 零参流: Qt3 无独立 info 通道，落到 QtDebugMsg")
 
 TEST_CASE("Qt3LogStream: 多次 << 累积拼接，析构时一次性输出")
 {
+    // 2026-10-18：项间自动插一个空格（Qt4+ QDebug 语义，见 qdebug_shim.h）。
+    // 原先直接拼接导致 `qInfo() << "using" << url` 输出 "usinghttps://..." 字段黏连。
     MsgCapture cap;
     {
         Qt3LogStream s(false);
-        s << "a=" << 1 << " b=" << 2 << " ";
+        s << "a=" << 1 << "b=" << 2 << "end";
         // 尚未析构 → 不应有任何输出
         CHECK_EQ(g_callCount, 0);
     }   // ← 析构在此发生
     CHECK_EQ(g_callCount, 1);
-    CHECK(g_lastMsg == S("a=1 b=2 "));
+    CHECK(g_lastMsg == S("a= 1 b= 2 end"));
 }
 
 TEST_CASE("Qt3LogStream: noquote() 可链式调用且无副作用")
@@ -148,7 +150,7 @@ TEST_CASE("Qt3LogStream: noquote() 可链式调用且无副作用")
         Qt3LogStream s(false);
         s.noquote() << "x" << 1;
     }
-    CHECK(g_lastMsg == S("x1"));
+    CHECK(g_lastMsg == S("x 1"));
 }
 
 TEST_CASE("Qt3LogStream: 整数各类型格式化正确")
@@ -156,7 +158,7 @@ TEST_CASE("Qt3LogStream: 整数各类型格式化正确")
     MsgCapture cap;
     {
         Qt3LogStream s(false);
-        s << int(-5) << " " << (unsigned int)7 << " " << qint64(-9007199254740993LL);
+        s << int(-5) << (unsigned int)7 << qint64(-9007199254740993LL);
     }
     // ⚠ 断言用 QString 而非 printf：QString 的数字格式化与 Qt3 的
     //   QString::number 同源，不受终端编码影响。
@@ -213,7 +215,7 @@ TEST_CASE("Qt3LogStream: QString 与 QLatin1String 重载")
         Qt3LogStream s(false);
         s << S("qs") << QLatin1String("la");
     }
-    CHECK(g_lastMsg == S("qsla"));
+    CHECK(g_lastMsg == S("qs la"));
 }
 
 TEST_CASE("Qt3LogStream: 纯 ASCII QString 不会被再转码")

@@ -121,6 +121,7 @@ public:
         }
         return abs;
     }
+    QString baseDir() const { return base; }
     std::vector<DavLocalPack> installedPacksByTitleAsc()
     {
         std::vector<DavLocalPack> v;

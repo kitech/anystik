@@ -455,12 +455,14 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
         const bool settingsComplete =
             !davUrl.isEmpty() && !davUser.isEmpty() && !davPass.isEmpty();
         // 仅当设置三项齐全且地址有效时才用设置项，否则整体回退内置混淆配置
+        bool usedFallback = false;
         if (!settingsComplete || !validDav(davUrl)) {
             const QString key = davObfusKey();
             const QUrl ob(key);
             davUrl  = key;
             davUser = ob.userName();
             davPass = ob.password();
+            usedFallback = true;
             qInfo() << "[dav] fallback to built-in config"
                     << "settingsComplete=" << settingsComplete
                     << "host=" << ob.host();
@@ -472,6 +474,15 @@ void StickerHomePage::onCreate(const QVariantMap& launchArgs,
             return;
         }
         const bool https = url.scheme().startsWith(QLatin1String("https"));
+
+        {   // 同步期 DAV 端点日志（不打印凭据）
+            const int effPort = url.port() > 0 ? url.port() : (https ? 443 : 80);
+            const QString effUrl = QStringLiteral("%1://%2:%3%4")
+                .arg(https ? QStringLiteral("https") : QStringLiteral("http"))
+                .arg(url.host()).arg(effPort).arg(url.path());
+            qInfo().noquote() << "[dav] using" << effUrl
+                              << "source=" << (usedFallback ? "builtin" : "settings");
+        }
 
         if (!m_syncEngine) {
             m_syncEngine = new SyncEngine(this);

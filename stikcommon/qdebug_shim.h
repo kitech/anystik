@@ -88,7 +88,10 @@ public:
         emitChunked(m_warn, QCString(m_acc.utf8()));
     }
     Qt3LogStream& noquote() { return *this; }
-    Qt3LogStream& operator<<(const QString& v) { m_acc += v; return *this; }
+    // 项间分隔：Qt4+ QDebug 在相邻 << 项之间自动插一个空格；本垫片原先直接
+    // 拼接，导致 `qInfo() << "using" << url` 输出 "usinghttps://..." 字段黏连
+    // （实测 qlstik stickerlistpage.cpp:1607）。对齐 Qt 语义：首项前不加。
+    Qt3LogStream& operator<<(const QString& v) { sep(); m_acc += v; return *this; }
     // ⚠ 用 fromUtf8 而非 fromLatin1：调用点传的多半是**源码里的中文字面量**，
     //   那些字节是 UTF-8。fromLatin1 会把多字节序列逐字节拆成 Latin1 码点，
     //   串起来就是乱码，且因为析构走 QCString 通道、不会二次破坏，
@@ -97,42 +100,58 @@ public:
     Qt3LogStream& operator<<(const char* v)
     {
         if (!v) return *this;
+        sep();
         m_acc += QString::fromUtf8(v);
         return *this;
     }
     // ⚠ QLatin1String 是 qstring_shim.h:76 垫出来的最小类（Qt3 无此类，
     //   Qt4.0 才引入）。它只有 operator QString()（内部 fromLatin1），
     //   没有 Qt4 原生的 latin1()/data() 成员 —— 别照 Qt4 写法调。
-    Qt3LogStream& operator<<(QLatin1String v) { m_acc += QString(v); return *this; }
+    Qt3LogStream& operator<<(QLatin1String v) { sep(); m_acc += QString(v); return *this; }
     Qt3LogStream& operator<<(int v)
     {
+        sep();
         m_acc += QString::number((long)v);
         return *this;
     }
     Qt3LogStream& operator<<(unsigned int v)
     {
+        sep();
         m_acc += QString::number((ulong)v);
         return *this;
     }
     Qt3LogStream& operator<<(quint64 v)
     {
+        sep();
         m_acc += QString::number((Q_ULLONG)v);
         return *this;
     }
     Qt3LogStream& operator<<(qint64 v)   // qglobaltype_shim 的 qint64
     {
+        sep();
         m_acc += QString::number((Q_LLONG)v);
         return *this;
     }
     Qt3LogStream& operator<<(bool v)
     {
+        sep();
         m_acc += v ? QString::fromUtf8("true")
                    : QString::fromUtf8("false");
         return *this;
     }
 
 private:
+    // 项间分隔空格（首个 << 项前不加；noquote() 不算项）
+    void sep()
+    {
+        if (!m_first) {
+            m_acc += QString::fromLatin1(" ");
+        }
+        m_first = false;
+    }
+
     bool m_warn;
+    bool m_first = true;
     QString m_acc;   // ⚠ 保持 QString 累加（QCString 的 += 会静默丢数据，见析构说明）
 };
 
