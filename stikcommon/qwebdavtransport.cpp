@@ -93,6 +93,36 @@ size_t readCb(char* buf, size_t sz, size_t nm, void* ud)
     return n;
 }
 
+// ★ 301/302/307/308 跟随重发请求体时的「回卷」回调。
+//   带体动词（PROPFIND/PUT/PROPPATCH…）走 UPLOAD + READFUNCTION，请求体是
+//   内存里的 std::string。curl 跟随重定向要**原样重发请求体**，会先调
+//   SEEKFUNCTION 把读游标倒回起点；不注册这个回调时 libcurl 无法倒带，
+//   直接以 CURLE_SEND_FAIL_REWIND 失败：
+//     "Send failed since rewinding of the data stream failed"
+//   实测（auth_probe2）：PROPFIND 收到 301 后即报此错，目标端根本收不到请求。
+//   内存流可精确 seek，故按 origin 换算游标，越界一律 CANTSEEK 交回 curl。
+int seekCb(void* ud, curl_off_t offset, int origin)
+{
+    Task* t = (Task*)ud;
+    if (t == 0) {
+        return CURL_SEEKFUNC_CANTSEEK;
+    }
+    curl_off_t base = 0;
+    if (origin == SEEK_CUR) {
+        base = (curl_off_t)t->uploadPos;
+    } else if (origin == SEEK_END) {
+        base = (curl_off_t)t->uploadBuf.size();
+    } else if (origin != SEEK_SET) {
+        return CURL_SEEKFUNC_CANTSEEK;
+    }
+    const curl_off_t np = base + offset;
+    if (np < 0 || (size_t)np > t->uploadBuf.size()) {
+        return CURL_SEEKFUNC_CANTSEEK;
+    }
+    t->uploadPos = (size_t)np;
+    return CURL_SEEKFUNC_OK;
+}
+
 size_t headerCb(char* ptr, size_t sz, size_t nm, void* ud)
 {
     Task* t = (Task*)ud;
@@ -506,6 +536,10 @@ void QWebdavTransport::send(const std::string& method,
         curl_easy_setopt(t->easy, CURLOPT_READDATA, (void*)t);
         curl_easy_setopt(t->easy, CURLOPT_INFILESIZE_LARGE,
                          (curl_off_t)body.size());
+        // ★ 跟随重定向时要能倒带重发请求体（否则 301 → CURLE_SEND_FAIL_REWIND，
+        //   见 seekCb 注释）。注册 seek 回调后 301 跳转的 PUT/PROPFIND 可重发。
+        curl_easy_setopt(t->easy, CURLOPT_SEEKFUNCTION, seekCb);
+        curl_easy_setopt(t->easy, CURLOPT_SEEKDATA, (void*)t);
     }
 
     // 请求头
@@ -513,6 +547,17 @@ void QWebdavTransport::send(const std::string& method,
          it != headers.end(); ++it) {
         if (it->first == "Content-Length") {
             continue;   // UPLOAD 模式由 curl 自己算，手工给会冲突
+        }
+        // ★ 名或值含内嵌 NUL 的头绝不交给 curl：slist 走 c_str()，会在 NUL
+        //   处截断，把 "Authorization\0: Basic xyz" 变成裸 "Authorization"
+        //   （空值头＝无认证，实测引发 401 风暴；根因与修法见 qwebdavlite.cpp
+        //   createRequest 的注释）。告警 + 跳过，让坏头在日志现形而不是
+        //   静默上线。
+        if (it->first.find('\0') != std::string::npos ||
+            it->second.find('\0') != std::string::npos) {
+            qWarning().noquote() << ">> SKIP header with embedded NUL:"
+                                 << QString::fromUtf8(it->first.c_str());
+            continue;
         }
         const std::string line = it->first + ": " + it->second;
         t->hdrs = curl_slist_append(t->hdrs, line.c_str());

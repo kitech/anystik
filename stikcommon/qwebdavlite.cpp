@@ -195,20 +195,36 @@ QNetworkReply* QWebdavLite::createRequest(const QString& method, QNetworkRequest
 {
     m_lastReply = 0;
     QNetworkReply* reply = 0;
-    // ★ 已设凭据则首请求直接带 Authorization，省掉 401 → 重发的一轮往返
-    //（原先不带头 → 服务器 401 → qnam_shim 的重发链补头重发，每个请求
-    //  白付一次 401。重发链保留：凭据错误时仍兜底一次。）
-    // base64 按 length() 拷贝（Qt3 QCString size() 含 NUL 的坑，同
-    // qnam_shim.cpp:308 的纪律）；凭据不进 URL、不进日志。
-    if (!m_username.isEmpty() || !m_password.isEmpty()) {
-        const QByteArray plain = qToUtf8BA(m_username + QLatin1Char(':') + m_password);
+    // ★ 已设凭据且 HTTPS 时首请求直接带 Authorization（vendor buildRequest()
+    //   qwebdav.cpp:713-722 同构）。HTTP 不预挂（同 vendor）：走垫片 401
+    //   挑战链（deliverResult → provideAuthentication → reissue，补的头是
+    //   干净的 std::string）。凭据不进 URL、不进日志。
+    //
+    // ★★ 键值一律走 QByteArray 重载，严禁 QCString（401 风暴根因）：
+    //   Qt3 的 QByteArray=QMemArray<char>，size() 是精确长度；而 QCString 的
+    //   size() 含终止 NUL（qcstring.h:245），喂 setRawHeader(QByteArray,
+    //   QByteArray) 会把键弄成 "Authorization\0"。传输层拼
+    //   "Authorization\0: Basic …" 后 curl_slist_append 按 c_str() 截断 ⇒
+    //   线上只剩没有值的裸 Authorization ⇒ 等于无认证 ⇒ 401；401 链补的真头
+    //   又与坏头重复上线，nginx 合并重复 Authorization 成非法 Basic ⇒ 401
+    //   持续（实测）。故本段只允许 QString / qToUtf8BA / qToBase64 产物。
+    if (isSSL() && (!m_username.isEmpty() || !m_password.isEmpty())) {
+        const QString concatenated = m_username + QLatin1Char(':') + m_password;
 #if !defined(QT_VERSION) || QT_VERSION < 0x040000
-        const QCString b64 = qToBase64(plain);
-        req.setRawHeader(QCString("Authorization"),
-                         QCString("Basic ") + b64);
+        const QByteArray data = qToUtf8BA(concatenated);
+        // qToBase64 返回 QCString，按其 QByteArray 基类接收；产物为纯 ASCII，
+        // fromUtf8 走 strlen 构造（base64 字母表无内嵌 NUL），不碰 .size()。
+        const QByteArray b64 = qToBase64(data);
+        const QString headerData =
+            QString("Basic ") + QString::fromUtf8(b64.data());
+        QByteArray name;
+        qByteArrayAppend(name, "Authorization");
+        req.setRawHeader(name, qToUtf8BA(headerData));
 #else
-        req.setRawHeader(QByteArray("Authorization"),
-                         QByteArray("Basic ") + plain.toBase64());
+        const QByteArray data = concatenated.toUtf8().toBase64();
+        const QString headerData =
+            QString("Basic ") + QString::fromUtf8(data.constData());
+        req.setRawHeader("Authorization", headerData.toUtf8());
 #endif
     }
     // 请求体：必须在**这里**当场从 QIODevice 读出来。

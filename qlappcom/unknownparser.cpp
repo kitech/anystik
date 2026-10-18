@@ -2254,7 +2254,7 @@ static bool tryParseSysinfo(const std::string& rawStr, ParseResult& ret) {
     std::string buf;
     buf.reserve(2048);
     const double GiB = 1073741824.0;
-    char tmp[96];
+    char tmp[386];
 
     // buf += "| " + std::string(kSysinfoBoardName) + " | " + hostname + " |\n";
     // buf += "|---|---|\n";
@@ -2343,6 +2343,12 @@ static bool tryParseSysinfo(const std::string& rawStr, ParseResult& ret) {
         for (int i = 0; i < n; i++) {
             cJSON* d = cJSON_GetArrayItem(diskArr, i);
             if (!d) continue;
+            if (strstr(jsonGetString(d, "mountpoint").c_str(), "/dev") ||
+				strstr(jsonGetString(d, "device").c_str(), "devfs") ||
+				strstr(jsonGetString(d, "mountpoint").c_str(), "/AppTranslocation/") ||
+				strstr(jsonGetString(d, "mountpoint").c_str(), "android.i18n")) {
+					continue;
+			}
             double pct = jsonGetDouble(d, "used_percent");
             if (bestIdx == -1 || pct > bestPct + 1e-12) {
                 bestPct = pct;

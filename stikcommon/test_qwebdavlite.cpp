@@ -10,6 +10,9 @@
 // 刻意**不测** get/put/mkdir/move/remove/options/head/propfind：
 // 它们一律经 createRequest → QNAM::issue → EventPoller → curl_multi 真的发包，
 // 属于 e2e，见 test_dav207.cpp 的 fixture 路线。构造函数本身安全（只挂认证槽）。
+// 例外（零发包）：文末「预挂 Authorization」两例经 Probe::create 直调
+// createRequest —— 单测里 QWebdavTransport 未 start()，send() 走
+// "transport not ready" 早退，不会发任何包。
 //
 // 受保护方法经 Probe 子类暴露，避免为测试放宽生产类的可见性。
 //
@@ -41,6 +44,10 @@ public:
     QNetworkRequest proFind(const QString& p, int depth = 0)
     {
         return proFindRequest(p, depth);
+    }
+    QNetworkReply* create(const QString& m, QNetworkRequest& r)
+    {
+        return createRequest(m, r, static_cast<QIODevice*>(0));
     }
 };
 
@@ -379,5 +386,77 @@ TEST_CASE("QWebdavLite: errorChanged 订阅链按序触发")
     w.emitErrorChanged(QString("ssl: bad cert"));
     CHECK(seen.size() == 4);
     CHECK(seen[2] == "ssl: bad cert");
-    CHECK(seen[3] == "second:ssl: bad cert");
+    CHECK(seen[3] == std::string("second:ssl: bad cert"));
+}
+
+// ── 预挂 Authorization（vendor buildRequest 同构，QCString NUL 回归）──────
+//
+// createRequest 会真的走 issue()；单测里 QWebdavTransport 未 start()，
+// send() 走 "transport not ready" 早退（零发包），但完成回调会
+// QApplication::postEvent —— Qt3 需要应用实例，沿用 test_qconcurrent_shim
+// 的 ensureApp 单例范式（不 delete，避开 static 析构序问题）。
+#include <stdlib.h>
+#include <qapplication.h>
+
+static bool ensureTestApp()
+{
+    if (qApp) {
+        return true;
+    }
+    const char* d = getenv("DISPLAY");
+    if (!d || !*d) {
+        return false;
+    }
+    static int s_argc = 1;
+    static char s_arg0[] = "run_tests";
+    static char* s_argv[2] = { s_arg0, 0 };
+    static QApplication* s_app = new QApplication(s_argc, s_argv);  // 故意不 delete
+    (void)s_app;
+    return true;
+}
+
+TEST_CASE("QWebdavLite: HTTPS 预挂 Authorization 键干净、值确切（QCString NUL 回归）")
+{
+    if (!ensureTestApp()) {
+        return;   // 无 DISPLAY：postEvent 需要应用实例，跳过（同 qconcurrent 范式）
+    }
+    Probe w;
+    w.setConnectionSettings(QWebdavLite::HTTPS, QString("h"), QString("/"),
+                            QString("user"), QString("pass"), 0);
+    QNetworkRequest req = w.mkcol(QString("x"));
+    QNetworkReply* r = w.create(QString("MKCOL"), req);
+    REQUIRE(r != 0);
+    const std::map<std::string, std::string>& h = r->reqExtraHeaders;
+    // 精确键必须在（坏键是 "Authorization\0"，c_str() 匹配看不出来）
+    CHECK(h.count("Authorization") == 1);
+    std::map<std::string, std::string>::const_iterator it = h.find("Authorization");
+    REQUIRE(it != h.end());
+    // user:pass 的确切 base64（多带一个 NUL 字节时末位 '=' 会变 'A'）
+    CHECK(it->second == std::string("Basic dXNlcjpwYXNz"));
+    // 任何键/值都不许含内嵌 NUL
+    for (std::map<std::string, std::string>::const_iterator k = h.begin();
+         k != h.end(); ++k) {
+        CHECK(k->first.find('\0') == std::string::npos);
+        CHECK(k->second.find('\0') == std::string::npos);
+    }
+    // 先派发 "transport not ready" 完成事件再删，避免悬挂事件留给后续
+    // processEvents 的用例（Qt3 析构不清 posted events）
+    QApplication::sendPostedEvents(r, 0);
+    delete r;
+}
+
+TEST_CASE("QWebdavLite: HTTP 不预挂 Authorization（vendor 语义，靠 401 挑战链）")
+{
+    if (!ensureTestApp()) {
+        return;
+    }
+    Probe w;
+    w.setConnectionSettings(QWebdavLite::HTTP, QString("h"), QString("/"),
+                            QString("user"), QString("pass"), 0);
+    QNetworkRequest req = w.mkcol(QString("x"));
+    QNetworkReply* r = w.create(QString("MKCOL"), req);
+    REQUIRE(r != 0);
+    CHECK(r->reqExtraHeaders.count("Authorization") == 0);
+    QApplication::sendPostedEvents(r, 0);
+    delete r;
 }
