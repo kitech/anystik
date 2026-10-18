@@ -49,6 +49,14 @@
 #include <utime.h>
 #endif
 
+// ── 调用点注入：q34log(level, tag, msg) ────────────────────────────────
+// 成员 logAt() 是本 TU 唯一的 qInfo/qWarning/qCritical 落点；若在它内部展开宏，
+// file:line 会全部指向 logAt() 自身。故调用点一律走本宏，由宏补上
+// __FILE__/__LINE__，再交 logAt()。宏只在本 .cpp 生效（不进头文件），不污染其它
+// TU；本 TU 内没有同名符号。⚠ 必须放在所有 #include 之后，否则会重写头文件里
+// 的成员声明。
+#define q34log(LEVEL, TAG, MSG) logAt((LEVEL), (TAG), (MSG), __FILE__, __LINE__)
+
 namespace {
 
 QString formatBytes(qint64 n)
@@ -444,7 +452,7 @@ void SyncEngine::createConnection()
         (m_connectionType == 2) ? QWebdavLite::HTTPS : QWebdavLite::HTTP,
         m_host, m_rootPath, m_username, m_password, m_port);
     // 空闲超时：仅在连续无字节传输时计时，且随上传/下载进度重置；大图留余量
-    m_webdav->setTransferTimeout(90000);
+    m_webdav->setTransferTimeout(290000);
     // 暴露被吞掉的认证/SSL 等内部原因。
     // QWebdavLite 刻意不 moc（见 qwebdavlite.h 说明），Qt6 下对无 Q_OBJECT 的类
     // 做 PMF connect 会触发 qobject.cpp 的静态断言。Qt3 侧走 qwebdavlite.h
@@ -458,7 +466,7 @@ void SyncEngine::createConnection()
 // QWebdavLite 的 errorChanged 落点（两版都经 subscribeErrorChanged 转发到此）
 void SyncEngine::onWebdavError(const QString& e)
 {
-    log(davbisync::Warn, QStringLiteral("webdav"), e);
+    q34log(davbisync::Warn, QStringLiteral("webdav"), e);
 }
 
 // 子对象析构日志（两版共用）
@@ -566,7 +574,7 @@ bool SyncEngine::startSync()
     {   // 同步期连接端点（进同步弹窗 syncLog；不打印凭据）
         const bool ssl = (m_connectionType == 2);
         const int effPort = m_port > 0 ? m_port : (ssl ? 443 : 80);
-        log(davbisync::Info, QStringLiteral("dav"),
+        q34log(davbisync::Info, QStringLiteral("dav"),
             QStringLiteral("连接 %1://%2:%3%4 (type=%5)")
                 .arg(ssl ? QStringLiteral("https") : QStringLiteral("http"))
                 .arg(m_host).arg(effPort).arg(m_rootPath)
@@ -579,7 +587,7 @@ bool SyncEngine::startSync()
             cloudRootAbs += QLatin1Char('/');
         }
         cloudRootAbs += m_cloudRoot;
-        log(davbisync::Info, QStringLiteral("dav"),
+        q34log(davbisync::Info, QStringLiteral("dav"),
             QStringLiteral("本地base=%1 · rootPath=%2 · cloudRoot=%3 · 云根=%4")
                 .arg(davLocalSource()->baseDir(),
                      m_rootPath, m_cloudRoot, cloudRootAbs));
@@ -682,7 +690,7 @@ void SyncEngine::abort()
         QFile::remove(t);
     }
     m_tempFiles.clear();
-    log(davbisync::Info, QStringLiteral("sync"),
+    q34log(davbisync::Info, QStringLiteral("sync"),
         QStringLiteral("cancelled by user"));
     emit progressUpdated(m_percent, QStringLiteral("cancelled"), QString());
     emit finished(davbisync::FinishCancelled, QStringLiteral("cancel requested"));
@@ -831,7 +839,7 @@ void SyncEngine::applyLocalListing(const LocalListingResult& r)
     m_diagnosis      = r.diagnosis;
     m_base           = r.base;
     for (size_t i = 0; i < r.logs.size(); ++i) {
-        log(davbisync::LogLevel(r.logs[i].level), r.logs[i].tag, r.logs[i].line);
+        q34log(davbisync::LogLevel(r.logs[i].level), r.logs[i].tag, r.logs[i].line);
     }
     // 阶段 B：云端清单（异步逐目录）
     // 扫描根 = 业务 dbRel 空串（cloudPath 拼出云根 anystik）
@@ -856,7 +864,7 @@ void SyncEngine::scanCloudDir(const QString& dbRelDir)
     m_scanCurrentDir = dir;
     emit progressUpdated(0, QStringLiteral("scan"),
                          QStringLiteral("listing %1").arg(cloudRelPath));
-    log(davbisync::Info, QStringLiteral("scan"),
+    q34log(davbisync::Info, QStringLiteral("scan"),
         QStringLiteral("listing %1").arg(cloudRelPath));   // 进日志视图/控制台（原先只进详情标签）
     probeServer();   // 阶段 B 起点，轻量 OPTIONS，仅首目录触发一次
     if (!m_parser->listDirectory(m_webdav, dir, false)) {
@@ -899,7 +907,7 @@ void SyncEngine::collectCloudItems()
     }
     m_scannedCloudDirs.insert(dirRel);
 
-    log(davbisync::Info, QStringLiteral("scan"),
+    q34log(davbisync::Info, QStringLiteral("scan"),
         QStringLiteral("cloud dir %1: %2 files").arg(dirRel)
             .arg(m_cloudFiles.size()));
     emit treeScanned(m_localFileCount + m_cloudFileCount,
@@ -934,7 +942,7 @@ void SyncEngine::finishCloudScan()
         m_cloudMtimeDecided = true;    // 云端有文件 → getlastmodified 结论可定
         updateRemoteFeature();
     }
-    log(davbisync::Info, QStringLiteral("scan"),
+    q34log(davbisync::Info, QStringLiteral("scan"),
         QStringLiteral("cloud listing done: %1 files in %2 dirs")
             .arg(m_cloudFiles.size()).arg(m_scannedCloudDirs.size()));
 
@@ -1107,7 +1115,7 @@ void SyncEngine::buildOpQueue()
             m_diagnosis.conflicts
                 .append(QStringLiteral("%1 (local %2 B vs cloud %3 B; cloud kept as %4)")
                             .arg(rel).arg(localSize).arg(cloudSize).arg(newRel));
-            log(davbisync::Warn, QStringLiteral("conflict"),
+            q34log(davbisync::Warn, QStringLiteral("conflict"),
                 QStringLiteral("%1 changed on both sides; "
                                "keeping cloud version as %2, uploading local")
                     .arg(rel, newRel));
@@ -1139,7 +1147,7 @@ void SyncEngine::buildOpQueue()
         if (!packId.isEmpty() && m_packPolicies.contains(packId)) {
             const davbisync::PackPolicy p = m_packPolicies.value(packId);
             if (!p.pullEnabled) {
-                log(davbisync::Info, QStringLiteral("pack"),
+                q34log(davbisync::Info, QStringLiteral("pack"),
                     QStringLiteral("skip download by policy: %1").arg(rel));
                 ++m_downloadSkipped;
                 continue;
@@ -1152,7 +1160,7 @@ void SyncEngine::buildOpQueue()
     m_totalJobs = m_uploadQueue.size()
         + m_downloadQueue.size() + m_pendingCloudRenames.size()
         + m_mergeQueue.size();
-    log(davbisync::Info, QStringLiteral("scan"),
+    q34log(davbisync::Info, QStringLiteral("scan"),
         QStringLiteral("op queue: %1 uploads, %2 downloads, %3 conflicts")
             .arg(m_uploadQueue.size()).arg(m_downloadQueue.size())
             .arg(m_conflictRelCloud.size()));
@@ -1193,7 +1201,7 @@ void SyncEngine::pushNext()
         const QString to = item.second;
         const QString fromPath = cloudPath(from);
         const QString toPath = cloudPath(to);
-        log(davbisync::Info, QStringLiteral("conflict"),
+        q34log(davbisync::Info, QStringLiteral("conflict"),
             QStringLiteral("MOVE %1 → %2").arg(fromPath, toPath));
         QNetworkReply* reply = m_webdav->move(fromPath, toPath);
         m_activeReplies.append(reply);
@@ -1207,11 +1215,11 @@ void SyncEngine::pushNext()
                         m_cloudFiles.insert(to, m_cloudFiles.value(from));
                         m_cloudFiles.remove(from);
                         persistBaseline();
-                        log(davbisync::Info, QStringLiteral("conflict"),
+                        q34log(davbisync::Info, QStringLiteral("conflict"),
                             QStringLiteral("cloud rename %1 → %2")
                                 .arg(from, to));
                     } else {
-                        log(davbisync::Warn, QStringLiteral("conflict"),
+                        q34log(davbisync::Warn, QStringLiteral("conflict"),
                             QStringLiteral("cloud rename failed %1: %2")
                                 .arg(from, reply->errorString()));
                     }
@@ -1279,7 +1287,7 @@ void SyncEngine::mkdirNextChain()
     }
     const QString dir = m_mkdirChain.front();   // QList(value shim) 无 constFirst
     const QString dirPath = cloudPath(dir);
-    log(davbisync::Info, QStringLiteral("mkdir"),
+    q34log(davbisync::Info, QStringLiteral("mkdir"),
         QStringLiteral("MKCOL %1").arg(dirPath));
     QNetworkReply* reply = m_webdav->mkdir(dirPath);
     m_activeReplies.append(reply);
@@ -1290,7 +1298,7 @@ void SyncEngine::mkdirNextChain()
                     return;
                 }
                 if (reply->error() != QNetworkReply::NoError) {
-                    log(davbisync::Warn, QStringLiteral("mkdir"),
+                    q34log(davbisync::Warn, QStringLiteral("mkdir"),
                         QStringLiteral("%1: %2").arg(dir, reply->errorString()));
                 }
                 // 无论成败都标记 ensured（继续建子层；put 前真正缺失会以 HTTP 错误上报）
@@ -1381,7 +1389,7 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRelPat
     DAV_SYNC_JOIN_CONNECT
     m_fileStartMsec = nowMsec();
     const QFileInfo finfo(localPath);
-    log(davbisync::Info, QStringLiteral("upload"),
+    q34log(davbisync::Info, QStringLiteral("upload"),
         QStringLiteral("上传 %1 · %2 · 第 %3/%4")
             .arg(finfo.fileName())
             .arg(formatBytes(finfo.size()))
@@ -1424,7 +1432,7 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRelPat
                     const qint64 elapsed =
                         nowMsec() - m_fileStartMsec;
                     if (reply->error() == QNetworkReply::OperationCanceledError) {
-                        log(davbisync::Warn, QStringLiteral("upload"),
+                        q34log(davbisync::Warn, QStringLiteral("upload"),
                             QStringLiteral("canceled after %1 ms · timeout=90000 · https=%2 · host=%3")
                                 .arg(elapsed).arg(m_connectionType == 2).arg(m_host));
                     }
@@ -1436,7 +1444,7 @@ void SyncEngine::uploadFile(const QString& localPath, const QString& cloudRelPat
                     return;
                 }
                 m_lastFileMs = nowMsec() - m_fileStartMsec;
-                log(davbisync::Info, QStringLiteral("upload"),
+                q34log(davbisync::Info, QStringLiteral("upload"),
                     QStringLiteral("完成 %1 → %2 · 用时 %3 s")
                         .arg(QFileInfo(localPath).fileName(),
                              cloudPath(cloudRelPath))
@@ -1483,7 +1491,7 @@ void SyncEngine::downloadFile(const QString& cloudRelPath, const QString& _local
     // B：内置源排除不区分上传/下载侧，按云目录名对称判定（上传侧整包不列出、
     // 下载侧对属于内置源包的云目录整体跳过），在 ensurePack 前拦截，不为其建包
     if (davLocalSource()->builtinSourceCloudDirs().contains(title)) {
-        log(davbisync::Info, QStringLiteral("pack"),
+        q34log(davbisync::Info, QStringLiteral("pack"),
             QStringLiteral("skip download into builtin-source pack: %1")
                 .arg(cloudRelPath));
         m_diagnosis.skipped.append(cloudRelPath);
@@ -1521,7 +1529,7 @@ void SyncEngine::downloadFile(const QString& cloudRelPath, const QString& _local
     }
     m_tempFiles.append(tmp);
 
-    log(davbisync::Info, QStringLiteral("download"),
+    q34log(davbisync::Info, QStringLiteral("download"),
         QStringLiteral("下载 %1 → %2 · 第 %3/%4")
             .arg(baseName, cloudPath(cloudRelPath))
             .arg(m_downloadIndex + 1)
@@ -1559,7 +1567,7 @@ void SyncEngine::downloadFile(const QString& cloudRelPath, const QString& _local
                     const qint64 elapsed =
                         nowMsec() - m_fileStartMsec;
                     if (reply->error() == QNetworkReply::OperationCanceledError) {
-                        log(davbisync::Warn, QStringLiteral("download"),
+                        q34log(davbisync::Warn, QStringLiteral("download"),
                             QStringLiteral("canceled after %1 ms · timeout=90000 · https=%2 · host=%3")
                                 .arg(elapsed).arg(m_connectionType == 2).arg(m_host));
                     }
@@ -1610,7 +1618,7 @@ void SyncEngine::downloadFile(const QString& cloudRelPath, const QString& _local
                     fileSetMsecUtc(f, cloudMsec);
                 }
                 m_lastFileMs = nowMsec() - m_fileStartMsec;
-                log(davbisync::Info, QStringLiteral("download"),
+                q34log(davbisync::Info, QStringLiteral("download"),
                     QStringLiteral("完成 %1 · 用时 %2 s")
                         .arg(cloudRelPath.section(QLatin1Char('/'), -1))
                         .arg(m_lastFileMs / 1000.0, 0, 'f', 1));
@@ -1639,7 +1647,7 @@ void SyncEngine::mergeSpecialNext()
     const packmeta::MergeableEntry* entry =
         packmeta::findMergeableRel(qToStdString(rel));
     if (!entry || !entry->merge) {          // 入队即已注册，防御性跳过
-        log(davbisync::Warn, QStringLiteral("merge"),
+        q34log(davbisync::Warn, QStringLiteral("merge"),
             QStringLiteral("未注册的合并项，跳过: %1").arg(rel));
         ++m_mergeIndex;
         ++m_jobsDone;
@@ -1648,7 +1656,7 @@ void SyncEngine::mergeSpecialNext()
         return;
     }
     m_fileStartMsec = nowMsec();
-    log(davbisync::Info, QStringLiteral("merge"),
+    q34log(davbisync::Info, QStringLiteral("merge"),
         QStringLiteral("合并 %1 → %2").arg(rel, cloudPath(rel)));
 
     QNetworkReply* reply = m_webdav->get(cloudPath(rel));
@@ -1728,7 +1736,7 @@ void SyncEngine::uploadMerged(const QString& rel, const QString& localAbsPath)
                 ++m_merged;
                 ++m_mergeIndex;
                 ++m_jobsDone;
-                log(davbisync::Info, QStringLiteral("merge"),
+                q34log(davbisync::Info, QStringLiteral("merge"),
                     QStringLiteral("合并完成 %1 · %2 s")
                         .arg(rel).arg(m_lastFileMs / 1000.0, 0, 'f', 1));
                 emitProgress();
@@ -1894,7 +1902,7 @@ void SyncEngine::probeServer()
         probePath += QLatin1Char('/');
     }
     probePath += m_cloudRoot;
-    log(davbisync::Info, QStringLiteral("probe"),
+    q34log(davbisync::Info, QStringLiteral("probe"),
         QStringLiteral("OPTIONS %1").arg(probePath));
     QNetworkReply* reply = m_webdav->options(m_cloudRoot);
     if (!reply) {
@@ -1908,7 +1916,7 @@ void SyncEngine::probeServer()
         m_allowMethods = QString::fromLatin1(reply->rawHeader("Allow"));
         if (reply->error() == QNetworkReply::NoError
                 && !m_davCap.contains(QLatin1Char('1'))) {
-            log(davbisync::Warn, QStringLiteral("probe"),
+            q34log(davbisync::Warn, QStringLiteral("probe"),
                 QStringLiteral("非标准 WebDAV（DAV=%1），部分功能可能失败")
                     .arg(m_davCap));
         }
@@ -1950,7 +1958,7 @@ lines << QStringLiteral("文件时间: %1 · 上传回读: %2 · 判定: %3")
         ? QStringLiteral("远程特征: 检测中...")
         : QStringLiteral("远程特征: ") + lines.join(QStringLiteral(" | "));
     emit remoteFeature(text);
-    log(davbisync::Info, QStringLiteral("probe"), text);
+    q34log(davbisync::Info, QStringLiteral("probe"), text);
 }
 
 void SyncEngine::removeActiveReply(QNetworkReply* reply)
@@ -2002,7 +2010,7 @@ void SyncEngine::finishOk(const QString& summary)
         }
     }
     m_activeReplies.clear();
-    log(davbisync::Info, QStringLiteral("sync"), s);
+    q34log(davbisync::Info, QStringLiteral("sync"), s);
     emit progressUpdated(100, QStringLiteral("done"), s);
     emit finished(davbisync::FinishOk, s);
 }
@@ -2014,8 +2022,8 @@ void SyncEngine::finishWithError(const QString& msg)
     }
     m_finished = true;
     m_running = false;
-    log(davbisync::Error, QStringLiteral("sync"), msg);
-    log(davbisync::Error, QStringLiteral("sync"),
+    q34log(davbisync::Error, QStringLiteral("sync"), msg);
+    q34log(davbisync::Error, QStringLiteral("sync"),
         QStringLiteral("aborted; completed transfers kept, rerun will re-check by size"));
     for (QNetworkReply* r : m_activeReplies) {
         if (r) {
@@ -2029,15 +2037,42 @@ void SyncEngine::finishWithError(const QString& msg)
     emit finished(davbisync::FinishError, msg);
 }
 
-void SyncEngine::log(davbisync::LogLevel level, const QString& tag, const QString& line)
+void SyncEngine::logAt(davbisync::LogLevel level, const QString& tag, const QString& line,
+                       const char* file, int lineNo)
 {
     emit syncLog(int(level), tag, line);
     // 控制台镜像：UI 日志视图之外，终端（flatpak run --devel 等）也能看到
-    // 同一份同步日志。INF/WRN/ERR 与 SyncProgressDialog::levelTag 一致。
-    qInfo().noquote() << "[sync]" << tag
-                      << (level == davbisync::Warn   ? "WRN"
-                        : level == davbisync::Error  ? "ERR" : "INF")
-                      << line;
+    // 同一份同步日志。logAt 是唯一落点，调用点由 q34log 宏从调用处带进来
+    //（file/lineNo），故这里显式指定 file/lineNo —— 若直接写 qInfo()/qWarning()
+    // 宏，调用点会退化成 logAt 自身。
+    // 级别真分流：Error→critical、Warn→warning、其余 → info（不再一律 qInfo）。
+    // 处理器/UI 各自从 level 出 [ERROR]/[WARN]/[INFO]，文本里不再重复级别标签。
+#ifdef QT3_BUILD
+    // Qt3 侧用垫片：把 davbisync::LogLevel 映射到 Qt34LogLevel，再显式带调用点。
+    Qt34LogLevel lvl = Qt34Info;
+    switch (level) {
+        case davbisync::Error: lvl = Qt34Critical; break;
+        case davbisync::Warn:  lvl = Qt34Warning;  break;
+        default:               lvl = Qt34Info;     break;
+    }
+    Qt34LogStream(lvl, file, lineNo, "").noquote() << "[sync]" << tag << line;
+#else
+    // Qt5/6：用原生的 QMessageLogger 显式带 file/lineNo（垫片在 Qt5+ 不生效）。
+    switch (level) {
+        case davbisync::Error:
+            QMessageLogger(file, lineNo, "").critical().noquote()
+                << "[sync]" << tag << line;
+            break;
+        case davbisync::Warn:
+            QMessageLogger(file, lineNo, "").warning().noquote()
+                << "[sync]" << tag << line;
+            break;
+        default:
+            QMessageLogger(file, lineNo, "").info().noquote()
+                << "[sync]" << tag << line;
+            break;
+    }
+#endif
 }
 
 QString SyncEngine::canonicalRel(const QString& raw)
