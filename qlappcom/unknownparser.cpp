@@ -2256,44 +2256,42 @@ static bool tryParseSysinfo(const std::string& rawStr, ParseResult& ret) {
     const double GiB = 1073741824.0;
     char tmp[96];
 
-    buf += "| " + std::string(kSysinfoBoardName) + " | " + hostname + " |\n";
-    buf += "|---|---|\n";
-    buf += "| 类别 | 字段 | 值 |\n";
-    buf += "|---|---|---|\n";
+    // buf += "| " + std::string(kSysinfoBoardName) + " | " + hostname + " |\n";
+    // buf += "|---|---|\n";
+    // buf += "| 类别 | 字段 | 值 |\n";
+    // buf += "|---|---|---|\n";
 
-    std::string arch   = jsonGetString(root, "host.arch");
+        std::string arch   = jsonGetString(root, "host.arch");
     std::string os     = jsonGetString(root, "host.os");
     std::string plats  = jsonGetString(root, "host.platform");
     std::string kernel = jsonGetString(root, "host.kernel");
-    buf += "| host | 主机 | " + hostname;
-    if (!arch.empty()) buf += " · " + arch;
-    if (!plats.empty()) buf += " · " + plats + "/" + os;
-    buf += " |\n";
-    buf += "| host | 内核/进程 | " + kernel
+    std::string hostStr = hostname;
+    if (!arch.empty()) hostStr += " · " + arch;
+    buf += "| host | 主机 | " + hostStr
+         + " · " + kernel
          + " · procs " + std::to_string(jsonGetInt64(root, "host.procs"))
          + " · up " + std::to_string(jsonGetInt64(root, "host.uptime_sec")) + "s |\n";
-
     std::string cpuModel = jsonGetString(root, "cpu.model");
     int64_t phy = jsonGetInt64(root, "cpu.counts_physical");
     int64_t lgc = jsonGetInt64(root, "cpu.counts_logical");
-    buf += "| cpu | CPU | " + cpuModel;
-    if (phy > 0) buf += " · " + std::to_string(phy) + "物理/" + std::to_string(lgc) + "逻辑";
-    buf += " |\n";
-    snprintf(tmp, sizeof(tmp), "| cpu | 使用率 | %.1f%% |", jsonGetDouble(root, "cpu.percent"));
-    buf += tmp; buf += "\n";
+    std::string cpuStr = cpuModel;
+    if (phy > 0 && lgc > 0) cpuStr += " · " + std::to_string(phy) + "/" + std::to_string(lgc);
+    snprintf(tmp, sizeof(tmp), " · %.1f%%", jsonGetDouble(root, "cpu.percent"));
+    cpuStr += tmp;
+    buf += "| cpu | CPU | " + cpuStr + " |\n";
 
-    snprintf(tmp, sizeof(tmp), "| mem | 内存 | %.2f/%.2f GiB (%.1f%%) |",
-             jsonGetDouble(root, "mem.used") / GiB,
-             jsonGetDouble(root, "mem.total") / GiB,
+    snprintf(tmp, sizeof(tmp), "| mem | 内存 | %.2f/%.2f GiB (%.1f%%)",
+             jsonGetDouble(root, "mem.used") / GiB, jsonGetDouble(root, "mem.total") / GiB,
              jsonGetDouble(root, "mem.used_percent"));
-    buf += tmp; buf += "\n";
-    if (jsonGetDouble(root, "mem.swap_total") > 0) {
-        snprintf(tmp, sizeof(tmp), "| mem | swap | %.2f/%.2f GiB (%.1f%%) |",
+    buf += tmp;
+    if (jsonGetDouble(root, "mem.swap_total") > 0.0) {
+        snprintf(tmp, sizeof(tmp), " · Swap %.2f/%.2f GiB (%.1f%%)",
                  jsonGetDouble(root, "mem.swap_used") / GiB,
                  jsonGetDouble(root, "mem.swap_total") / GiB,
                  jsonGetDouble(root, "mem.swap_used_percent"));
-        buf += tmp; buf += "\n";
+        buf += tmp;
     }
+    buf += " |\n";
 
     // battery：逐块一行（最多 4 块）；present<=0 且 state 空 → 无电池，跳过
     cJSON* batArr = cJSON_GetObjectItem(root, "battery");
@@ -2336,13 +2334,24 @@ static bool tryParseSysinfo(const std::string& rawStr, ParseResult& ret) {
              jsonGetDouble(root, "load.load15"));
     buf += tmp; buf += "\n";
 
-    // disk：逐块一行（最多 8 块）
+    // disk：只保留占比最大的那一行
     cJSON* diskArr = cJSON_GetObjectItem(root, "disk");
     if (cJSON_IsArray(diskArr)) {
         int n = cJSON_GetArraySize(diskArr);
-        for (int i = 0; i < n && i < 8; i++) {
+        int bestIdx = -1;
+        double bestPct = -1.0;
+        for (int i = 0; i < n; i++) {
             cJSON* d = cJSON_GetArrayItem(diskArr, i);
             if (!d) continue;
+            double pct = jsonGetDouble(d, "used_percent");
+            if (bestIdx == -1 || pct > bestPct + 1e-12) {
+                bestPct = pct;
+                bestIdx = i;
+                if (bestPct >= 99.9) break;
+            }
+        }
+        if (bestIdx >= 0) {
+            cJSON* d = cJSON_GetArrayItem(diskArr, bestIdx);
             snprintf(tmp, sizeof(tmp), "| disk | %s | %s · %.2f/%.2f GiB (%.1f%%) |",
                      jsonGetString(d, "mountpoint").c_str(),
                      jsonGetString(d, "device").c_str(),
@@ -2401,7 +2410,7 @@ static bool tryParseSysinfo(const std::string& rawStr, ParseResult& ret) {
         if (!el.empty()) buf += "| err | 异常 | " + el + " |\n";
     }
 
-    // 时间（published_at 转本地）
+    // 时间（published_at 转本地，仅用于 created_at / eventId，不输出表格行）
     int64_t pub = jsonGetInt64(root, "published_at");
     std::string timeStr;
     if (pub > 0) {
@@ -2412,7 +2421,6 @@ static bool tryParseSysinfo(const std::string& rawStr, ParseResult& ret) {
         strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
         timeStr = tbuf;
     }
-    buf += "| time | 时间 | " + timeStr + " |\n";
 
     HistoryMessage hm;
     hm.message       = buf;
