@@ -189,7 +189,7 @@ SyncProgressDialog::SyncProgressDialog(SyncEngine* engine, QWidget* parent)
     titleLay->addWidget(title, 0);
     titleLay->addStretch(1);
     m_cornerCloseBtn = new QPushButton(QString::fromUtf8("✕"), titleRow);
-    connect(m_cornerCloseBtn, SIGNAL(clicked()), this, SLOT(close()));
+    connect(m_cornerCloseBtn, SIGNAL(clicked()), this, SLOT(onCloseRequested()));
     m_cornerCloseBtn->setEnabled(false);
     titleLay->addWidget(m_cornerCloseBtn, 0);
 
@@ -261,7 +261,7 @@ SyncProgressDialog::SyncProgressDialog(SyncEngine* engine, QWidget* parent)
     m_closeBtn = new QPushButton(bRow);
     m_closeBtn->setText(QString::fromUtf8("关闭"));
     m_closeBtn->setEnabled(false);
-    connect(m_closeBtn, SIGNAL(clicked()), this, SLOT(close()));
+    connect(m_closeBtn, SIGNAL(clicked()), this, SLOT(onCloseRequested()));
     bh->addWidget(m_closeBtn, 0);
 
     v->addWidget(titleRow, 0);
@@ -481,6 +481,9 @@ void SyncProgressDialog::onFinished(int exitCode, const QString& summary)
     m_cancelBtn->setEnabled(false);
     m_closeBtn->setEnabled(true);
     m_cornerCloseBtn->setEnabled(true);
+    // 诊断：完成态仅启用按钮，绝不自动关闭——结果停留供用户查看，手动关
+    qWarning().noquote() << "[syncdlg] finished exit=" << int(exitCode)
+                         << "-> close enabled, dialog stays open";
     // 成功/失败结果同步进控制台（UI 状态行之外的可重定向副本）
     qInfo().noquote() << "[sync] finished exit=" << exitCode << summary;
     if (exitCode == davbisync::FinishOk) {
@@ -507,9 +510,24 @@ void SyncProgressDialog::onCancelClicked()
     }
 }
 
+// ✕/关闭/Esc 统一关闭入口：只由用户动作触发。
+// ⚠ 完成后不走此路径（onFinished 仅启用按钮）——对话框绝不自动关闭。
+void SyncProgressDialog::onCloseRequested()
+{
+    const int running = (m_engine && m_engine->isRunning()) ? 1 : 0;
+    qWarning().noquote() << "[syncdlg] onCloseRequested running=" << running;
+    if (running) {
+        return;           // 运行中禁止关闭（与 closeEvent 门控一致），须先「取消」
+    }
+    emit closed();
+    hide();               // 绕开 QWidget::close()→QCloseEvent 链（Qt3 疑点段）
+}
+
 void SyncProgressDialog::closeEvent(QCloseEvent* e)
 {
-    if (m_engine && m_engine->isRunning()) {
+    const int running = (m_engine && m_engine->isRunning()) ? 1 : 0;
+    qWarning().noquote() << "[syncdlg] closeEvent running=" << running;
+    if (running) {
         e->ignore();       // 运行中禁止关闭（与 Esc 门控一致），须先「取消」
         return;
     }
@@ -519,14 +537,19 @@ void SyncProgressDialog::closeEvent(QCloseEvent* e)
 
 void SyncProgressDialog::keyPressEvent(QKeyEvent* e)
 {
-    if (e->key() == Qt::Key_Escape && m_engine && m_engine->isRunning()) {
-        e->ignore();     // 运行中禁止 Esc 关闭（照 anysk eventFilter:203-213）
-        return;
+    if (e->key() == Qt::Key_Escape) {
+        // 照 anysk syncprogresspopup.cpp:203-214 逐点移植：
+        // 门控 = 关闭按钮可用（= 已 finished）；任何情况都吞掉 Esc，
+        // 禁止冒泡到 QDialog 默认 reject→close 事件链绕过门控。
+        if (m_closeBtn && m_closeBtn->isEnabled()) {
+            onCloseRequested();   // 真关闭（与 ✕/关闭按钮同一入口）
+        }
+        return;                   // 吞掉，不调基类
     }
     QDialog::keyPressEvent(e);
 }
 
 void SyncProgressDialog::reject()
 {
-    close();             // 统一走 closeEvent → closed()；否则只 hide 不发 closed()
+    onCloseRequested();  // Esc → 与按钮同一入口（不依赖 close()/closeEvent 链）
 }

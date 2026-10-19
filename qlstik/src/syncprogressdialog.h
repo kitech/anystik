@@ -47,7 +47,7 @@ signals:
 protected:
     virtual void closeEvent(QCloseEvent* e);
     virtual void keyPressEvent(QKeyEvent* e);
-    virtual void reject();     // Esc → 统一走 close()（否则只 hide，closed() 不发）
+    virtual void reject();     // Esc → onCloseRequested()（否则只 hide，closed() 不发）
 
 private slots:
     void onSyncLog(int level, const QString& tag, const QString& line);
@@ -55,6 +55,7 @@ private slots:
     void onFinished(int exitCode, const QString& summary);
     void onRemoteFeature(const QString& text);
     void onCancelClicked();
+    void onCloseRequested();    // ✕/关闭/Esc 统一关闭入口（仅用户动作触发；完成态不自动关）
     void onFilterChanged();      // 过滤/搜索变化 → 重启 150ms 防抖
     void onDebounceTimeout();    // 防抖到期 → 重建日志视图
     void onCopyClicked();
