@@ -26,19 +26,25 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>     // shared_ptr：取消令牌与 reply 生命周期解耦
+#include <atomic>
 
 class QWebdavTransport
 {
 public:
     // 一次请求的完成回调（在 QWebdavTransport 自己的泵线程里被调用，
     // 实现方负责把结果 postEvent 回目标线程）。
-    // aborted=true 表示传输期间被取消/超时等 CURLcode 非 0 情况。
+    // aborted：预留参数，当前恒为 false——**取消不再走本回调**（上层可能
+    // 已 deleteLater 自己的对象），泵改调 DropCb 释放上下文，见 send() 注。
     typedef void (*DoneCb)(void* userdata,
                            int httpCode,
                            const std::string& curlErr,
                            const std::string& body,
                            const std::map<std::string, std::string>& headers,
                            bool aborted);
+
+    // 任务被取消/丢弃时释放 userdata（泵线程调用；DoneCb 不会被调）。
+    typedef void (*DropCb)(void* userdata);
 
     // 起泵线程（幂等）。与 EventPoller::start() 同样需要显式调用。
     //
@@ -65,6 +71,9 @@ public:
     // 注意 qldox/eventpoller.h 的 HttpRequest::timeoutSec 是「秒」，两者差
     // 1000 倍，直接透传会把 60s 超时变成 60000s ≈ 16.7 小时）。
     // body 为空时不启用 UPLOAD（GET/HEAD/DELETE/MKCOL/MOVE/PROPFIND 无体场景）。
+    // cancel：取消令牌（shared_ptr 副本入 Task）；置位后泵下一轮巡检
+    //   （传输中 ≤ ~110ms）摘除在途 easy 断流——不再回调 cb，改调 onDrop。
+    //   shared_ptr 而非裸指针：reply 析构后泵仍持有效令牌，读写无 UAF。
     static void send(const std::string& method,
                      const std::string& url,
                      const std::map<std::string, std::string>& headers,
@@ -72,7 +81,8 @@ public:
                      int timeoutMsecs,
                      DoneCb cb,
                      void* userdata,
-                     volatile bool* cancel);
+                     std::shared_ptr<std::atomic<bool> > cancel,
+                     DropCb onDrop);
 
 private:
     QWebdavTransport();

@@ -40,6 +40,8 @@
 #include <map>
 #include <vector>
 #include <functional>
+#include <memory>
+#include <atomic>
 
 #include "compatcore34.h"   // CustomEventBase / EventType34 / qFromUtf8 等
 #include "qba_shim.h"       // qbaConstData 等 QByteArray 垫片（qba_constdata 定义在此）
@@ -293,10 +295,12 @@ public:
     void ignoreSslErrors() { m_sslIgnore = true; }
     // 本次传输是否因证书问题需要用户裁决
     bool sslErrorsPending() const { return m_sslIgnore || m_sslAbortedByUser; }
-    // stikcommon 自建 verb-aware 传输（qwebdavtransport）用的取消标志。
-    // EventPoller 无句柄可取消，abort() 只能靠软标志（移植计划 §5.4a）；
-    // 自建传输有 easy handle，但为与既有 abort 语义一致，仍用此标志。
-    volatile bool m_liteCancel;
+    // stikcommon 自建 verb-aware 传输（qwebdavtransport）用的取消令牌。
+    // abort() 置位 → 泵下一轮巡检（传输中 ≤ ~110ms）摘除在途 easy 断流，
+    // 移植 Qt6 原生 QNetworkReply::abort() 的「立刻断流」语义（anysk 取消
+    // 传输即靠它）。shared_ptr 副本入 Task：reply 析构后泵仍持有效令牌。
+    // EventPoller 路径（无 easy handle）仍只靠软标志（移植计划 §5.4a）。
+    std::shared_ptr<std::atomic<bool> > m_cancelTok;
 
     // 探测到的对端证书（TLS 失败时填充，供 accept 后收录）
     const QSslCertificate& probedCertificate() const { return m_sslCert; }

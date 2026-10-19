@@ -43,7 +43,8 @@ struct Task
     int status;
     std::string uploadBuf;     // 请求体
     size_t uploadPos;
-    volatile bool* cancel;     // 调用方持有；非 0 且置位则中止
+    std::shared_ptr<std::atomic<bool> > cancel;  // 调用方持另一副本；置位则中止
+    QWebdavTransport::DropCb onDrop;  // 取消/丢弃时释放 ud（此时不调 cb）
     bool reported;             // 防止重复投递
     QWebdavTransport::DoneCb cb;
     void* ud;
@@ -60,8 +61,8 @@ struct Task
     int idleTimeoutMs;
     qint64 lastProgressMs;
 
-    Task() : easy(0), status(0), uploadPos(0), cancel(0), reported(false),
-             cb(0), ud(0), hdrs(0), idleTimeoutMs(0), lastProgressMs(0) {}
+    Task() : easy(0), status(0), uploadPos(0), reported(false),
+             onDrop(0), cb(0), ud(0), hdrs(0), idleTimeoutMs(0), lastProgressMs(0) {}
 };
 
 size_t writeCb(char* ptr, size_t sz, size_t nm, void* ud)
@@ -234,8 +235,8 @@ protected:
                 QMutexLocker lock(&m_mutex);
                 for (size_t i = 0; i < m_live.size(); ++i) {
                     Task* t = m_live[i];
-                    if (t->cancel != 0) {
-                        *t->cancel = true;   // 告知调用方「是被停机中止的」
+                    if (t->cancel) {
+                        t->cancel->store(true);   // 告知调用方「是被停机中止的」
                     }
                     curl_multi_remove_handle(m_multi, t->easy);
                     curl_easy_cleanup(t->easy);
@@ -243,6 +244,39 @@ protected:
                 }
                 m_live.clear();
             }
+
+            // ── 用户取消巡检 ──（锁内摘除、锁外收尾，照「空闲超时巡检」结构）
+            // SyncEngine::abort → QNetworkReply::abort 置令牌后，本泵在下一轮
+            // 循环（传输中 ≤ ~110ms）摘除在途 easy——移植 Qt6 原生
+            // QNetworkReply::abort() 的「立刻断流」语义（anysk 取消传输即靠它）。
+            //
+            // 刻意**不回调 DoneCb**：上层置位令牌后随即 deleteLater 自己的
+            // reply，此刻回调会把事件 post 进已释放对象（UAF）。同一取舍见上方
+            // 「停机必须主动拆掉在途 easy」段。上下文改由 onDrop 独立释放——
+            // ReplyCtx 不为 reply 所有，可安全单独 delete。
+            std::vector<Task*> cancelDead;
+            if (!m_live.empty()) {
+                QMutexLocker lock(&m_mutex);
+                for (size_t i = 0; i < m_live.size(); ) {
+                    Task* t = m_live[i];
+                    if (t->cancel && t->cancel->load()) {
+                        curl_multi_remove_handle(m_multi, t->easy);
+                        cancelDead.push_back(t);
+                        m_live.erase(m_live.begin() + i);
+                        continue;   // erase 后本下标已是下一个元素，不能自增
+                    }
+                    ++i;
+                }
+            }
+            for (size_t i = 0; i < cancelDead.size(); ++i) {
+                Task* t = cancelDead[i];
+                if (t->onDrop != 0) {
+                    t->onDrop(t->ud);
+                }
+                curl_easy_cleanup(t->easy);
+                delete t;
+            }
+
             // ★ 关键：poll 只负责「等」，真正驱动传输的是 perform。
             // 官方 libcurl-multi 文档原话：
             //   "Adding the easy handle to the multi handle does not start the
@@ -353,14 +387,21 @@ protected:
                 //   一句 "Request aborted"，毫无信息量。
                 //   现在 curl 失败只经 err 串上报（aborted=false），
                 //   deliverResult 会走 `if (!curlErr.empty())` → mapCurlError。
-                const bool aborted = (t->cancel != 0 && *t->cancel);
+                // 令牌若在巡检间隙被置位（GUI 与本线程并发）：与巡检路径同
+                // 取舍——不回调，onDrop 释放上下文；故障仍以 aborted=false
+                // 经 err 串上报（上方注释的事故史继续成立）。
+                const bool cancelled = (t->cancel && t->cancel->load());
                 if (!t->reported) {
                     t->reported = true;
-                    const char* err = (msg->data.result == CURLE_OK)
-                                      ? "" : curl_easy_strerror(msg->data.result);
-                    if (t->cb != 0) {
+                    if (cancelled) {
+                        if (t->onDrop != 0) {
+                            t->onDrop(t->ud);
+                        }
+                    } else if (t->cb != 0) {
+                        const char* err = (msg->data.result == CURLE_OK)
+                                          ? "" : curl_easy_strerror(msg->data.result);
                         t->cb(t->ud, t->status, std::string(err), t->respBody,
-                              t->respHeaders, aborted);
+                              t->respHeaders, false);
                     }
                 }
                 curl_easy_cleanup(e);
@@ -447,7 +488,8 @@ void QWebdavTransport::send(const std::string& method,
                             int timeoutMsecs,
                             DoneCb cb,
                             void* userdata,
-                            volatile bool* cancel)
+                            std::shared_ptr<std::atomic<bool> > cancel,
+                            DropCb onDrop)
 {
         if (!isReady()) {
         // 与 EventPoller 一致的失败语义：立刻回调，让上层照常走错误路径。
@@ -472,6 +514,7 @@ void QWebdavTransport::send(const std::string& method,
     t->cb = cb;
     t->ud = userdata;
     t->cancel = cancel;
+    t->onDrop = onDrop;
     t->idleTimeoutMs = timeoutMsecs;
     // ★ 发包前就以当前时刻起算：连接建立 + TLS 握手这段时间里 readCb/headerCb
     //   都还没被调过，若把 lastProgressMs 留 0，第一次巡检就会把刚入队的

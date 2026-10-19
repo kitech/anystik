@@ -5,7 +5,7 @@
 #include "webcreds.h"
 #include "compatcore34.h"
 
-#include <qapplication.h>
+// #include <qapplication.h>
 #include <qobject.h>
 
 #include <algorithm>

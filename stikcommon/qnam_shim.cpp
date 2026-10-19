@@ -219,7 +219,7 @@ std::string findHeaderCaseInsensitive(
 
 QNetworkReply::QNetworkReply(QObject* parent)
     : QObject(parent)
-    , m_liteCancel(false)
+    , m_cancelTok(std::make_shared<std::atomic<bool> >(false))
 {
 }
 
@@ -543,6 +543,14 @@ void QNetworkReply::abort()
     // 处于 sslErrors 派发窗口时的 abort = QWebdav 走 checkSslCertifcate 后拒绝
     if (m_inSslDispatch) {
         m_sslAbortedByUser = true;
+    }
+    // 自建泵（qwebdavtransport）路径：置取消令牌 → 泵下一轮巡检（传输中
+    // ≤ ~110ms）摘除在途 easy **立刻断流**，移植 Qt6 原生
+    // QNetworkReply::abort() 的行为（anysk 取消传输即靠它）。
+    // SSL 裁决窗口不置令牌：此刻泵在等用户点证书按钮，裁决产生的
+    // 重试/放弃由 m_sslAbortedByUser 分支处理，动 easy 会打乱该状态机。
+    if (!m_inSslDispatch && m_cancelTok) {
+        m_cancelTok->store(true);
     }
     m_aborted = true;
     m_error = OperationCanceledError;
@@ -941,6 +949,15 @@ void qwebdavDoneCb(void* udata,
     delete ctx;
 }
 
+// 泵的「丢弃回调」（QWebdavTransport::DropCb）：用户取消时泵**不**调
+// qwebdavDoneCb——reply 置位令牌后随即 deleteLater 自己，此刻向它
+// postEvent 是向已释放对象投事件（UAF）。ReplyCtx 不为 reply 所有，
+// 可在此独立释放，避免取消路径泄漏。
+void dropReplyCtx(void* udata)
+{
+    delete static_cast<ReplyCtx*>(udata);
+}
+
 void qnamDoneCb(const HttpResponse& resp, void* udata)
 {
     ReplyCtx* ctx = static_cast<ReplyCtx*>(udata);
@@ -1027,7 +1044,8 @@ void QNetworkAccessManager::issue(QNetworkReply* r)
                                r->reqTimeoutSec,
                                qwebdavDoneCb,
                                ctx,
-                               &r->m_liteCancel);
+                               r->m_cancelTok,
+                               dropReplyCtx);
         return;
     }
 
