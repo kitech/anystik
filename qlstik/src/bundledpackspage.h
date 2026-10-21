@@ -37,6 +37,8 @@
 //      （Qt3 QPushButton 默认 sizeHint 比 Qsk 紧凑钮宽）。
 //   9. 长文本折行：Qt3 QLabel 无 setWordWrap（qlabel.h 实证；confirmpopup.cpp 同注记），
 //      且 URL 无空格 → url/dlhint 用 qFontWidth 贪心测宽折行（cpp wrapToWidth）+ tooltip 全文。
+//      ⚠ 折行宽度取固定 kWrapWidth=380（按窗口约 420–480px 定），窗口 resize 后不重算；
+//      更窄窗时折行位置有偏差但不裁字，属可接受近似（anysk WrapAnywhere 按实宽动态折行）。
 //  10. 卡片清空：Qt3 children() 是 const QObjectList* 且最后子对象销毁后**变 nil**
 //      （stickerlistpage.cpp:249-253 实测注记）→ 先收集再 deleteLater，模式照抄
 //      stickerlistpage.cpp:266-299；子代数不靠 children() 数（m_downloadedCount 自记）。

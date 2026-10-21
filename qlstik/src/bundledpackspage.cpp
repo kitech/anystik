@@ -290,12 +290,15 @@ void BundledPacksPage::onStart()
     //   setStackBoxCurrent()（pagemanager.cpp:289/312），此刻页面尚未 raise、
     //   布局无效，喂进去的高度是错的。统一放到 onRestoreScroll 首行 —— 那里
     //   已在事件循环跑过一拍之后，布局已定型。
+    //
+    // ⚠ **无条件**排一拍：即便没有滚动位要恢复，也必须让定型后的 relayoutScroll()
+    //   跑一次，否则 Manual 下内容高停留在构造期的过小值 → 不能滚（只看上半）。
     const double scrollY = qSettingsValueDouble("bundledpacks_scroll", 0.0);
     if (scrollY > 0) {
         m_pendingScroll = scrollY;
-        m_scrollRetry = false;
-        QTimer::singleShot(0, this, SLOT(onRestoreScroll()));
     }
+    m_scrollRetry = false;
+    QTimer::singleShot(0, this, SLOT(onRestoreScroll()));
 }
 
 void BundledPacksPage::onStop()
@@ -316,11 +319,12 @@ void BundledPacksPage::onStop()
 
 void BundledPacksPage::onRestoreScroll()
 {
-    if (!m_scroll || m_pendingScroll <= 0)
+    if (!m_scroll)
         return;
-    // 首次进入时布局已定型（见 onStart 注释），但内容高要主动喂给 QScrollView
-    //（Qt3 Manual 政策下它不会自己从子件推），否则 max=0、setContentsPos 无效。
+    // 首行无条件重排：让定型后的布局尺寸喂给 QScrollView（Qt3 Manual）。
     relayoutScroll();
+    if (m_pendingScroll <= 0)
+        return;                        // 无待恢复滚动位：重排完即收工
     const int want = int(m_pendingScroll);
 #ifdef QT3_BUILD
     m_scroll->setContentsPos(0, want);
@@ -550,49 +554,29 @@ void BundledPacksPage::rebuildDownloaded()
 void BundledPacksPage::relayoutScroll()
 {
 #ifdef QT3_BUILD
-    // Qt3 的 QScrollView **不会**从子件自动推出可滚高度：用 AutoOneFit 时
-    // contentsHeight 实测恒为 -1、vbar.max=0（滚动位存不进也恢复不了），改用
-    // Manual 后必须显式 resizeContents 喂内容高，否则 setContentsPos 无处可去。
-    //（/tmp/opencode/scrollprobe{2,3,5,9} 真机实测的全部依据。）
+    // Qt3 QScrollView::Manual 下内容高**只认 resizeContents() 的实参**，绝不从
+    // 子件自动推高（Qt3 官方文档三处原文）。
     //
-    // 高度取 m_body 顶层布局的 sizeHint().height()（probe9 实测：结构正确时它
-    // 与「逐子件 sizeHint 求和」一致，且 resizeContents 后 vbar.max 正确）。
-    // 逐子件求和作兜底：Qt3 布局 sizeHint 在某些嵌套下会低估（probe7 实证），
-    // 故两者取较大值更稳。
+    // 内容高不再手算：官方 QScrollArea 源码明示「滚动区内容显示不全，需保证子件
+    // sizeHint 合适，必要时给子件 setMinimumSize()」——即让 m_body 的 minimumSize
+    // 由布局驱动，滚动区跟随。故此处先 activate() 令布局定型，再取布局 sizeHint
+    // 设为 m_body 的最小尺寸，最后把它喂给 resizeContents。
+    //
+    // ⚠ 必须在「布局定型后」调用（activate 之后），且首次打开也要调一次 —— 见
+    //   onStart/onRestoreScroll：无滚动位时旧代码会在 onRestoreScroll 首行 return，
+    //   导致定型后再没重排过（这正是「只见上半、不能滚」的根因）。
     if (!m_scroll || !m_body)
         return;
-    QBoxLayout* lay = m_bodyLayout;
-    int wantH = 0;
-    if (lay) {
-        wantH = lay->sizeHint().height();
-        int sum = 0;
-        bool first = true;
-        QLayoutIterator it = lay->iterator();
-        for (QLayoutItem* li = it.current(); li; li = ++it) {
-            QWidget* w = li->widget();
-            if (!w)
-                continue;
-            if (!first)
-                sum += lay->spacing();
-            first = false;
-            int ph = w->sizeHint().height();
-            if (ph <= 0)
-                ph = w->minimumSize().height();
-            sum += ph;
-        }
-        if (sum > wantH)
-            wantH = sum;
-    }
-    if (wantH <= 0)
-        wantH = m_body->sizeHint().height();
-    // 宽度贴当前视口（vbar 出现会使视口变窄）→ 多趟收敛，避免横向滚动条
-    //（probe9：3 趟后 contentsW==viewportW、hbarMax=0）。
-    // ⚠ 循环内**不** processEvents：本函数可能在某按钮槽栈上被 dataChanged 间接
-    //   调到，嵌套 processEvents 有重入风险；probeA 实测不发事件也能让
-    //   setContentsPos 落到正确位置（只是 vbar.maxValue 要到下一轮事件循环才刷新，
-    //   真实 app 事件循环永续，无影响）。
+    if (m_bodyLayout)
+        m_bodyLayout->activate();          // 令布局立即定型，sizeHint 才可靠
+    const QSize want = m_bodyLayout ? m_bodyLayout->sizeHint() : m_body->sizeHint();
+    m_body->setMinimumSize(want);          // 官方处方：给内容 widget 设最小尺寸
+    // 宽度贴当前视口（vbar 出现会使视口变窄）→ 多趟收敛，避免横向滚动条。
+    // ⚠ 循环内不 processEvents：本函数可能在某按钮槽栈上被 dataChanged 间接调到，
+    //   嵌套 processEvents 有重入风险。
     for (int pass = 0; pass < 3; ++pass)
-        m_scroll->resizeContents(m_scroll->viewport()->width(), wantH);
+        m_scroll->resizeContents(m_scroll->viewport()->width(),
+                                 m_body->minimumSize().height());
 #else
     // Qt4+ 的 QScrollArea + setWidgetResizable(true) 自带内容高推导，无需手喂
 #endif
@@ -737,6 +721,7 @@ void BundledPacksPage::onProbeDone(const QString& url, qint64 /*size*/,
     if (!ok) {
         setTextWrapped(row.dlhint, QString::fromUtf8("获取失败：%1").arg(error));
         refreshButtons(row);
+        relayoutScroll();   // dlhint 行数变化 → Qt3 Manual 需重喂内容高
         return;
     }
 
@@ -764,6 +749,7 @@ void BundledPacksPage::onProbeDone(const QString& url, qint64 /*size*/,
     }
     setTextWrapped(row.dlhint, text);
     refreshButtons(row);
+    relayoutScroll();       // 「版本 X / 已装且未变化」行数变化 → 重排
 }
 
 void BundledPacksPage::onProgress(const QString& url, qint64 done, qint64 total)
@@ -827,6 +813,7 @@ void BundledPacksPage::onProgress(const QString& url, qint64 done, qint64 total)
     }
     setTextWrapped(row.dlhint, text);
     refreshButtons(row);
+    relayoutScroll();       // 进度条 show + dlhint 加长 → 重排，否则底部被裁
     stopBusyTimerIfIdle();
 }
 
