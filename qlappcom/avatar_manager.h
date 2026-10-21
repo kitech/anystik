@@ -1,7 +1,7 @@
 #ifndef AVATAR_MANAGER_H
 #define AVATAR_MANAGER_H
 
-#include "compat34.h"
+#include "compatcore34.h"
 #include <qpixmap.h>
 #include <qstring.h>
 #include <map>

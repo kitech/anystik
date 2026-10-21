@@ -4,6 +4,19 @@
 #include <stdint.h>
 #include <qstring.h>
 
+// 虚拟联系人 ID（使用 <-100 的负数避免与服务器 ID 及 "未选择" 哨兵值 -1 冲突）
+constexpr int VIRTUAL_UNKNOWN_ID = -100;
+constexpr int VIRTUAL_SYSEVENT_ID = -101;
+constexpr int VIRTUAL_REDDIT_ID = -102;
+constexpr int VIRTUAL_BOOKMARK_ID  = -103;
+constexpr int VIRTUAL_AICHAT_ID    = -104;
+constexpr int VIRTUAL_PASTEBIN_ID  = -105;
+constexpr int VIRTUAL_TRANSLATE_ID = -106;
+constexpr int VIRTUAL_MOBPUSH_ID   = -126;
+constexpr int VIRTUAL_SNAP_ID     = -122;
+constexpr int VIRTUAL_WEBSEARCH_ID = -123;
+constexpr int VIRTUAL_TTSBOT_ID   = -124;
+
 // ── 联系人类型常量 ──
 // C++11 constexpr（内部链接，每 TU 一份；消费方为内容比较/赋值，无指针同一性依赖）
 constexpr const char* const kImapMailType       = "imap_mail";
@@ -61,6 +74,8 @@ constexpr int kXiaohongshuNoteId = -117;                                   // �
 constexpr const char* const kSysinfoBoardType = "sysinfo_board";   // 系统信息公告板（字符名，订阅流 type == chatId）
 constexpr const char* const kSysinfoBoardName = "系统信息公告板";    // 显示名（表格标题 / hostname 缺失回退）
 constexpr int kSysinfoBoardId = -121;                               // 系统信息公告板保留 id（-121，固定不 hash）
+
+
 
 constexpr int kMisskeyTimelineId = -118;
 constexpr int kOutlookGraphId = -119;
@@ -130,5 +145,27 @@ inline const char* typeToEmojiUtf8(const QString& type) {
     }
     return "👤";   // 未知类型回落 👤
 }
+
+// ── 虚拟联系人（合成频道）定义 ──
+struct VirtualContactDef {
+    int         id;
+    const char* type;
+    const char* name;
+    const char* emoji;
+};
+
+constexpr VirtualContactDef kVirtualContactDefs[] = {
+    { VIRTUAL_UNKNOWN_ID,   kUnknownType,   "Unknown",      "❓" },
+    { VIRTUAL_SYSEVENT_ID,  kSyseventType,  "Sysevent",     "🔔" },
+    { VIRTUAL_REDDIT_ID,    kTopicType,     "Reddit",       "👽" },
+    { VIRTUAL_BOOKMARK_ID,  kBookmarkType,  kBookmarkName,  "🔖" },
+    { VIRTUAL_AICHAT_ID,    kAichatType,    kAichatName,    "🤖" },
+    { VIRTUAL_PASTEBIN_ID,  kPastebinType,  kPastebinName,  "📋" },
+    { VIRTUAL_TRANSLATE_ID, kTranslateType, kTranslateName, "🌐" },
+    { VIRTUAL_MOBPUSH_ID,   kMobPushType,   kMobPushName,   "📨" },
+    { VIRTUAL_SNAP_ID,      kSnapType,      kSnapName,      "📸" },
+    { VIRTUAL_WEBSEARCH_ID, kWebsearchType, kWebsearchName, "🔍" },
+    { VIRTUAL_TTSBOT_ID,    kTtsbotType,    kTtsbotName,    "🔊" },
+};
 
 #endif // PURECONSTS_HPP
