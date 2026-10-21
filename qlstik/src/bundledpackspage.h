@@ -144,6 +144,12 @@ private:
     int                  m_downloadedCount; // A 区卡片数（children() 在 Qt3 不可数，自记）
     double               m_pendingScroll;   // 待恢复滚动位；<=0 = 无待恢复
     bool                 m_scrollRetry;     // 恢复被钳位后是否已重试过一次
+
+    // ── 临时计时埋点（定位切页卡顿；确认后可删）──
+    mutable qint64       m_dbgGivenPackMsec;   // givenPackIdForUrl 累计耗时
+    mutable int          m_dbgGivenPackCalls;  // givenPackIdForUrl 调用次数
+    qint64               m_dbgPackSizeMsec;    // packDiskSize 累计耗时
+    int                  m_dbgPackSizeCalls;   // packDiskSize 调用次数
 };
 
 #endif // QLSTIK_BUNDLED_PACKS_PAGE_H

@@ -32,7 +32,20 @@
 #include <QTimer>
 #endif
 
+#include "qdebug_shim.h"     // qDebug() 流（Qt3 垫片；Qt5/6 原生）— 临时计时埋点
+
 namespace {
+
+// ── 临时计时埋点辅助（定位切页卡顿；确认后连同埋点一起删）──
+// qNowMsecs() 是 Qt3 专用；Qt4+ 用 QDateTime::currentMSecsSinceEpoch()。
+static qint64 dbgNowMsec()
+{
+#ifdef QT3_BUILD
+    return qNowMsecs();
+#else
+    return QDateTime::currentMSecsSinceEpoch();
+#endif
+}
 
 // 折行宽度：窗口 420 - 页面边距 16 - 卡片内边距 20 ≈ 384，取 380 保守值
 const int kWrapWidth     = 380;
@@ -168,6 +181,8 @@ BundledPacksPage::BundledPacksPage(QWidget* parent)
     , m_downloadedBox(0), m_downloadedLayout(0)
     , m_title(0), m_aTitle(0), m_bTitle(0), m_busyTimer(0)
     , m_downloadedCount(0), m_pendingScroll(0.0), m_scrollRetry(false)
+    , m_dbgGivenPackMsec(0), m_dbgGivenPackCalls(0)
+    , m_dbgPackSizeMsec(0), m_dbgPackSizeCalls(0)
 {
     buildBody();
 }
@@ -176,6 +191,7 @@ BundledPacksPage::~BundledPacksPage() {}
 
 void BundledPacksPage::buildBody()
 {
+    const qint64 tBegin = qNowMsecs();
     QBoxLayout* root = qNewBoxLayout(this, QBoxLayout::TopToBottom, 0, 0);
     root->setSpacing(0);
     qSetMargins(root, 0, 0, 0, 0);
@@ -254,6 +270,7 @@ void BundledPacksPage::buildBody()
     connect(store, SIGNAL(dataChanged()), this, SLOT(onStoreDataChanged()));
 
     // ── B 区源行（仅 enabled；anysk :144-151）──
+    qint64 tSrc = qNowMsecs();
     int srcIndex = 0;
     for (unsigned i = 0; i < kBuiltinSourceCount; ++i) {
         if (!kBuiltinSources[i].enabled)
@@ -267,17 +284,30 @@ void BundledPacksPage::buildBody()
                      QString::fromUtf8(kBuiltinSources[i].updated),
                      srcIndex);
     }
+    qDebug() << "[BPPage-timing] B区源行" << (qNowMsecs() - tSrc) << "ms;"
+             << "givenPackId:" << m_dbgGivenPackMsec << "ms /"
+             << m_dbgGivenPackCalls << "次";
 
     // ── B2：清理非内置源的残留下载（.part + dlProgress 死条目）（anysk :153-158）──
+    qint64 tCln = qNowMsecs();
     QStringList sourceUrls;
     for (unsigned i = 0; i < kBuiltinSourceCount; ++i)
         if (kBuiltinSources[i].enabled)
             sourceUrls << QString::fromUtf8(kBuiltinSources[i].url);
     store->cleanupAbandonedDownloads(sourceUrls);
+    qDebug() << "[BPPage-timing] 清理残留" << (qNowMsecs() - tCln) << "ms";
 
+    qint64 tA = qNowMsecs();
     rebuildDownloaded();
+    qDebug() << "[BPPage-timing] A区rebuild" << (qNowMsecs() - tA) << "ms;"
+             << "packDiskSize:" << m_dbgPackSizeMsec << "ms /"
+             << m_dbgPackSizeCalls << "次";
+
+    qint64 tT = qNowMsecs();
     updateTitles();
     relayoutScroll();
+    qDebug() << "[BPPage-timing] titles+relayout" << (qNowMsecs() - tT) << "ms";
+    qDebug() << "[BPPage-timing] buildBody 总计" << (qNowMsecs() - tBegin) << "ms";
 }
 
 void BundledPacksPage::onStart()
@@ -608,7 +638,10 @@ void BundledPacksPage::addPackRow(int index, const QString& id,
     // 信息行：大小 · 版本 · md5（anysk :388-399）
     StickerStore* store = StickerStore::instance();
     const QVariantMap meta = store->packMeta(id);
+    const qint64 tPs = qNowMsecs();
     QString info = formatSize(store->packDiskSize(id));
+    m_dbgPackSizeMsec += (qNowMsecs() - tPs);
+    ++m_dbgPackSizeCalls;
     const QString version = qVariantMapValue(meta, QString::fromUtf8("version")).toString();
     if (!version.isEmpty() && version != QString::fromUtf8("未知"))
         info += QString::fromUtf8("  ·  ") + version;
@@ -882,12 +915,17 @@ void BundledPacksPage::showToast(const QString& text)
 
 QString BundledPacksPage::givenPackIdForUrl(const QString& url) const
 {
+    const qint64 t0 = qNowMsecs();
+    ++m_dbgGivenPackCalls;
     const QStringList ids = QSettings34().valueStringList("downloadedPacks");
     for (int i = 0; i < (int)ids.size(); ++i) {
         const QVariantMap meta = StickerStore::instance()->packMeta(ids[i]);
-        if (qVariantMapValue(meta, QString::fromUtf8("url")).toString() == url)
+        if (qVariantMapValue(meta, QString::fromUtf8("url")).toString() == url) {
+            m_dbgGivenPackMsec += (qNowMsecs() - t0);
             return ids[i];
+        }
     }
+    m_dbgGivenPackMsec += (qNowMsecs() - t0);
     return QString();
 }
 
