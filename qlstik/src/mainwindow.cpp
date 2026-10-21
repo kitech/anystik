@@ -16,6 +16,11 @@
 #include "pagemanager.h"
 #include "stickerlistpage.h"
 #include "settingspage.h"
+// 表情包目录页：依赖 StickerStore（qlstik.pro 只在 Qt3/Qt≥5 挂载该页，
+// Qt4 无 StickerStore）→ include 与注册同闸，同 stickerlistpage.cpp:28 写法
+#if defined(QT3_BUILD) || QT_VERSION >= 0x050000
+#include "bundledpackspage.h"
+#endif
 
 #include <qpixmap.h>
 #include <qevent.h>
@@ -231,6 +236,13 @@ void MainWindow::buildCentralWidget()
     pageMgr->registerPage(QString::fromUtf8("settings"),
                           []() -> Page* { return new SettingsPage(); },
                           reg);
+#if defined(QT3_BUILD) || QT_VERSION >= 0x050000
+    // 表情包目录页：用默认 PageRegistration = {Transient, Standard}，对齐
+    // anysk main.cpp:369-371 —— back() 即销毁，滚动位靠 QSettings
+    // bundledpacks_scroll 跨次恢复（故不能复用上面 LRU 的 reg）
+    pageMgr->registerPage(QString::fromUtf8("bundledpacks"),
+                          []() -> Page* { return new BundledPacksPage(); });
+#endif
     pageMgr->open(QString::fromUtf8("stickerList"));
 
     // 托盘表头/徽标跟随贴纸页计数标签（app 名 - N 个 · M 包）

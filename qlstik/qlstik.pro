@@ -96,19 +96,26 @@ HEADERS += \
     src/stickerpaste.h \
     $$STIKCOMMON_HEADERS
 
-# ── DAV 同步适配层 + 进度弹窗（批次 P3/P4）──
+# ── DAV 同步适配层 + 进度弹窗（批次 P3/P4）+ 表情包目录页 ──
 # davsource.cpp 实现 stikcommon/davlocalsource.h 的九方法；syncprogressdialog.*
 # 是 qlstik 同步进度弹窗（依赖 SyncEngine）。二者依赖的 davbisync.cpp 在
 # stikcommon.pri 仅在 Qt3 / Qt≥5 挂载（Qt4 跳过：其上 davbisync 依赖 qwebdavlite
 # 的 Qt5 语法）。故同条件挂载，否则 Qt4 链接缺符号（适配层：基类 vtable；
 # 弹窗：SyncEngine）。stickerlistpage.cpp 里引用 SyncEngine 的段亦同闸。
 # davsource 无 Q_OBJECT 不需 moc；syncprogressdialog 有 Q_OBJECT，由 qmake moc。
+# bundledpackspage（表情包目录）依赖 stickerstore，confirmpopup（卸载确认）
+# 只被它使用 → 二者搭同一道 Qt3/Qt≥5 闸；mainwindow.cpp 的注册、
+# stickerlistpage.cpp 的菜单开页用 #if defined(QT3_BUILD)||QT_VERSION>=0x050000 同闸。
 isEmpty(QT_VERSION) {
-    SOURCES += src/davsource.cpp src/syncprogressdialog.cpp src/stickerstore.cpp
-    HEADERS += src/davsource.h src/syncprogressdialog.h src/stickerstore.h
+    SOURCES += src/davsource.cpp src/syncprogressdialog.cpp src/stickerstore.cpp \
+        src/bundledpackspage.cpp src/confirmpopup.cpp
+    HEADERS += src/davsource.h src/syncprogressdialog.h src/stickerstore.h \
+        src/bundledpackspage.h src/confirmpopup.h
 } else:!lessThan(QT_VERSION, 5.0.0) {
-    SOURCES += src/davsource.cpp src/syncprogressdialog.cpp src/stickerstore.cpp
-    HEADERS += src/davsource.h src/syncprogressdialog.h src/stickerstore.h
+    SOURCES += src/davsource.cpp src/syncprogressdialog.cpp src/stickerstore.cpp \
+        src/bundledpackspage.cpp src/confirmpopup.cpp
+    HEADERS += src/davsource.h src/syncprogressdialog.h src/stickerstore.h \
+        src/bundledpackspage.h src/confirmpopup.h
     # stickerstore.cpp 的 Qt4+ 分支直接 include 原件 qnaturalsort.h（Qt3 走
     # stikcommon/qnaturalsort_shim.h）；列表页 pack 标题排序也用它。故补原件
     # 的搜索路径并编译其 .cpp（anystik 侧同样编此文件，见 CMakeLists:121）。

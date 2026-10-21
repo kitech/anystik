@@ -1728,7 +1728,13 @@ void StickerListPage::showOptionsMenu(const QPoint& globalPos)
         todoToast(this, "导入表情包文件夹");            // anysk requestImportFolder
     });
     insertActionItem(menu, QString::fromUtf8("表情包目录"), [this]() {
-        todoToast(this, "表情包目录");                  // anysk open("bundledpacks")
+#if defined(QT3_BUILD) || QT_VERSION >= 0x050000
+        // anysk showOptionsMenu:1256 open("bundledpacks")
+        if (pageManager())
+            pageManager()->open(QString::fromUtf8("bundledpacks"));
+#else
+        todoToast(this, "表情包目录");   // Qt4 未挂 StickerStore/本页，维持占位
+#endif
     });
     insertActionItem(menu, QString::fromUtf8("粘贴添加"), [this]() {
         onPasteButton();                                // anysk requestPasteSticker（已实现）
