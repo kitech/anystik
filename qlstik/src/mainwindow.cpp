@@ -237,11 +237,12 @@ void MainWindow::buildCentralWidget()
                           []() -> Page* { return new SettingsPage(); },
                           reg);
 #if defined(QT3_BUILD) || QT_VERSION >= 0x050000
-    // 表情包目录页：用默认 PageRegistration = {Transient, Standard}，对齐
-    // anysk main.cpp:369-371 —— back() 即销毁，滚动位靠 QSettings
-    // bundledpacks_scroll 跨次恢复（故不能复用上面 LRU 的 reg）
+    // 表情包目录页：CachePolicy::LRU（同贴纸家）—— 切走进缓存池、回来不重建，
+    // 消除每次进入都要 parse 配置/重建卡片列表的卡顿；滚动位仍由 QSettings34
+    // 的 bundledpacks_scroll 持久化（进程重启后恢复）。
     pageMgr->registerPage(QString::fromUtf8("bundledpacks"),
-                          []() -> Page* { return new BundledPacksPage(); });
+                          []() -> Page* { return new BundledPacksPage(); },
+                          reg);
 #endif
     pageMgr->open(QString::fromUtf8("stickerList"));
 

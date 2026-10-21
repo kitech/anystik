@@ -13,12 +13,8 @@
 #endif
 
 // 编译期选择 HTML 解析器：
-//   Android(qsktox) 无 libgumbo 预编译包 → 内置手写浅扫描器；
-//   桌面(qt3/qt4/qt6) 继续使用 gumbo。
-// -DLINKPREVIEW_FORCE_GUMBO 可在 Android 强制用 gumbo；-DLINKPREVIEW_NO_GUMBO 可在桌面测试手写路径。
-#if defined(Q_OS_ANDROID) && !defined(LINKPREVIEW_FORCE_GUMBO)
-#define LINKPREVIEW_NO_GUMBO 1
-#endif
+//   全平台统一使用 vendor 内嵌 gumbo（源码编译，不依赖系统 libgumbo）。
+// -DLINKPREVIEW_NO_GUMBO 仍可强制切换到内置手写浅扫描器（应急/测试）。
 #ifndef LINKPREVIEW_NO_GUMBO
 #include <gumbo.h>
 #endif

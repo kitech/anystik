@@ -69,14 +69,13 @@
 //   QDateTime::toString 带格式名                            → qdatetime_shim.h
 //   QStringLiteral/QString::split 语义差异等                 → qstring_shim.h
 // 保留 Qt3 原生小写头的：QDir / QFile / QBuffer / QFileInfo / QDateTime /
-// QMutex / QSettings / QUrl / QPainter。
+// QMutex / QUrl / QPainter。
 #include <qdir.h>
 #include <qfile.h>
 #include <qbuffer.h>
 #include <qfileinfo.h>
 #include <qdatetime.h>
 #include <qmutex.h>
-#include <qsettings.h>
 #include <qurl.h>
 #include <qpainter.h>
 #include "qstandardpaths_shim.h"
@@ -154,7 +153,6 @@
 // Qt4.5+ 转调原生 QJsonDocument）。头内部逐项带版本守卫，两版本都安全可含，
 // 且必须包含 —— 下面的调用点是 Qt3/Qt6 共用的一份代码。
 #include "qjson_shim.h"
-#include <QSettings>
 #include <QUrl>
 #include <QSet>
 #include <QNetworkAccessManager>
@@ -181,12 +179,10 @@
 // 上面这个**共用区**（两个版本分支的 #endif 之后）—— 放进任一分支都会让
 // 另一版本报 "qVariantMapValue was not declared in this scope"。
 #include "qvariant_shim.h"
-// qSettingsValueStr/qSettingsValueMap/qSettingsSetMap/qSettingsRemove 等：
-// Qt3 的 QSettings 无 QVariant 版 value()/setValue()/remove()/childKeys()
-// （见 stikcommon/qsettings_shim.h 头注释）。本垫片在 Qt3/Qt6 两分支都定义，
-// 下面所有 QSettings 调用点统一改用这些自由函数——⚠ 必须放在**共用区**
-// （两个版本分支的 #endif 之后），放进任一分支都会让另一版本报未声明。
-#include "qsettings_shim.h"
+// 配置读写统一走 qlcomp 的 QSettings34（Qt3 侧独立实现 Qt6 落盘规则，与
+// anystik 共用 ~/.config/fedlet/anystik.conf；实例级一次 parse、无自动 sync）。
+// 常驻实例 m_settings 见构造函数；⚠ 放在**共用区**（两版本分支 #endif 之后）。
+#include "qsettings34.h"
 // Qt3 无 QImage 的 Format 概念（构造参数是 int depth）、无 scaled()、
 // 无 Format_RGBA8888/Format_ARGB32_Premultiplied、Qt3 32 位图内存是 BGRA
 // 而非 RGBA。qimage_shim.h 把这些差异收进自由函数，Qt6 分支转调原生 API，
@@ -220,6 +216,15 @@ StickerStore* StickerStore::instance()
 StickerStore::StickerStore(QObject* parent)
     : QObject(parent)
 {
+    // 常驻配置实例（默认 org=fedlet / app=anystik，与 anystik 同一 conf）。
+    // 单例生命周期内只 parse 一次；高频读写（dlHint 等）全程复用。
+    m_settings = new QSettings34();
+}
+
+StickerStore::~StickerStore()
+{
+    delete m_settings;
+    m_settings = nullptr;
 }
 
 bool StickerStore::ensureInit()
@@ -265,7 +270,7 @@ QString StickerStore::stickerBaseDir() const
 {
     if (m_stickerBaseDir.isEmpty()) {
         // 持久化优先：若已显式切过存储根，则沿用；否则默认 app 私有目录。
-        const QString saved = qSettingsValueStr(
+        const QString saved = m_settings->valueStr(
             QStringLiteral("storageRoot"));
         if (!saved.isEmpty()
                 && QDir(saved).exists()
@@ -434,7 +439,8 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
     }
     if (fromRoot == toRoot) {
         // 目标即当前根：直接持久化该根并返回成功
-        qSettingsSetStr(QStringLiteral("storageRoot"), toRoot);
+        m_settings->setValue(QStringLiteral("storageRoot"), toRoot);
+        m_settings->sync();
         return true;
     }
     if (!qMkpath(toRoot)) {
@@ -619,22 +625,14 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
         }
 
         // 持久化新 base
-        qSettingsSetStr(QStringLiteral("storageRoot"), toRoot);
+        m_settings->setValue(QStringLiteral("storageRoot"), toRoot);
+        m_settings->sync();
         m_stickerBaseDir = toRoot;
         m_migrating = false;
 
         // 迁移完全成功（DB 已转、base 已切）后清理旧 base 的贴纸文件，避免两份拷贝。
         // 只删 packs/、pastes/；绝不动 fromRoot 根下 cache.db/message.db/cache_fs 等。
         cleanupMigrationSource(fromRoot);
-
-        // best-effort：重写 downloadedPackMeta/<id>.dir（若指向旧 base/packs）
-        {
-            QSettings s;
-            // 通过 packs 接口无法拿到元数据键集合，这里按 id 无法枚举；
-            // 改为遍历现有 pack 元数据键（downloadedPackMeta/<id>）估算不现实，
-            // 简化：卸载删文件路径略旧，不影响数据正确性，此处不处理（注释说明）。
-            Q_UNUSED(s)
-        }
 
         // 说明：不做 MediaScanner 广播，Pictures/anystik 仅作文件存储，
         // 图片不会自动出现在系统相册索引中（属预期）。
@@ -3349,15 +3347,16 @@ static QString urlDisplayName(const QString& url)
     return base;
 }
 
-static QVariantMap dlHint(const QString& url)
+QVariantMap StickerStore::dlHint(const QString& url) const
 {
-    return qSettingsValueMap(
-        QStringLiteral("dlProgress/") + urlHex(url));
+    return m_settings->value(
+        QStringLiteral("dlProgress/") + urlHex(url)).toMap();
 }
 
-static void setDlHint(const QString& url, const QVariantMap& hint)
+void StickerStore::setDlHint(const QString& url, const QVariantMap& hint)
 {
-    qSettingsSetMap(QStringLiteral("dlProgress/") + urlHex(url), hint);
+    m_settings->setValue(QStringLiteral("dlProgress/") + urlHex(url), hint);
+    m_settings->sync();   // QSettings34 无自动 sync；高频写后立即落盘
 }
 
 static QByteArray fileMd5(const QString& path)
@@ -3930,8 +3929,9 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     r.md5Hex = QString::fromLatin1(qbaToHex(md5));
 
     // A2 内容变化检测：同源同包且 md5 变化 → 附加提示
-    const QVariantMap oldMeta = qSettingsValueMap(
-        QStringLiteral("downloadedPackMeta/") + packId);
+    // （工作线程；用局部实例，避免与 GUI 线程的常驻 m_settings 并发）
+    const QVariantMap oldMeta = QSettings34().value(
+        QStringLiteral("downloadedPackMeta/") + packId).toMap();
     const QString oldMd5 = qVariantMapValue(oldMeta, QStringLiteral("md5")).toString();
     if (!oldMd5.isEmpty()
             && qVariantMapValue(oldMeta, QStringLiteral("url")).toString() == url
@@ -4003,8 +4003,9 @@ StickerStore::InstallResult StickerStore::runInstallEif(
     r.total = QFileInfo(eifPath).size();
     r.md5Hex = QString::fromLatin1(qbaToHex(md5));
 
-    const QVariantMap oldMeta = qSettingsValueMap(
-        QStringLiteral("downloadedPackMeta/") + packId);
+    // 工作线程读取：用局部实例（避免与常驻 m_settings 并发）
+    const QVariantMap oldMeta = QSettings34().value(
+        QStringLiteral("downloadedPackMeta/") + packId).toMap();
     const QString oldMd5 = qVariantMapValue(oldMeta, QStringLiteral("md5")).toString();
     if (!oldMd5.isEmpty()
             && qVariantMapValue(oldMeta, QStringLiteral("url")).toString() == url
@@ -4075,8 +4076,9 @@ StickerStore::InstallResult StickerStore::runInstallTgs(
     r.total = QFileInfo(tgsPath).size();
     r.md5Hex = QString::fromLatin1(qbaToHex(md5));
 
-    const QVariantMap oldMeta = qSettingsValueMap(
-        QStringLiteral("downloadedPackMeta/") + packId);
+    // 工作线程读取：用局部实例（避免与常驻 m_settings 并发）
+    const QVariantMap oldMeta = QSettings34().value(
+        QStringLiteral("downloadedPackMeta/") + packId).toMap();
     const QString oldMd5 = qVariantMapValue(oldMeta, QStringLiteral("md5")).toString();
     if (!oldMd5.isEmpty()
             && qVariantMapValue(oldMeta, QStringLiteral("url")).toString() == url
@@ -4093,8 +4095,8 @@ void StickerStore::finalizeInstall(DownloadTask* task, const InstallResult& r)
     const QString url = task->url;
     if (r.ok) {
         const QVariantMap hint = dlHint(url);
-        QVariantMap meta = qSettingsValueMap(
-            QStringLiteral("downloadedPackMeta/") + r.packId);
+        QVariantMap meta = m_settings->value(
+            QStringLiteral("downloadedPackMeta/") + r.packId).toMap();
         meta.insert("url", url);
         meta.insert("name", r.message);
         meta.insert("total", r.total);
@@ -4103,15 +4105,16 @@ void StickerStore::finalizeInstall(DownloadTask* task, const InstallResult& r)
         meta.insert("md5", r.md5Hex);
         meta.insert("dir", r.dir);
         meta.insert("dl_time", qDateTimeEpochSecs());
-        qSettingsSetMap(QStringLiteral("downloadedPackMeta/") + r.packId, meta);
+        m_settings->setValue(QStringLiteral("downloadedPackMeta/") + r.packId, meta);
 
-        QStringList list = qSettingsValueStringList(
+        QStringList list = m_settings->valueStringList(
             QStringLiteral("downloadedPacks"));
         if (!list.contains(r.packId)) {
             list.append(r.packId);
-            qSettingsSetStringList(QStringLiteral("downloadedPacks"), list);
+            m_settings->setValue(QStringLiteral("downloadedPacks"), list);
         }
-        qSettingsRemove(QStringLiteral("dlProgress/") + urlHex(url));
+        m_settings->remove(QStringLiteral("dlProgress/") + urlHex(url));
+        m_settings->sync();
     }
 
     m_tasks.remove(url);
@@ -4153,14 +4156,15 @@ bool StickerStore::uninstallPack(const QString& packId, bool removeFiles)
         if (removeFiles && !dir.isEmpty()) {
             qDirRemoveRecursively(QDir(dir));
         }
-        QStringList list = qSettingsValueStringList(
+        QStringList list = m_settings->valueStringList(
             QStringLiteral("downloadedPacks"));
         // 卸载（保留文件）也从已下载列表移除；元数据仅彻底删除时清除
         qStringListRemoveAll(list, packId);
-        qSettingsSetStringList(QStringLiteral("downloadedPacks"), list);
+        m_settings->setValue(QStringLiteral("downloadedPacks"), list);
         if (removeFiles) {
-            qSettingsRemove(QStringLiteral("downloadedPackMeta/") + packId);
+            m_settings->remove(QStringLiteral("downloadedPackMeta/") + packId);
         }
+        m_settings->sync();
         emit dataChanged();
     }
     return ok;
@@ -4191,23 +4195,22 @@ void StickerStore::cleanupAbandonedDownloads(const QStringList& knownUrls)
     }
 
     // 清理不在已知源内的 dlProgress 死条目
-#ifdef QT3_BUILD
-    // ⚠ Qt3 垫片限制：QSettings 的 INI 后端 subkeyList() 列不出子组，垫片的
-    //   qSettingsChildKeys() 在 Qt3 下**恒返回空**（见 stikcommon/qsettings_shim.h
-    //   文件头的实测记录），故无法枚举 dlProgress/* 子键 → 本清理在 Qt3 下为
-    //   no-op（不误删、不报错，仅残留死条目，无数据正确性影响）。
-    //   Qt6 分支行为不变（原生 beginGroup/childKeys/remove）。
-#else
-    QSettings settings;
-    settings.beginGroup(QStringLiteral("dlProgress"));
-    const auto keys = settings.childKeys();
-    for (const QString& k : keys) {
-        if (!keep.contains(k)) {
-            settings.remove(k);
+    // QSettings34::childKeys(prefix) 返回**全键**（含 "dlProgress/" 前缀）；
+    // keep 存的是 urlHex（叶子），故取出叶子后比较、remove 用全键。
+    {
+        QSettings34 s;
+        const QStringList keys = s.childKeys(QStringLiteral("dlProgress"));
+        const QString prefix = QStringLiteral("dlProgress/");
+        for (int i = 0; i < (int)keys.size(); ++i) {
+            const QString full = keys[i];
+            const QString leaf = full.startsWith(prefix)
+                ? full.mid(prefix.length()) : full;
+            if (!keep.contains(leaf)) {
+                s.remove(full);
+            }
         }
+        s.sync();
     }
-    settings.endGroup();
-#endif
 }
 
 qint64 StickerStore::packDiskSize(const QString& packId)
@@ -4226,8 +4229,8 @@ qint64 StickerStore::packDiskSize(const QString& packId)
 
 QVariantMap StickerStore::packMeta(const QString& packId) const
 {
-    return qSettingsValueMap(
-        QStringLiteral("downloadedPackMeta/") + packId);
+    return m_settings->value(
+        QStringLiteral("downloadedPackMeta/") + packId).toMap();
 }
 
 bool StickerStore::isBuiltinSourcePack(const QString& packId,

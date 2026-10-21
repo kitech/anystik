@@ -56,7 +56,6 @@ test_qimage_shim.cpp
 test_qdebug_shim.cpp
 test_qmimedatabase_shim.cpp
 test_qclipboard_shim.cpp
-test_qsettings_shim.cpp
 test_qtrimmed_shim.cpp
 test_qtemporaryfile_shim.cpp
 test_qconnect_slots.cpp

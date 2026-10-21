@@ -379,20 +379,18 @@ STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qtemporaryfile_shim.h
 
 # ── 批次 5：QSettings / QtConcurrent 分版本实现 ──────────────────────────
 # 需求：stickerstore.cpp 用 QSettings 的 QVariant 存取（value/setValue/remove/
-#   childKeys，Qt4.0 才有）持久化 storageRoot / dlProgress / downloadedPackMeta；
+#   childKeys）持久化 storageRoot / dlProgress / downloadedPackMeta；
 #   用 QtConcurrent::run(...).then()（Qt4.4 才有）跑迁移与安装的工作线程。
+# 存储后端：配置读写不再走本目录垫片，统一走 qlcomp 的 QSettings34
+#   （qlcomp/qsettings34.h，Qt3 侧独立实现 Qt6 落盘规则，与 anystik 共用
+#   ~/.config/fedlet/anystik.conf；实例级一次 parse，无自动 sync）。
 # Qt3 侧：
-#   · qsettings_shim.h —— 把 QVariant 按真实类型落到 Qt3 QSettings 的类型化
-#     readXxxEntry/writeEntry/removeEntry，读侧按期望类型选函数（自由函数，
-#     覆盖 Qt3/Qt6 两侧）。⚠ 本仓两个版本共用同一 anystik.conf 时落盘不互通，
-#     垫片只保证同版本内与 Qt6 等价（详见该头文件头注释）。
 #   · qconcurrent_shim.h —— Qt3 无 QThread 信号/QThreadPool，改用自实现固定
 #     大小线程池（kPoolSize=2 条 QThread）跑任务 + 事件投递回 context 线程；
 #     覆盖 run+then 两处形态，并提供 then 链式返回 / waitForFinished / result /
 #     异常传播（详见该头文件头注释）。
-# 两个头对 Qt4+ 均为空/走原生，故无条件登记（依赖扫描）。线程池依赖 Qt3 QThread。
-STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qsettings_shim.h \
-                      $$STIKCOMMON_DIR/qconcurrent_shim.h
+# 本头对 Qt4+ 均为空/走原生，故无条件登记（依赖扫描）。线程池依赖 Qt3 QThread。
+STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qconcurrent_shim.h
 
 # ── 批次 5：QDirIterator 分版本实现 ──────────────────────────────────────
 # 需求：stickerstore.cpp:3822 用 QDirIterator 递归收集 *.eif / *.EIF

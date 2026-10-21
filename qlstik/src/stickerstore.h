@@ -43,6 +43,7 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class QNetworkRequest;
 class QUrl;
+class QSettings34;   // qlcomp 配置后端（常驻实例，避免每次重解析）
 
 struct StickerPackBrief {
     QString id;
@@ -90,7 +91,6 @@ public:
 
     // 惰性初始化 Storage（message.db/cache.db + sticker 表），线程安全单次执行
     bool ensureInit();
-
     // ── 查询（全部走 StickerDbSyncInterface，GUI 线程直接调用）──
     QVector<StickerPackBrief> packs(int installed = 1,
                                     const char* orderby = "created_at DESC",
@@ -236,6 +236,7 @@ signals:
 
 private:
     StickerStore(QObject* parent = nullptr);
+    ~StickerStore();
 
     void dropLegacyChatTables();
 
@@ -294,10 +295,16 @@ private:
     bool m_migrating = false;
     StorageRoot m_pendingStorageRoot = StorageRoot::AppPrivate;
 
+    // 下载进度提示（dlProgress/<urlHex>）：常驻 QSettings34 读写。
+    // 高频路径（网络进度回调）——绝不能用临时实例（每次构造=每次重解析）。
+    QVariantMap dlHint(const QString& url) const;
+    void setDlHint(const QString& url, const QVariantMap& hint);
+
     static StickerStore* s_instance;
     bool m_initialized = false;
     QNetworkAccessManager* m_nam = nullptr;
     QHash<QString, DownloadTask*> m_tasks;
+    QSettings34* m_settings = nullptr;   // 常驻配置（org=fedlet/app=anystik）
 };
 
 #endif // STICKER_STORE_H

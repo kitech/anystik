@@ -15,7 +15,7 @@
 
 #include "qdatetime_shim.h"  // qNowMsecs()（Qt3 无 currentMSecsSinceEpoch）
 #include "qset_shim.h"       // QSet<QString>（Qt3 无 QSet）
-#include "qsettings_shim.h"  // qSettingsValue*/qSettingsSet*（downloadedPacks 等）
+#include "qsettings34.h"    // QSettings34（qlcomp；与 anystik 同文件同格式）
 #include "qvariant_shim.h"   // qVariantMapValue()（Qt3 QMap 无 value()）
 
 #ifdef QT3_BUILD
@@ -293,7 +293,7 @@ void BundledPacksPage::onStart()
     //
     // ⚠ **无条件**排一拍：即便没有滚动位要恢复，也必须让定型后的 relayoutScroll()
     //   跑一次，否则 Manual 下内容高停留在构造期的过小值 → 不能滚（只看上半）。
-    const double scrollY = qSettingsValueDouble("bundledpacks_scroll", 0.0);
+    const double scrollY = QSettings34().valueDouble("bundledpacks_scroll", 0.0);
     if (scrollY > 0) {
         m_pendingScroll = scrollY;
     }
@@ -308,12 +308,15 @@ void BundledPacksPage::onStop()
     // scrollPos().y()）；Qt4+ 取 verticalScrollBar()->value()（QScrollArea 无
     // contentsY）。两者都是「纵向已滚像素数」，键名/类型跨版本一致。
 #ifdef QT3_BUILD
-    qSettingsSetDouble("bundledpacks_scroll",
-                       m_scroll ? double(m_scroll->contentsY()) : 0.0);
+    QSettings34 set;
+    set.setValue("bundledpacks_scroll",
+                 m_scroll ? double(m_scroll->contentsY()) : 0.0);
 #else
-    qSettingsSetDouble("bundledpacks_scroll",
-                       m_scroll ? double(m_scroll->verticalScrollBar()->value()) : 0.0);
+    QSettings34 set;
+    set.setValue("bundledpacks_scroll",
+                 m_scroll ? double(m_scroll->verticalScrollBar()->value()) : 0.0);
 #endif
+    set.sync();   // QSettings34 无自动 sync（无析构/事件循环 sync），写后必须手动
     Page::onStop();
 }
 
@@ -520,7 +523,7 @@ void BundledPacksPage::rebuildDownloaded()
     m_downloadedCount = 0;   // 子代数不靠 children() 数（头注释 10），自记
 
     StickerStore* store = StickerStore::instance();
-    const QStringList ids = qSettingsValueStringList("downloadedPacks");
+    const QStringList ids = QSettings34().valueStringList("downloadedPacks");
     if (ids.isEmpty()) {
         QLabel* hint = makeInfoLabel(m_downloadedBox);
         setTextWrapped(hint, QString::fromUtf8("尚未下载任何表情包"));
@@ -734,7 +737,7 @@ void BundledPacksPage::onProbeDone(const QString& url, qint64 /*size*/,
         const QVector<StickerPackBrief> ip = StickerStore::instance()->packs(1);
         for (int k = 0; k < (int)ip.size(); ++k)
             installed.insert(ip[k].id);
-        const QStringList ids = qSettingsValueStringList("downloadedPacks");
+        const QStringList ids = QSettings34().valueStringList("downloadedPacks");
         for (int k = 0; k < (int)ids.size(); ++k) {
             const QVariantMap meta = StickerStore::instance()->packMeta(ids[k]);
             if (installed.contains(ids[k])
@@ -879,7 +882,7 @@ void BundledPacksPage::showToast(const QString& text)
 
 QString BundledPacksPage::givenPackIdForUrl(const QString& url) const
 {
-    const QStringList ids = qSettingsValueStringList("downloadedPacks");
+    const QStringList ids = QSettings34().valueStringList("downloadedPacks");
     for (int i = 0; i < (int)ids.size(); ++i) {
         const QVariantMap meta = StickerStore::instance()->packMeta(ids[i]);
         if (qVariantMapValue(meta, QString::fromUtf8("url")).toString() == url)

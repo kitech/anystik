@@ -26,7 +26,8 @@
 //   5. Qt3 缺口全走既有垫片：qint64（qglobaltype_shim.h —— compatcore34 不引入它）、
 //      QSet（qset_shim.h）、QDateTime::currentMSecsSinceEpoch → qNowMsecs()
 //      （qdatetime_shim.h）、QSettings::value/setValue → qsettings_shim 的
-//      qSettingsValue*/qSettingsSet*（键名与 anystik 同名同型，共用同一份 conf）、
+//      QSettings34（qlcomp；键名与 anystik 同名同型，共用 ~/.config/fedlet/anystik.conf，
+//      落盘格式对齐 Qt6；⚠ 其无自动 sync（无析构/事件循环 sync），写后须手动 sync()）、
 //      QWidget::setVisible → show()/hide() 分流（同 stickerlistpage.cpp:334）。
 //   6. 进度条大小未知（anysk setIndeterminate(true)）：Qt3 QProgressBar 无该态，
 //      且 LimeStyle 只在 totalSteps>0 时画填充（LimeStyle.cpp:1189）→ 双版本统一
@@ -49,6 +50,7 @@
 
 #include "compat34.h"    // ScrollArea typedef、qNewBoxLayout/qSetMargins/qFontWidth/qSetToolTip
 #include "page.h"
+#include "qsettings34.h" // 滚动位 bundledpacks_scroll 读写
 
 #ifdef QT3_BUILD
 // qint64/qreal 是 Qt4 引入的别名，Qt3 只有 Q_LONG；compatcore34.h 不提供，必须自取

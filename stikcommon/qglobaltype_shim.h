@@ -57,9 +57,8 @@ typedef long long qint64;
 typedef unsigned long long quint64;
 // qulonglong：Qt4.0 起 qglobal.h 才有此名。Qt3 侧的基础 64 位无符号整型
 // 是 Q_ULLONG（qglobal.h:728 → unsigned long long），语义完全一致，故补同名
-// typedef。用到它的 qsettings_shim.h（qSettingsValueULongLong/SetULongLong）
-// 在 Qt3 分支本来就把值当 QString 存（Qt3 无 writeEntry(key, qulonglong)，
-// 只有 writeEntry(key, const QString&)），故此 typedef 不引入语义风险。
+// typedef。qlstik 侧由 QSettings34（qlcomp）与各调用点直接使用；本 typedef
+// 不引入语义风险。
 typedef unsigned long long qulonglong;
 #ifndef Q_INT64_C
 #define Q_INT64_C(c)   c##LL
