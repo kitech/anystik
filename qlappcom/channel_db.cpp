@@ -362,7 +362,11 @@ public:
             "status=CASE WHEN excluded.status!='' THEN excluded.status ELSE channels.status END,"
             "is_connected=CASE WHEN excluded.is_connected!=-1 THEN excluded.is_connected ELSE channels.is_connected END,"
             "icon_url=CASE WHEN excluded.icon_url!='' THEN excluded.icon_url ELSE channels.icon_url END,"
-            "pubkey=CASE WHEN excluded.pubkey!='' THEN excluded.pubkey ELSE channels.pubkey END");
+            "pubkey=CASE WHEN excluded.pubkey!='' THEN excluded.pubkey ELSE channels.pubkey END,"
+            // 会话摘要与活跃时间：自己发的消息同样要刷新列表预览与排序
+            "last_message_text=CASE WHEN excluded.last_message_text!='' THEN excluded.last_message_text ELSE channels.last_message_text END,"
+            "last_message_time=CASE WHEN excluded.last_message_time!='' THEN excluded.last_message_time ELSE channels.last_message_time END,"
+            "last_active=CASE WHEN excluded.last_active>0 THEN excluded.last_active ELSE channels.last_active END");
         if (!stmt.isPrepared()) {
             qWarning("ChannelDb::update_contact_channel prepare failed for %s", row.chanid.c_str());
             return false;
@@ -434,8 +438,10 @@ public:
 
     bool mark_read(const char* chanid, int64_t lastReadRowid) override {
         auto _ = m_conn->get();
+        // 已读水位只进不退：旧实现直接覆盖，读到更小的 rowid 会把水位拉回去
         auto stmt = _->prepare(
-            "UPDATE channels SET last_read_rowid = ?1, unread_count = 0 WHERE chanid = ?2");
+            "UPDATE channels SET last_read_rowid = MAX(COALESCE(last_read_rowid, 0), ?1), "
+            "unread_count = 0 WHERE chanid = ?2");
         if (!stmt.isPrepared()) { return false; }
         if (!stmt.bind(1, lastReadRowid)) { return false; }
         if (!stmt.bind(2, chanid)) { return false; }
