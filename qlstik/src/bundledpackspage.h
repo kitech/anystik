@@ -59,6 +59,7 @@
 #endif
 
 #include <qstring.h>
+#include <qmap.h>   // m_urlToPackId（Qt3 QMap 无 value()，取值用 find()）
 #include <vector>
 
 class QFrame;
@@ -120,7 +121,7 @@ private:
                       int index);
     void rebuildDownloaded();
     void addPackRow(int index, const QString& id, const QString& title,
-                    bool installed);
+                    bool installed, const QVariantMap& meta);
     void updateTitles();
     int  findRow(const QString& url) const;          // -1 = 未找到
     void refreshButtons(const BundledSourceRow& row);
@@ -150,6 +151,10 @@ private:
     mutable int          m_dbgGivenPackCalls;  // givenPackIdForUrl 调用次数
     qint64               m_dbgPackSizeMsec;    // packDiskSize 累计耗时
     int                  m_dbgPackSizeCalls;   // packDiskSize 调用次数
+
+    // 「已下载源 url → packId」内存反查表：buildBody 开头一次性从局部 QSettings34
+    // 读入（用完即释放那个实例），之后 givenPackIdForUrl 只查内存，不再解析配置。
+    QMap<QString, QString> m_urlToPackId;
 };
 
 #endif // QLSTIK_BUNDLED_PACKS_PAGE_H

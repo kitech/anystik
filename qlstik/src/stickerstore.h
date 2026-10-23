@@ -43,7 +43,7 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class QNetworkRequest;
 class QUrl;
-class QSettings34;   // qlcomp 配置后端（常驻实例，避免每次重解析）
+class QSettings34;   // qlcomp 配置后端（Qt3 版高版本落盘规则；一律用完即释放）
 
 struct StickerPackBrief {
     QString id;
@@ -236,7 +236,6 @@ signals:
 
 private:
     StickerStore(QObject* parent = nullptr);
-    ~StickerStore();
 
     void dropLegacyChatTables();
 
@@ -250,6 +249,7 @@ private:
         QString name;
         bool cancelled = false;
         bool installing = false;   // 安装阶段（工作线程），期间不可取消
+        QSettings34* settings = nullptr;   // 下载期间临时配置实例（结束即释放）
     };
 
     // install 工作线程的返回结果；GUI 线程收尾时据此写元数据并发信号
@@ -275,6 +275,7 @@ private:
     InstallResult runInstallWork(DownloadTask* task);
     void finalizeInstall(DownloadTask* task, const InstallResult& r);
     void closeOut(DownloadTask* task);
+    void destroyTask(DownloadTask* task);   // 统一收口：closeOut + 释放 settings + delete
     // eif 直链安装（工作线程；文件已重命名为 zipPath，仅头部魔数已判别）
     InstallResult runInstallEif(DownloadTask* task, const QString& eifPath,
                                 const QByteArray& md5);
@@ -295,16 +296,14 @@ private:
     bool m_migrating = false;
     StorageRoot m_pendingStorageRoot = StorageRoot::AppPrivate;
 
-    // 下载进度提示（dlProgress/<urlHex>）：常驻 QSettings34 读写。
-    // 高频路径（网络进度回调）——绝不能用临时实例（每次构造=每次重解析）。
-    QVariantMap dlHint(const QString& url) const;
-    void setDlHint(const QString& url, const QVariantMap& hint);
-
+    // 下载进度提示（dlProgress/<urlHex>）。传入下载期间临时持有的配置实例
+    // （每个 DownloadTask 一个，下载结束释放）；不在内部构造 QSettings34。
+    QVariantMap dlHint(QSettings34* s, const QString& url) const;
+    void setDlHint(QSettings34* s, const QString& url, const QVariantMap& hint);
     static StickerStore* s_instance;
     bool m_initialized = false;
     QNetworkAccessManager* m_nam = nullptr;
     QHash<QString, DownloadTask*> m_tasks;
-    QSettings34* m_settings = nullptr;   // 常驻配置（org=fedlet/app=anystik）
 };
 
 #endif // STICKER_STORE_H

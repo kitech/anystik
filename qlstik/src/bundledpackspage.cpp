@@ -47,6 +47,18 @@ static qint64 dbgNowMsec()
 #endif
 }
 
+// QMap 迭代器取值名跨版本不同（Qt3=it.data()，Qt6=it.value()；Qt5 两者皆有）
+// —— pagemanager.cpp:115 同款分流。
+template <typename It>
+static typename It::value_type bpItValue(It it)
+{
+#ifdef QT3_BUILD
+    return it.data();
+#else
+    return it.value();
+#endif
+}
+
 // 折行宽度：窗口 420 - 页面边距 16 - 卡片内边距 20 ≈ 384，取 380 保守值
 const int kWrapWidth     = 380;
 // 忙碌动画节拍/步进（头注释 6：Qt3 无 indeterminate 且 LimeStyle 只在
@@ -191,7 +203,7 @@ BundledPacksPage::~BundledPacksPage() {}
 
 void BundledPacksPage::buildBody()
 {
-    const qint64 tBegin = qNowMsecs();
+    const qint64 tBegin = dbgNowMsec();
     QBoxLayout* root = qNewBoxLayout(this, QBoxLayout::TopToBottom, 0, 0);
     root->setSpacing(0);
     qSetMargins(root, 0, 0, 0, 0);
@@ -270,7 +282,22 @@ void BundledPacksPage::buildBody()
     connect(store, SIGNAL(dataChanged()), this, SLOT(onStoreDataChanged()));
 
     // ── B 区源行（仅 enabled；anysk :144-151）──
-    qint64 tSrc = qNowMsecs();
+    // 一次性从局部 QSettings34 读入「已下载 id 列表 + 各 id 的 url」，建内存反查表；
+    // 该实例为**局部**，作用域结束即析构（用完即释放）。消除原先 59 个源行各构造
+    // 一次 QSettings34 全量解析 anystik.conf 的卡顿主因。
+    m_urlToPackId.clear();
+    {
+        QSettings34 s;
+        const QStringList ids = s.valueStringList("downloadedPacks");
+        for (int i = 0; i < (int)ids.size(); ++i) {
+            const QString u =
+                qVariantMapValue(s.value("downloadedPackMeta/" + ids[i]).toMap(),
+                                 QString::fromUtf8("url")).toString();
+            if (!u.isEmpty())
+                m_urlToPackId.insert(u, ids[i]);
+        }
+    }
+    qint64 tSrc = dbgNowMsec();
     int srcIndex = 0;
     for (unsigned i = 0; i < kBuiltinSourceCount; ++i) {
         if (!kBuiltinSources[i].enabled)
@@ -284,30 +311,30 @@ void BundledPacksPage::buildBody()
                      QString::fromUtf8(kBuiltinSources[i].updated),
                      srcIndex);
     }
-    qDebug() << "[BPPage-timing] B区源行" << (qNowMsecs() - tSrc) << "ms;"
+    qDebug() << "[BPPage-timing] B区源行" << (dbgNowMsec() - tSrc) << "ms;"
              << "givenPackId:" << m_dbgGivenPackMsec << "ms /"
              << m_dbgGivenPackCalls << "次";
 
     // ── B2：清理非内置源的残留下载（.part + dlProgress 死条目）（anysk :153-158）──
-    qint64 tCln = qNowMsecs();
+    qint64 tCln = dbgNowMsec();
     QStringList sourceUrls;
     for (unsigned i = 0; i < kBuiltinSourceCount; ++i)
         if (kBuiltinSources[i].enabled)
             sourceUrls << QString::fromUtf8(kBuiltinSources[i].url);
     store->cleanupAbandonedDownloads(sourceUrls);
-    qDebug() << "[BPPage-timing] 清理残留" << (qNowMsecs() - tCln) << "ms";
+    qDebug() << "[BPPage-timing] 清理残留" << (dbgNowMsec() - tCln) << "ms";
 
-    qint64 tA = qNowMsecs();
+    qint64 tA = dbgNowMsec();
     rebuildDownloaded();
-    qDebug() << "[BPPage-timing] A区rebuild" << (qNowMsecs() - tA) << "ms;"
+    qDebug() << "[BPPage-timing] A区rebuild" << (dbgNowMsec() - tA) << "ms;"
              << "packDiskSize:" << m_dbgPackSizeMsec << "ms /"
              << m_dbgPackSizeCalls << "次";
 
-    qint64 tT = qNowMsecs();
+    qint64 tT = dbgNowMsec();
     updateTitles();
     relayoutScroll();
-    qDebug() << "[BPPage-timing] titles+relayout" << (qNowMsecs() - tT) << "ms";
-    qDebug() << "[BPPage-timing] buildBody 总计" << (qNowMsecs() - tBegin) << "ms";
+    qDebug() << "[BPPage-timing] titles+relayout" << (dbgNowMsec() - tT) << "ms";
+    qDebug() << "[BPPage-timing] buildBody 总计" << (dbgNowMsec() - tBegin) << "ms";
 }
 
 void BundledPacksPage::onStart()
@@ -553,7 +580,17 @@ void BundledPacksPage::rebuildDownloaded()
     m_downloadedCount = 0;   // 子代数不靠 children() 数（头注释 10），自记
 
     StickerStore* store = StickerStore::instance();
-    const QStringList ids = QSettings34().valueStringList("downloadedPacks");
+    // 一次性从局部 QSettings34 读入 ids + 各包 meta（用完即释放），避免 addPackRow
+    // 内逐包构造实例全量解析。
+    QStringList ids;
+    QMap<QString, QVariantMap> metas;
+    {
+        QSettings34 s;
+        ids = s.valueStringList("downloadedPacks");
+        for (int i = 0; i < (int)ids.size(); ++i)
+            metas.insert(ids[i],
+                s.value("downloadedPackMeta/" + ids[i]).toMap());
+    }
     if (ids.isEmpty()) {
         QLabel* hint = makeInfoLabel(m_downloadedBox);
         setTextWrapped(hint, QString::fromUtf8("尚未下载任何表情包"));
@@ -574,7 +611,12 @@ void BundledPacksPage::rebuildDownloaded()
         ++idx;
         for (int j = 0; j < (int)all.size(); ++j) {
             if (all[j].id == id) {
-                addPackRow(idx, id, all[j].title, installed.contains(id));
+                // Qt3 QMap 无 value()，用 find()
+                const QMap<QString, QVariantMap>::const_iterator mit =
+                    metas.find(id);
+                const QVariantMap meta =
+                    (mit != metas.end()) ? bpItValue(mit) : QVariantMap();
+                addPackRow(idx, id, all[j].title, installed.contains(id), meta);
                 ++m_downloadedCount;
                 break;
             }
@@ -616,7 +658,8 @@ void BundledPacksPage::relayoutScroll()
 }
 
 void BundledPacksPage::addPackRow(int index, const QString& id,
-                                  const QString& title, bool installed)
+                                  const QString& title, bool installed,
+                                  const QVariantMap& meta)
 {
     QFrame* card = makeCard(m_downloadedBox);
     QBoxLayout* cl = qNewBoxLayout(card, QBoxLayout::TopToBottom, 0, 0);
@@ -636,11 +679,11 @@ void BundledPacksPage::addPackRow(int index, const QString& id,
     cl->addWidget(top, 0);
 
     // 信息行：大小 · 版本 · md5（anysk :388-399）
+    // meta 由 rebuildDownloaded 一次性读入传入（原先每包一次 packMeta → 全量解析）。
     StickerStore* store = StickerStore::instance();
-    const QVariantMap meta = store->packMeta(id);
-    const qint64 tPs = qNowMsecs();
+    const qint64 tPs = dbgNowMsec();
     QString info = formatSize(store->packDiskSize(id));
-    m_dbgPackSizeMsec += (qNowMsecs() - tPs);
+    m_dbgPackSizeMsec += (dbgNowMsec() - tPs);
     ++m_dbgPackSizeCalls;
     const QString version = qVariantMapValue(meta, QString::fromUtf8("version")).toString();
     if (!version.isEmpty() && version != QString::fromUtf8("未知"))
@@ -770,9 +813,11 @@ void BundledPacksPage::onProbeDone(const QString& url, qint64 /*size*/,
         const QVector<StickerPackBrief> ip = StickerStore::instance()->packs(1);
         for (int k = 0; k < (int)ip.size(); ++k)
             installed.insert(ip[k].id);
-        const QStringList ids = QSettings34().valueStringList("downloadedPacks");
+        QSettings34 s;   // 用完即释放（低频：probe 回调，仅一次）
+        const QStringList ids = s.valueStringList("downloadedPacks");
         for (int k = 0; k < (int)ids.size(); ++k) {
-            const QVariantMap meta = StickerStore::instance()->packMeta(ids[k]);
+            const QVariantMap meta = s.value(
+                "downloadedPackMeta/" + ids[k]).toMap();
             if (installed.contains(ids[k])
                     && qVariantMapValue(meta, QString::fromUtf8("url")).toString() == url
                     && qVariantMapValue(meta, QString::fromUtf8("versionRaw")).toString() == versionRaw) {
@@ -915,17 +960,13 @@ void BundledPacksPage::showToast(const QString& text)
 
 QString BundledPacksPage::givenPackIdForUrl(const QString& url) const
 {
-    const qint64 t0 = qNowMsecs();
+    const qint64 t0 = dbgNowMsec();
     ++m_dbgGivenPackCalls;
-    const QStringList ids = QSettings34().valueStringList("downloadedPacks");
-    for (int i = 0; i < (int)ids.size(); ++i) {
-        const QVariantMap meta = StickerStore::instance()->packMeta(ids[i]);
-        if (qVariantMapValue(meta, QString::fromUtf8("url")).toString() == url) {
-            m_dbgGivenPackMsec += (qNowMsecs() - t0);
-            return ids[i];
-        }
-    }
-    m_dbgGivenPackMsec += (qNowMsecs() - t0);
+    // 查 buildBody 建好的内存表（Qt3 QMap 无 value()，用 find() 迭代器比对）
+    const QMap<QString, QString>::const_iterator it = m_urlToPackId.find(url);
+    m_dbgGivenPackMsec += (dbgNowMsec() - t0);
+    if (it != m_urlToPackId.end())
+        return bpItValue(it);
     return QString();
 }
 

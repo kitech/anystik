@@ -181,7 +181,9 @@
 #include "qvariant_shim.h"
 // 配置读写统一走 qlcomp 的 QSettings34（Qt3 侧独立实现 Qt6 落盘规则，与
 // anystik 共用 ~/.config/fedlet/anystik.conf；实例级一次 parse、无自动 sync）。
-// 常驻实例 m_settings 见构造函数；⚠ 放在**共用区**（两版本分支 #endif 之后）。
+// ⚠ 一律「用完即释放」：按函数作用域构造局部实例，不设常驻成员。下载期间
+// 每个 DownloadTask 临时持有实例（见 startDownload/destroyTask），结束即释放。
+// ⚠ 放在**共用区**（两版本分支 #endif 之后）。
 #include "qsettings34.h"
 // Qt3 无 QImage 的 Format 概念（构造参数是 int depth）、无 scaled()、
 // 无 Format_RGBA8888/Format_ARGB32_Premultiplied、Qt3 32 位图内存是 BGRA
@@ -216,15 +218,6 @@ StickerStore* StickerStore::instance()
 StickerStore::StickerStore(QObject* parent)
     : QObject(parent)
 {
-    // 常驻配置实例（默认 org=fedlet / app=anystik，与 anystik 同一 conf）。
-    // 单例生命周期内只 parse 一次；高频读写（dlHint 等）全程复用。
-    m_settings = new QSettings34();
-}
-
-StickerStore::~StickerStore()
-{
-    delete m_settings;
-    m_settings = nullptr;
 }
 
 bool StickerStore::ensureInit()
@@ -270,7 +263,7 @@ QString StickerStore::stickerBaseDir() const
 {
     if (m_stickerBaseDir.isEmpty()) {
         // 持久化优先：若已显式切过存储根，则沿用；否则默认 app 私有目录。
-        const QString saved = m_settings->valueStr(
+        const QString saved = QSettings34().valueStr(
             QStringLiteral("storageRoot"));
         if (!saved.isEmpty()
                 && QDir(saved).exists()
@@ -439,8 +432,9 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
     }
     if (fromRoot == toRoot) {
         // 目标即当前根：直接持久化该根并返回成功
-        m_settings->setValue(QStringLiteral("storageRoot"), toRoot);
-        m_settings->sync();
+        QSettings34 s;   // 用完即释放
+        s.setValue(QStringLiteral("storageRoot"), toRoot);
+        s.sync();
         return true;
     }
     if (!qMkpath(toRoot)) {
@@ -625,8 +619,9 @@ bool StickerStore::switchStorageRoot(StorageRoot target, QString* errorOut)
         }
 
         // 持久化新 base
-        m_settings->setValue(QStringLiteral("storageRoot"), toRoot);
-        m_settings->sync();
+        QSettings34 s;   // 用完即释放
+        s.setValue(QStringLiteral("storageRoot"), toRoot);
+        s.sync();
         m_stickerBaseDir = toRoot;
         m_migrating = false;
 
@@ -3347,16 +3342,17 @@ static QString urlDisplayName(const QString& url)
     return base;
 }
 
-QVariantMap StickerStore::dlHint(const QString& url) const
+QVariantMap StickerStore::dlHint(QSettings34* s, const QString& url) const
 {
-    return m_settings->value(
+    return s->value(
         QStringLiteral("dlProgress/") + urlHex(url)).toMap();
 }
 
-void StickerStore::setDlHint(const QString& url, const QVariantMap& hint)
+void StickerStore::setDlHint(QSettings34* s, const QString& url,
+                             const QVariantMap& hint)
 {
-    m_settings->setValue(QStringLiteral("dlProgress/") + urlHex(url), hint);
-    m_settings->sync();   // QSettings34 无自动 sync；高频写后立即落盘
+    s->setValue(QStringLiteral("dlProgress/") + urlHex(url), hint);
+    s->sync();   // QSettings34 无自动 sync；高频写后立即落盘
 }
 
 static QByteArray fileMd5(const QString& path)
@@ -3413,10 +3409,11 @@ void StickerStore::probeRemote(const QString& url)
     if (matchRemoteRepo(url, nullptr, nullptr, &branch) == RemoteKind::ArchiveZip) {
         // 整包已固定到具体 commit；版本即该 sha，无需请求网络。
         const QString ver = QStringLiteral("commit ") + branch.left(7);
-        auto hint = dlHint(url);
+        QSettings34 s;   // 用完即释放（低频探测路径）
+        auto hint = dlHint(&s, url);
         hint.insert("version", ver);
         hint.insert("versionRaw", branch);
-        setDlHint(url, hint);
+        setDlHint(&s, url, hint);
         emit probeDone(url, -1, ver, branch, true, QString());
         return;
     }
@@ -3445,12 +3442,13 @@ void StickerStore::probeRemote(const QString& url)
         } else {
             err = reply->errorString();
         }
-        auto hint = dlHint(url);
+        QSettings34 s;   // 用完即释放（HEAD 回调，每源一次）
+        auto hint = dlHint(&s, url);
         hint.insert("version", ver);
         hint.insert("versionRaw", raw);
         if (size >= 0)
             hint.insert("realSize", size);        // HEAD 带 Content-Length 的精确实测
-        setDlHint(url, hint);
+        setDlHint(&s, url, hint);
         reply->deleteLater();
         emit probeDone(url, size, ver, raw, ok, err);
     });
@@ -3458,25 +3456,28 @@ void StickerStore::probeRemote(const QString& url)
 
 qint64 StickerStore::cachedRealSize(const QString& url) const
 {
-    return qVariantMapValue(dlHint(url), QStringLiteral("realSize"), -1).toLongLong();
+    QSettings34 s;   // 用完即释放
+    return qVariantMapValue(dlHint(&s, url), QStringLiteral("realSize"), -1).toLongLong();
 }
 
 qint64 StickerStore::cachedApproxSize(const QString& url) const
 {
-    return qVariantMapValue(dlHint(url), QStringLiteral("approxSize"), -1).toLongLong();
+    QSettings34 s;   // 用完即释放
+    return qVariantMapValue(dlHint(&s, url), QStringLiteral("approxSize"), -1).toLongLong();
 }
 
 void StickerStore::seedBuiltinApproxSizes()
 {
+    QSettings34 s;   // 整个种子循环复用一次；函数结束即释放
     for (unsigned i = 0; i < kBuiltinSourceCount; ++i) {
         if (!kBuiltinSources[i].enabled)
             continue;                                  // 预留源不上种子表
         const QString url = QString::fromUtf8(kBuiltinSources[i].url);
-        auto hint = dlHint(url);
+        auto hint = dlHint(&s, url);
         if (qVariantMapValue(hint, QStringLiteral("approxSize")).toLongLong() > 0)
             continue;                                  // 有效正值不动；-1/缺失则升级填入
         hint.insert(QStringLiteral("approxSize"), kBuiltinSources[i].approxSize);
-        setDlHint(url, hint);
+        setDlHint(&s, url, hint);
     }
 }
 
@@ -3523,8 +3524,9 @@ void StickerStore::startDownload(const QString& url, bool noRange)
     task->url = url;
     task->partPath = partPath;
     task->offset = offset;
+    task->settings = new QSettings34();   // 下载期间临时持有；destroyTask 释放
 
-    const QVariantMap hint = dlHint(url);
+    const QVariantMap hint = dlHint(task->settings, url);
     task->total = qVariantMapValue(hint, QStringLiteral("total"), -1).toLongLong();
     if (task->total < 0) {
         task->total = -1;
@@ -3549,7 +3551,7 @@ void StickerStore::startDownload(const QString& url, bool noRange)
         ? qOpenWriteOnlyAppend(*file)
         : qOpenWriteOnly(*file);
     if (!opened) {
-        delete task;
+        destroyTask(task);
         delete file;
         emit downloadFinished(url, false, "无法写入下载目录");
         return;
@@ -3595,10 +3597,10 @@ void StickerStore::startDownload(const QString& url, bool noRange)
             }
         }
         task->total = overallTotal;
-        auto hint = dlHint(task->url);
+        auto hint = dlHint(task->settings, task->url);
         hint.insert("total", overallTotal);
         hint.insert("name", task->name);
-        setDlHint(task->url, hint);
+        setDlHint(task->settings, task->url, hint);
         emit progressChanged(task->url, overallDone, overallTotal);
     });
 
@@ -3613,6 +3615,16 @@ void StickerStore::closeOut(DownloadTask* task)
         delete task->out;
         task->out = nullptr;
     }
+}
+
+void StickerStore::destroyTask(DownloadTask* task)
+{
+    closeOut(task);
+    if (task->settings) {
+        delete task->settings;
+        task->settings = nullptr;
+    }
+    delete task;
 }
 
 void StickerStore::handleDownloadFinished(DownloadTask* task)
@@ -3632,7 +3644,7 @@ void StickerStore::handleDownloadFinished(DownloadTask* task)
         task->reply = nullptr;
         closeOut(task);
         m_tasks.remove(url);
-        delete task;
+        destroyTask(task);
         emit downloadFinished(url, false, "已取消（进度已保留）");
         return;
     }
@@ -3644,7 +3656,7 @@ void StickerStore::handleDownloadFinished(DownloadTask* task)
         m_tasks.remove(url);
         const bool notFound = (err == QNetworkReply::ContentNotFoundError
                                || status == 404);
-        delete task;
+        destroyTask(task);
         emit downloadFinished(url, false,
             notFound ? "地址不存在(404)" : reply->errorString());
         return;
@@ -3665,7 +3677,7 @@ void StickerStore::handleDownloadFinished(DownloadTask* task)
             closeOut(task);
             QFile::remove(task->partPath);
             m_tasks.remove(url);
-            delete task;
+            destroyTask(task);
             startDownload(url, /*noRange=*/false);
             return;
         }
@@ -3684,7 +3696,7 @@ void StickerStore::handleDownloadFinished(DownloadTask* task)
             closeOut(task);
             QFile::remove(task->partPath);
             m_tasks.remove(url);
-            delete task;
+            destroyTask(task);
             startDownload(url, /*noRange=*/true);
             return;
         }
@@ -3705,7 +3717,7 @@ void StickerStore::handleDownloadFinished(DownloadTask* task)
         closeOut(task);
         QFile::remove(task->partPath);
         m_tasks.remove(url);
-        delete task;
+        destroyTask(task);
         startDownload(url, /*noRange=*/false);
         return;
     }
@@ -3714,7 +3726,7 @@ void StickerStore::handleDownloadFinished(DownloadTask* task)
     task->reply = nullptr;
     closeOut(task);
     m_tasks.remove(url);
-    delete task;
+    destroyTask(task);
     emit downloadFinished(url, false, QStringLiteral("HTTP %1").arg(status));
 }
 
@@ -3725,7 +3737,7 @@ void StickerStore::finishIfComplete(DownloadTask* task)
     const bool complete = (task->total < 0) ? true : (fsize >= task->total);
     if (!complete) {
         m_tasks.remove(url);
-        delete task;
+        destroyTask(task);
         emit downloadFinished(url, false,
             QStringLiteral("下载未完整(%1/%2)，可继续")
                 .arg(fsize).arg(task->total));
@@ -3743,7 +3755,7 @@ void StickerStore::runInstall(DownloadTask* task)
         // 迁移结束后 UI 显示「继续」，用户可点继续重新安装。
         const QString url = task->url;
         m_tasks.remove(url);
-        delete task;
+        destroyTask(task);
         emit downloadFinished(url, false,
             QStringLiteral("正在迁移存储位置，下载已完成，请稍后点击「继续」"));
         return;
@@ -3929,7 +3941,7 @@ StickerStore::InstallResult StickerStore::runInstallWork(DownloadTask* task)
     r.md5Hex = QString::fromLatin1(qbaToHex(md5));
 
     // A2 内容变化检测：同源同包且 md5 变化 → 附加提示
-    // （工作线程；用局部实例，避免与 GUI 线程的常驻 m_settings 并发）
+    // （工作线程；用局部实例，避免与 GUI 线程并发）
     const QVariantMap oldMeta = QSettings34().value(
         QStringLiteral("downloadedPackMeta/") + packId).toMap();
     const QString oldMd5 = qVariantMapValue(oldMeta, QStringLiteral("md5")).toString();
@@ -4003,7 +4015,7 @@ StickerStore::InstallResult StickerStore::runInstallEif(
     r.total = QFileInfo(eifPath).size();
     r.md5Hex = QString::fromLatin1(qbaToHex(md5));
 
-    // 工作线程读取：用局部实例（避免与常驻 m_settings 并发）
+    // 工作线程读取：用局部实例（避免与 GUI 线程并发）
     const QVariantMap oldMeta = QSettings34().value(
         QStringLiteral("downloadedPackMeta/") + packId).toMap();
     const QString oldMd5 = qVariantMapValue(oldMeta, QStringLiteral("md5")).toString();
@@ -4076,7 +4088,7 @@ StickerStore::InstallResult StickerStore::runInstallTgs(
     r.total = QFileInfo(tgsPath).size();
     r.md5Hex = QString::fromLatin1(qbaToHex(md5));
 
-    // 工作线程读取：用局部实例（避免与常驻 m_settings 并发）
+    // 工作线程读取：用局部实例（避免与 GUI 线程并发）
     const QVariantMap oldMeta = QSettings34().value(
         QStringLiteral("downloadedPackMeta/") + packId).toMap();
     const QString oldMd5 = qVariantMapValue(oldMeta, QStringLiteral("md5")).toString();
@@ -4093,9 +4105,10 @@ StickerStore::InstallResult StickerStore::runInstallTgs(
 void StickerStore::finalizeInstall(DownloadTask* task, const InstallResult& r)
 {
     const QString url = task->url;
+    QSettings34* s = task->settings;   // 本 task 的临时实例；destroyTask 释放
     if (r.ok) {
-        const QVariantMap hint = dlHint(url);
-        QVariantMap meta = m_settings->value(
+        const QVariantMap hint = dlHint(s, url);
+        QVariantMap meta = s->value(
             QStringLiteral("downloadedPackMeta/") + r.packId).toMap();
         meta.insert("url", url);
         meta.insert("name", r.message);
@@ -4105,20 +4118,20 @@ void StickerStore::finalizeInstall(DownloadTask* task, const InstallResult& r)
         meta.insert("md5", r.md5Hex);
         meta.insert("dir", r.dir);
         meta.insert("dl_time", qDateTimeEpochSecs());
-        m_settings->setValue(QStringLiteral("downloadedPackMeta/") + r.packId, meta);
+        s->setValue(QStringLiteral("downloadedPackMeta/") + r.packId, meta);
 
-        QStringList list = m_settings->valueStringList(
+        QStringList list = s->valueStringList(
             QStringLiteral("downloadedPacks"));
         if (!list.contains(r.packId)) {
             list.append(r.packId);
-            m_settings->setValue(QStringLiteral("downloadedPacks"), list);
+            s->setValue(QStringLiteral("downloadedPacks"), list);
         }
-        m_settings->remove(QStringLiteral("dlProgress/") + urlHex(url));
-        m_settings->sync();
+        s->remove(QStringLiteral("dlProgress/") + urlHex(url));
+        s->sync();
     }
 
     m_tasks.remove(url);
-    delete task;
+    destroyTask(task);
     emit dataChanged();
     if (r.ok) {
         emit downloadFinished(url, true, r.message + r.note);
@@ -4156,15 +4169,16 @@ bool StickerStore::uninstallPack(const QString& packId, bool removeFiles)
         if (removeFiles && !dir.isEmpty()) {
             qDirRemoveRecursively(QDir(dir));
         }
-        QStringList list = m_settings->valueStringList(
+        QSettings34 s;   // 用完即释放
+        QStringList list = s.valueStringList(
             QStringLiteral("downloadedPacks"));
         // 卸载（保留文件）也从已下载列表移除；元数据仅彻底删除时清除
         qStringListRemoveAll(list, packId);
-        m_settings->setValue(QStringLiteral("downloadedPacks"), list);
+        s.setValue(QStringLiteral("downloadedPacks"), list);
         if (removeFiles) {
-            m_settings->remove(QStringLiteral("downloadedPackMeta/") + packId);
+            s.remove(QStringLiteral("downloadedPackMeta/") + packId);
         }
-        m_settings->sync();
+        s.sync();
         emit dataChanged();
     }
     return ok;
@@ -4229,7 +4243,7 @@ qint64 StickerStore::packDiskSize(const QString& packId)
 
 QVariantMap StickerStore::packMeta(const QString& packId) const
 {
-    return m_settings->value(
+    return QSettings34().value(
         QStringLiteral("downloadedPackMeta/") + packId).toMap();
 }
 
