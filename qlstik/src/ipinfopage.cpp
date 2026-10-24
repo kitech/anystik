@@ -6,18 +6,10 @@
 #include "qstring_shim.h"
 #include "toastwidget.h"
 #ifdef QT3_BUILD
-#include "qjson_shim.h"
-#endif
-
-#ifdef QT3_BUILD
 #include "qglobaltype_shim.h"
 #include <qscrollview.h>
 #else
 #include <QScrollArea>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonValue>
 #endif
 
 #include <qlabel.h>
@@ -37,10 +29,13 @@
 #include <QNetworkRequest>
 #else
 #include "qnam_shim.h"
+#include "qconnect_slots.h"
 #endif
 
 #include <vector>
 #include <qobject.h>
+#include <stdlib.h>
+#include "cJSON.h"
 #ifdef QT3_BUILD
 #include <qcstring.h>
 #else
@@ -219,34 +214,37 @@ void IPInfoPage::refreshLocal()
     QStringList lines;
     netut_ip_list_t* list = netut_get_all_ip_addresses();
     if (list) {
-        std::vector<char> buf(1 << 18);
-        if (netut_format_ip_list_json(list, buf.data(), buf.size()) == 0) {
-#ifdef QT3_BUILD
-            QByteArray b;
-            b.assign(buf.data(), strlen(buf.data()));
-            QJsonDocument doc = QJsonDocument::fromJson(b);
-#else
-            QByteArray b(buf.data());
-            QJsonDocument doc = QJsonDocument::fromJson(b);
-#endif
-            QJsonObject obj = doc.object();
-            if (obj.contains(QStringLiteral("addresses"))) {
-                QJsonValue val = obj.value(QStringLiteral("addresses"));
-                QJsonArray arr = val.toArray();
-                for (int i = 0; i < arr.size(); ++i) {
-                    QJsonValue v = arr.at(i);
-                    QJsonObject o = v.toObject();
-                    const QString iface = o.value(QStringLiteral("interface")).toString();
-                    const QString addr  = o.value(QStringLiteral("address")).toString();
-                    const QString fam   = o.value(QStringLiteral("family")).toString();
-                    const int plen      = o.value(QStringLiteral("prefix_length")).toInt();
-                    QString line = iface + QStringLiteral("  ") + addr;
-                    if (plen > 0)
-                        line += QStringLiteral("/") + QString::number(plen);
-                    line += QStringLiteral(" ") + fam;
-                    lines.append(line);
+        // 纯 C 段：malloc 缓冲 + cJSON 直解析，不过任何 Qt/STL 容器
+        char* const buf = (char*)malloc(256 * 1024);
+        if (buf) {
+            if (netut_format_ip_list_json(list, buf, 256 * 1024) == 0) {
+                cJSON* const root = cJSON_Parse(buf);
+                if (root) {
+                    cJSON* const arr = cJSON_GetObjectItem(root, "addresses");
+                    if (arr && cJSON_IsArray(arr)) {
+                        for (cJSON* it = arr->child; it; it = it->next) {
+                            const cJSON* jiface = cJSON_GetObjectItem(it, "interface");
+                            const cJSON* jaddr  = cJSON_GetObjectItem(it, "address");
+                            const cJSON* jfam   = cJSON_GetObjectItem(it, "family");
+                            const cJSON* jplen  = cJSON_GetObjectItem(it, "prefix_length");
+                            if (jiface && jiface->valuestring && jaddr
+                                && jaddr->valuestring && jfam && jfam->valuestring) {
+                                QString line = QString::fromUtf8(jiface->valuestring)
+                                    + QStringLiteral("  ")
+                                    + QString::fromUtf8(jaddr->valuestring);
+                                if (jplen && jplen->valueint > 0)
+                                    line += QStringLiteral("/")
+                                        + QString::number(jplen->valueint);
+                                line += QStringLiteral(" ")
+                                    + QString::fromUtf8(jfam->valuestring);
+                                lines.append(line);
+                            }
+                        }
+                    }
+                    cJSON_Delete(root);
                 }
             }
+            free(buf);
         }
         netut_free_ip_list(list);
     }
@@ -256,6 +254,9 @@ void IPInfoPage::refreshLocal()
 
 void IPInfoPage::fetchExits()
 {
+#ifdef QT3_BUILD
+    using ::connect;
+#endif
     m_done = 0;
     for (int i = 0; i < kExitCount; ++i)
         m_exitLines[i] = QString();
@@ -282,18 +283,15 @@ void IPInfoPage::fetchExits()
 #endif
         QNetworkReply* reply = m_nam->get(req);
         m_replies.push_back(reply);
-        reply->setProperty("exitIndex", i);
-        connect(reply, SIGNAL(finished()), this, SLOT(onExitReplyFinished()));
+        // Qt3 无动态属性、moc 不认垫片信号；用函数指针 + lambda 捕住
+        // (reply, i)，范式同 stickerstore.cpp:3422
+        connect(reply, &QNetworkReply::finished, this,
+            [this, reply, i] { onExitReplyFinished(reply, i); });
     }
 }
 
-void IPInfoPage::onExitReplyFinished()
+void IPInfoPage::onExitReplyFinished(QNetworkReply* reply, int i)
 {
-    QObject* s = const_cast<QObject*>(sender());
-    QNetworkReply* reply = dynamic_cast<QNetworkReply*>(s);
-    if (!reply)
-        return;
-    const int i = reply->property("exitIndex").toInt();
     const bool ok = (reply->error() == QNetworkReply::NoError);
     QByteArray body;
     if (ok)

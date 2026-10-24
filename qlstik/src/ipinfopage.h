@@ -30,12 +30,12 @@ protected:
 
 private slots:
     void doRefresh();
-    void onExitReplyFinished();
     void onBackClicked();
 
 private:
     void refreshLocal();
     void fetchExits();
+    void onExitReplyFinished(QNetworkReply* reply, int index);
     void updateExitText();
 
     QLabel* m_title;
