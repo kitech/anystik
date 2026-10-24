@@ -7,7 +7,6 @@
 #include "toastwidget.h"
 #ifdef QT3_BUILD
 #include "qglobaltype_shim.h"
-#include <qscrollview.h>
 #else
 #include <QScrollArea>
 #endif
@@ -68,11 +67,7 @@ IPInfoPage::IPInfoPage(QWidget* parent)
     : Page(parent)
     , m_title(0), m_localTitle(0), m_exitTitle(0)
     , m_localEdit(0), m_exitEdit(0)
-#ifdef QT3_BUILD
     , m_localScroll(0), m_exitScroll(0)
-#else
-    , m_localScroll(0), m_exitScroll(0)
-#endif
     , m_refreshBtn(0), m_statusLabel(0)
     , m_nam(0), m_done(0)
 {
@@ -132,18 +127,17 @@ void IPInfoPage::onCreate(const QVariantMap&, const QVariantMap&)
     m_localEdit->setLineWrapMode(QTextEdit::WidgetWidth);
 #endif
 #ifdef QT3_BUILD
-    m_localScroll = new QScrollView(this);
-    m_localScroll->setResizePolicy(QScrollView::Manual);
-    m_localScroll->setHScrollBarMode(QScrollView::AlwaysOff);
-    m_localScroll->addChild(m_localEdit);
+    // QTextEdit 自带滚动，直接进布局（同 phoneqpage.cpp:112 范式）
+    m_localEdit->setFixedHeight(256);
+    root->addWidget(m_localEdit, 0);
 #else
     m_localScroll = new QScrollArea(this);
     m_localScroll->setWidgetResizable(true);
     m_localScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_localScroll->setWidget(m_localEdit);
-#endif
     m_localScroll->setMinimumHeight(160);
     root->addWidget(m_localScroll, 0);
+#endif
 
     root->addSpacing(12);
 
@@ -167,18 +161,16 @@ void IPInfoPage::onCreate(const QVariantMap&, const QVariantMap&)
     m_exitEdit->setLineWrapMode(QTextEdit::WidgetWidth);
 #endif
 #ifdef QT3_BUILD
-    m_exitScroll = new QScrollView(this);
-    m_exitScroll->setResizePolicy(QScrollView::Manual);
-    m_exitScroll->setHScrollBarMode(QScrollView::AlwaysOff);
-    m_exitScroll->addChild(m_exitEdit);
+    m_exitEdit->setFixedHeight(280);
+    root->addWidget(m_exitEdit, 0);
 #else
     m_exitScroll = new QScrollArea(this);
     m_exitScroll->setWidgetResizable(true);
     m_exitScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_exitScroll->setWidget(m_exitEdit);
-#endif
     m_exitScroll->setMinimumHeight(180);
     root->addWidget(m_exitScroll, 0);
+#endif
 
     root->addSpacing(8);
 

@@ -13,11 +13,7 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class QTextEdit;
 
-#ifdef QT3_BUILD
-class QScrollView;
-#else
 class QScrollArea;
-#endif
 
 class IPInfoPage : public Page
 {
@@ -43,13 +39,8 @@ private:
     QLabel* m_exitTitle;
     QTextEdit* m_localEdit;
     QTextEdit* m_exitEdit;
-#ifdef QT3_BUILD
-    QScrollView* m_localScroll;
-    QScrollView* m_exitScroll;
-#else
     QScrollArea* m_localScroll;
     QScrollArea* m_exitScroll;
-#endif
     QPushButton* m_refreshBtn;
     QLabel* m_statusLabel;
 
