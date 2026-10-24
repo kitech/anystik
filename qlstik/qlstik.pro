@@ -108,14 +108,18 @@ HEADERS += \
 # stickerlistpage.cpp 的菜单开页用 #if defined(QT3_BUILD)||QT_VERSION>=0x050000 同闸。
 isEmpty(QT_VERSION) {
     SOURCES += src/davsource.cpp src/syncprogressdialog.cpp src/stickerstore.cpp \
-        src/bundledpackspage.cpp src/confirmpopup.cpp
+        src/bundledpackspage.cpp src/confirmpopup.cpp \
+        src/phoneqpage.cpp src/ipinfopage.cpp
     HEADERS += src/davsource.h src/syncprogressdialog.h src/stickerstore.h \
-        src/bundledpackspage.h src/confirmpopup.h
+        src/bundledpackspage.h src/confirmpopup.h \
+        src/phoneqpage.h src/ipinfopage.h
 } else:!lessThan(QT_VERSION, 5.0.0) {
     SOURCES += src/davsource.cpp src/syncprogressdialog.cpp src/stickerstore.cpp \
-        src/bundledpackspage.cpp src/confirmpopup.cpp
+        src/bundledpackspage.cpp src/confirmpopup.cpp \
+        src/phoneqpage.cpp src/ipinfopage.cpp
     HEADERS += src/davsource.h src/syncprogressdialog.h src/stickerstore.h \
-        src/bundledpackspage.h src/confirmpopup.h
+        src/bundledpackspage.h src/confirmpopup.h \
+        src/phoneqpage.h src/ipinfopage.h
     # stickerstore.cpp 的 Qt4+ 分支直接 include 原件 qnaturalsort.h（Qt3 走
     # stikcommon/qnaturalsort_shim.h）；列表页 pack 标题排序也用它。故补原件
     # 的搜索路径并编译其 .cpp（anystik 侧同样编此文件，见 CMakeLists:121）。

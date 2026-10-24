@@ -20,6 +20,8 @@
 // Qt4 无 StickerStore）→ include 与注册同闸，同 stickerlistpage.cpp:28 写法
 #if defined(QT3_BUILD) || QT_VERSION >= 0x050000
 #include "bundledpackspage.h"
+#include "phoneqpage.h"
+#include "ipinfopage.h"
 #endif
 
 #include <qpixmap.h>
@@ -242,6 +244,12 @@ void MainWindow::buildCentralWidget()
     // 的 bundledpacks_scroll 持久化（进程重启后恢复）。
     pageMgr->registerPage(QString::fromUtf8("bundledpacks"),
                           []() -> Page* { return new BundledPacksPage(); },
+                          reg);
+    pageMgr->registerPage(QString::fromUtf8("phoneq"),
+                          []() -> Page* { return new PhoneQPage(); },
+                          reg);
+    pageMgr->registerPage(QString::fromUtf8("ipinfo"),
+                          []() -> Page* { return new IPInfoPage(); },
                           reg);
 #endif
     pageMgr->open(QString::fromUtf8("stickerList"));

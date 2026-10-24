@@ -1749,10 +1749,12 @@ void StickerListPage::showOptionsMenu(const QPoint& globalPos)
     insertSeparator(menu);
 
     insertActionItem(menu, QString::fromUtf8("号码归属地"), [this]() {
-        todoToast(this, "号码归属地");                  // anysk open("phoneq")
+        if (pageManager())
+            pageManager()->open(QString::fromUtf8("phoneq"));
     });
     insertActionItem(menu, QString::fromUtf8("IP 信息"), [this]() {
-        todoToast(this, "IP 信息");                     // anysk open("ipinfo")
+        if (pageManager())
+            pageManager()->open(QString::fromUtf8("ipinfo"));
     });
     insertActionItem(menu, QString::fromUtf8("App Log"), [this]() {
         todoToast(this, "App Log");                     // anysk open("logs")

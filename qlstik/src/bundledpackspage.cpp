@@ -841,12 +841,7 @@ void BundledPacksPage::onProgress(const QString& url, qint64 done, qint64 total)
     BundledSourceRow& row = m_rows[i];
 
     // ── 速度 EMA（anysk :517-529：≥200ms 采样一拍，0.6/0.4 平滑）──
-    //（Qt3 垫片 qNowMsecs / Qt4+ 原生 —— davbisync.cpp:381-383 同款分流）
-#ifdef QT3_BUILD
-    const qint64 now = qNowMsecs();
-#else
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-#endif
+    const qint64 now = dbgNowMsec();
     if (row.lastSpeedMsec > 0) {
         const qint64 dMs = now - row.lastSpeedMsec;
         const qint64 dB = done - row.lastSpeedBytes;
