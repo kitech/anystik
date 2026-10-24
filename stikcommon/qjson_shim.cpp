@@ -80,7 +80,12 @@ QJsonValue& QJsonValue::operator=(const QJsonValue& o)
 // 按 strlen 取全（cJSON 打印时同样按 NUL 终止）。
 QJsonValue::QJsonValue(const QString& v) : m_tree(0), m_node(0)
 {
-    const char* utf8 = SHIM_TO_UTF8(v).data();
+    // ⚠ 临时串必须由局部对象持有到用完：Qt3 的 QString::utf8() 返回按值
+    //   QCString、Qt4 的 toUtf8() 返回按值 QByteArray。只存 .data() 指针时，
+    //   临时对象在本语句末尾即析构，下一条 cJSON_CreateString 读悬垂指针
+    //   （标准层面 UB；Qt3 本构建实测未立即回收只是实现巧合）。
+    //   Qt3 侧 QCString 无数据成员，切片到 QByteArray 即共享缓冲 + 引用计数。
+    const QByteArray utf8 = SHIM_TO_UTF8(v);
     adopt(cJSON_CreateString(utf8));
 }
 
@@ -94,12 +99,14 @@ QJsonValue::QJsonValue(const char* v) : m_tree(0), m_node(0)
 QJsonValue::QJsonValue(const QJsonObject& v) : m_tree(0), m_node(0)
 {
     // 拷贝对象的子树，让本值拥有独立的一份（对齐 Qt 值类型语义）
-    adopt(qjsonshim::dupNode(v.node()));
+    // 空对象在 Qt 里是 Object(empty)，不是 Undefined；不能返回空节点。
+    adopt(v.node() ? qjsonshim::dupNode(v.node()) : cJSON_CreateObject());
 }
 
 QJsonValue::QJsonValue(const QJsonArray& v) : m_tree(0), m_node(0)
 {
-    adopt(qjsonshim::dupNode(v.node()));
+    // 空数组同理：Array(empty) ≠ Undefined。
+    adopt(v.node() ? qjsonshim::dupNode(v.node()) : cJSON_CreateArray());
 }
 
 bool QJsonValue::isNull()   const { return m_node && cJSON_IsNull(m_node); }
@@ -219,7 +226,9 @@ void QJsonObject::insert(const QString& key, const QJsonValue& v)
     if (!dup) {
         return;
     }
-    const char* k = SHIM_TO_UTF8(key).data();
+    // ⚠ 同上：临时串由局部对象持有；k 在后续 Get/Replace/Add 三处都要用
+    const QByteArray kba = SHIM_TO_UTF8(key);
+    const char* k = kba.data();
     cJSON* old = cJSON_GetObjectItemCaseSensitive(m_node, k);
     if (old) {
         // ReplaceItemInObjectCaseSensitive 会替 replacement 重设 string=key，
@@ -365,6 +374,19 @@ void QJsonDocument::reset()
     m_node = 0;
 }
 
+// ⚠ Qt3 入参所有权：fromJson 只读 data()/size()（下方 cJSON_ParseWithLength），
+//   不转移所有权。Qt3 的 QByteArray::assign(data,len) 是**浅移交**——析构时
+//   free() 传入指针（原理与禁用令见 qba_shim.h qbaFromRaw 处警示；ipinfopage
+//   1MB 缓冲双重 free 崩溃即源于此）。构造入参的正确姿势：
+//
+//     ✓ 通用（推荐，Qt3/Qt4+ 同点编译）：
+//         QByteArray b = qbaFromRaw(d, (int)n);   // 垫片深拷贝
+//     ✓ 仅 Qt3 语义参考：
+//         QByteArray b;  b.duplicate(d, (uint)n); // QGArray 深拷贝
+//     ✓ Qt4+ 可直接：
+//         QByteArray b(d, (int)n);                // 原生深拷贝构造
+//     ✗ 禁止：b.assign(外部缓冲指针, len);          // 浅移交 → 双重释放
+//
 QJsonDocument QJsonDocument::fromJson(const QByteArray& json)
 {
     QJsonDocument doc;
@@ -423,6 +445,8 @@ QByteArray QJsonDocument::toJson(Formatting style) const
     //   davbisync_baseline.json 末尾多 1 字节，Qt6 QJsonDocument::fromJson
     //   有 GarbageAtEnd 错误码，可能整份拒收 → 基线加载失败 → 空基线 →
     //   「两侧皆变」假冲突 + 全量重传。
+    //   因此本返回值 data() 不保证 NUL 终止：消费方必须用 size() 取长度
+    //   （QFile::write / append(data,size) / setBody 等），不可当 C 串。
     QByteArray out;
     out.resize((uint)strlen(s));
     memcpy(out.data(), s, out.size());

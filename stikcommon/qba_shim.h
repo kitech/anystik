@@ -341,6 +341,15 @@ inline QByteArray qbaTrimmed(const QByteArray& ba)
 #endif
 }
 
+// ⚠⚠ Qt3 的 QByteArray::assign(data, len) / setRawData() 是**浅移交所有权**：
+//   官方文档（doc.qt.io/archives/3.3/qmemarray.html）明文 "Do not delete data
+//   later; QMemArray will call free() on it at the right time"，且 qgarray.cpp
+//   实现体就是 `shd->data = (char*)d`——不拷贝、析构时直接 free() 传入指针。
+//   把 new[]/std::vector 等自有内存的 data() 喂进去 = 同一块内存两个所有者
+//   → 双重 free 崩溃（ipinfopage 1MB 缓冲崩溃实证，根因已网搜核对）。
+//   ⚠ Qt3 下禁止裸调用 QByteArray::assign(char*, len)：凡从外部缓冲造
+//   QByteArray 一律走下方 qbaFromRaw（深拷贝）或 Qt3 原生 duplicate()。
+//
 // 从裸指针造 QByteArray：Qt3 无 QByteArray(const char*, uint) 构造
 // （QMemArray(int,int) 是 protected，见 qmemarray.h），且 QByteArray(int) 给的
 // 是「长度 + 未初始化内容」。故按精确长度逐字节复制。Qt4+ 有原生构造。
