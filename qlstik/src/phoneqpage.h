@@ -15,11 +15,12 @@ public:
     PhoneQPage(QWidget* parent = 0);
 
 protected:
-    void onCreate();
+    void onCreate(const QVariantMap& launchArgs, const QVariantMap& savedState);
 
 private slots:
     void doQuery();
     void onDbStatusChanged();
+    void onBackClicked();
 
 private:
     void updateStatusLabel();

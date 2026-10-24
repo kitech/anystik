@@ -54,7 +54,7 @@ PhoneQPage::PhoneQPage(QWidget* parent)
 {
 }
 
-void PhoneQPage::onCreate()
+void PhoneQPage::onCreate(const QVariantMap&, const QVariantMap&)
 {
     QBoxLayout* root = qNewBoxLayout(this, QBoxLayout::TopToBottom, 0, 0);
     root->setSpacing(0);
@@ -235,4 +235,9 @@ void PhoneQPage::updateMetaLabel()
 #else
     m_metaLabel->setVisible(!meta.isEmpty());
 #endif
+}
+
+void PhoneQPage::onBackClicked()
+{
+    finish();
 }

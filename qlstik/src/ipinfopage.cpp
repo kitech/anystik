@@ -87,7 +87,7 @@ IPInfoPage::IPInfoPage(QWidget* parent)
     m_done = 0;
 }
 
-void IPInfoPage::onCreate()
+void IPInfoPage::onCreate(const QVariantMap&, const QVariantMap&)
 {
     QBoxLayout* root = qNewBoxLayout(this, QBoxLayout::TopToBottom, 0, 0);
     root->setSpacing(0);
@@ -335,4 +335,9 @@ void IPInfoPage::doRefresh()
 {
     refreshLocal();
     fetchExits();
+}
+
+void IPInfoPage::onBackClicked()
+{
+    finish();
 }

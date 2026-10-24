@@ -26,11 +26,12 @@ public:
     IPInfoPage(QWidget* parent = 0);
 
 protected:
-    void onCreate();
+    void onCreate(const QVariantMap& launchArgs, const QVariantMap& savedState);
 
 private slots:
     void doRefresh();
     void onExitReplyFinished();
+    void onBackClicked();
 
 private:
     void refreshLocal();
