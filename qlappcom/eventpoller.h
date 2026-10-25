@@ -191,7 +191,7 @@ class AvatarDownloadEvent : public CustomEventBase {
 public:
     AvatarDownloadEvent() : CustomEventBase(AvatarDownloadReadyType) {}
     std::string mxcUrl;
-    QPixmap pixmap;
+    std::string body;
     bool success = false;
     std::string errorInfo;
 };
