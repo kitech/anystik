@@ -194,6 +194,7 @@ public:
     std::string body;
     bool success = false;
     std::string errorInfo;
+    QPixmap pixmap; // qlver use, qskver not
 };
 
 class DiskLoadEvent : public CustomEventBase {
