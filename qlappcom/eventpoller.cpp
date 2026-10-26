@@ -2,6 +2,45 @@
 #include "limelog.h"
 #include <unistd.h>
 
+#ifdef Q_OS_ANDROID
+#include <dirent.h>
+#include <cstdio>
+#include <fstream>
+#endif
+
+// Android 无系统级默认 CA 路径供 libcurl 读取 → 把系统信任根目录里的 PEM
+// 拼成 CA blob 喂给 curl（OpenSSL 后端支持 CURLOPT_CAINFO_BLOB）。
+// 目录优先级：apex（Android 10+）> /system（Android 9-）；都读不到则返回空，
+// 交回 libcurl 默认行为（校验失败，日志可 logcat 取证）。
+#ifdef Q_OS_ANDROID
+static std::string androidCaBundle()
+{
+    const char* dirs[] = {"/apex/com.android.conscrypt/cacerts",
+                          "/system/etc/security/cacerts"};
+    for (const char* d : dirs) {
+        DIR* dp = opendir(d);
+        if (!dp) { continue; }
+        std::string bundle;
+        struct dirent* ent;
+        while ((ent = readdir(dp)) != nullptr) {
+            std::string name = ent->d_name;
+            // 系统信任根文件名形如 xxxxx.0（PEM 内容）
+            if (name.size() <= 2 || name.compare(name.size() - 2, 2, ".0") != 0) {
+                continue;
+            }
+            std::ifstream f(std::string(d) + "/" + name, std::ios::binary);
+            if (!f.is_open()) { continue; }
+            bundle.append(std::istreambuf_iterator<char>(f),
+                          std::istreambuf_iterator<char>());
+            bundle += "\n";
+        }
+        closedir(dp);
+        if (!bundle.empty()) { return bundle; }
+    }
+    return std::string();
+}
+#endif
+
 EventPoller* EventPoller::s_instance = nullptr;
 
 std::string webUrlEncode(const std::string& str) {
@@ -189,6 +228,18 @@ CURL* EventPoller::buildHandle(const HttpRequest& req,
     curl_easy_setopt(easy, CURLOPT_FORBID_REUSE, 1L);
     curl_easy_setopt(easy, CURLOPT_FRESH_CONNECT, 1L);
     curl_easy_setopt(easy, CURLOPT_SSL_SESSIONID_CACHE, 0L);
+
+#ifdef Q_OS_ANDROID
+    // Android 证书校验修复：系统 CA 目录拼装 blob 喂 curl（懒初始化，线程安全）
+    static const std::string caBundle = androidCaBundle();
+    if (!caBundle.empty()) {
+        struct curl_blob blob;
+        blob.data = const_cast<char*>(caBundle.data());
+        blob.len  = caBundle.size();
+        blob.flags = CURL_BLOB_NOCOPY;   // 静态缓存，程序生命周期内有效
+        curl_easy_setopt(easy, CURLOPT_CAINFO_BLOB, &blob);
+    }
+#endif
 
     // 代理：严格只认调用方设定（req.proxy）。
     // 无条件设置（含空串）以关闭 libcurl 隐式环境变量代理回退；空串 = 直连。

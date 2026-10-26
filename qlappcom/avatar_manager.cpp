@@ -35,13 +35,27 @@ QPixmap AvatarManager::makeThumbnail(const QPixmap& source, int size) {
     scaled.setMask(mask);
     return scaled;
 #else
-    QPixmap scaled = source.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    // 居中方裁：非方源先裁正方形（不拉伸），再统一缩放；圆=裁剪后全尺寸。
+    // 旧写法 KeepAspectRatio 出非方图 + 圆按 size 钳在 (0,0) → 头像变形/缺角。
+    const int sw = source.width(), sh = source.height();
+    const int side = qMin(sw, sh);
+    const QRectF crop((sw - side) / 2.0, (sh - side) / 2.0, side, side);
+
+    QPixmap square(side, side);
+    square.fill(Qt::transparent);
+    {
+        QPainter sp(&square);
+        sp.drawPixmap(QRectF(0, 0, side, side), source, crop);
+    }
+
+    QPixmap scaled = square.scaled(size, size, Qt::IgnoreAspectRatio,
+                                   Qt::SmoothTransformation);
     QPixmap circle(scaled.size());
     circle.fill(Qt::transparent);
     QPainter p(&circle);
     p.setRenderHint(QPainter::Antialiasing);
     QPainterPath path;
-    path.addEllipse(0, 0, size, size);
+    path.addEllipse(0, 0, scaled.width(), scaled.height());
     p.setClipPath(path);
     p.drawPixmap(0, 0, scaled);
     p.end();
