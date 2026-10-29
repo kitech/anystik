@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 20) # osx11 max23, build faster
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Quick Network Concurrent Xml)
+find_package(Qt6 REQUIRED COMPONENTS Core Quick Network Concurrent Xml Multimedia)
 find_package(QT NAMES Qt6 REQUIRED COMPONENTS LinguistTools)
 find_package(QSkinny REQUIRED)
 
@@ -153,7 +153,7 @@ target_include_directories(anystik PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../stikcommon
 )
 
-target_link_libraries(anystik PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::CorePrivate Qt6::Concurrent Qt6::Xml)
+target_link_libraries(anystik PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::CorePrivate Qt6::Concurrent Qt6::Xml Qt6::Multimedia)
 
 # 系统 /usr/lib 若存在更新版 Qt6 的未版本化 libQt6*.so，ld 解析 QSkinny 导入目标引入的
 # -lQt6* 时会命中错误版本（符号不匹配）。把 vendored Qt 库目录前置到链接搜索路径。
