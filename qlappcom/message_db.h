@@ -23,6 +23,7 @@ struct MessageRow {
     std::string caption;
     std::string media_url;
     std::string media_mime;
+    std::string msg_type;      // Matrix CS msgtype 原文（m.image/m.video/…；text 空）
     int media_width = 0;
     int media_height = 0;
     std::string file_name;

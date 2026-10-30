@@ -18,7 +18,7 @@ public:
             "(event_id,chanid,data,etype,"
             " sender_name,sender_nick,peer_number,sender_pubkey,"
             " signature,avatar_url,time_text,ip_address,"
-            " category,caption,media_url,media_mime,"
+            " category,caption,media_url,media_mime,msg_type,"
             " media_width,media_height,file_name,file_size,"
             " duration_sec,local_path,gif_path,thumbnail_key,"
             " cache_tag,send_state,relates_to_rowid,edited,"
@@ -27,7 +27,7 @@ public:
             "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,"
             "?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,"
             "?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,"
-            "?31,?32,?33)");
+            "?31,?32,?33,?34)");
         if (!stmt.isPrepared()) { return 0; }
         int i = 1;
         if (!stmt.bind(i++, row.event_id.c_str())) { return 0; }
@@ -46,6 +46,7 @@ public:
         if (!stmt.bind(i++, row.caption.c_str())) { return 0; }
         if (!stmt.bind(i++, row.media_url.c_str())) { return 0; }
         if (!stmt.bind(i++, row.media_mime.c_str())) { return 0; }
+        if (!stmt.bind(i++, row.msg_type.c_str())) { return 0; }
         if (!stmt.bind(i++, row.media_width)) { return 0; }
         if (!stmt.bind(i++, row.media_height)) { return 0; }
         if (!stmt.bind(i++, row.file_name.c_str())) { return 0; }
@@ -150,7 +151,7 @@ public:
             "SELECT rowid,event_id,chanid,data,etype,"
             " sender_name,sender_nick,peer_number,sender_pubkey,"
             " signature,avatar_url,time_text,ip_address,"
-            " category,caption,media_url,media_mime,"
+            " category,caption,media_url,media_mime,msg_type,"
             " media_width,media_height,file_name,file_size,"
             " duration_sec,local_path,gif_path,thumbnail_key,"
             " cache_tag,send_state,relates_to_rowid,edited,"
@@ -179,6 +180,7 @@ public:
         row->caption        = stmt.columnText(i++);
         row->media_url      = stmt.columnText(i++);
         row->media_mime     = stmt.columnText(i++);
+        row->msg_type       = stmt.columnText(i++);
         row->media_width    = stmt.columnInt(i++);
         row->media_height   = stmt.columnInt(i++);
         row->file_name      = stmt.columnText(i++);
@@ -207,7 +209,7 @@ row->relates_to_rowid = stmt.columnInt64(i++);
             "SELECT rowid,event_id,chanid,data,etype,"
             " sender_name,sender_nick,peer_number,sender_pubkey,"
             " signature,avatar_url,time_text,ip_address,"
-            " category,caption,media_url,media_mime,"
+            " category,caption,media_url,media_mime,msg_type,"
             " media_width,media_height,file_name,file_size,"
             " duration_sec,local_path,gif_path,thumbnail_key,"
             " cache_tag,send_state,relates_to_rowid,edited,"
@@ -234,7 +236,7 @@ row->relates_to_rowid = stmt.columnInt64(i++);
             "SELECT rowid,event_id,chanid,data,etype,"
             " sender_name,sender_nick,peer_number,sender_pubkey,"
             " signature,avatar_url,time_text,ip_address,"
-            " category,caption,media_url,media_mime,"
+            " category,caption,media_url,media_mime,msg_type,"
             " media_width,media_height,file_name,file_size,"
             " duration_sec,local_path,gif_path,thumbnail_key,"
             " cache_tag,send_state,relates_to_rowid,edited,"
@@ -517,6 +519,7 @@ private:
         row.caption        = stmt.columnText(i++);
         row.media_url      = stmt.columnText(i++);
         row.media_mime     = stmt.columnText(i++);
+        row.msg_type       = stmt.columnText(i++);
         row.media_width    = stmt.columnInt(i++);
         row.media_height   = stmt.columnInt(i++);
         row.file_name      = stmt.columnText(i++);
@@ -776,6 +779,7 @@ bool init_message_db(SqliteDb& db) {
         "  caption     TEXT DEFAULT '',"
         "  media_url   TEXT,"
         "  media_mime  TEXT,"
+        "  msg_type    TEXT DEFAULT '',"
         "  media_width INTEGER DEFAULT 0,"
         "  media_height INTEGER DEFAULT 0,"
         "  file_name   TEXT,"
@@ -816,6 +820,7 @@ bool init_message_db(SqliteDb& db) {
         bool hasRelIds = false;
         bool hasMentions = false;
         bool hasRedacted = false;
+        bool hasMsgType = false;
         auto stmt = db.prepare("PRAGMA table_info(messages)");
         while (stmt.isPrepared() && stmt.stepRow()) {
             const std::string name = stmt.columnText(1);
@@ -823,6 +828,7 @@ bool init_message_db(SqliteDb& db) {
             if (name == "relates_to_ids")   hasRelIds   = true;
             if (name == "mentions_text")    hasMentions = true;
             if (name == "redacted")         hasRedacted = true;
+            if (name == "msg_type")         hasMsgType = true;
         }
         if (!hasRelRowid &&
             !db.exec("ALTER TABLE messages ADD COLUMN relates_to_rowid INTEGER DEFAULT 0")) {
@@ -838,6 +844,10 @@ bool init_message_db(SqliteDb& db) {
         }
         if (!hasRedacted &&
             !db.exec("ALTER TABLE messages ADD COLUMN redacted INTEGER DEFAULT 0")) {
+            return false;
+        }
+        if (!hasMsgType &&
+            !db.exec("ALTER TABLE messages ADD COLUMN msg_type TEXT DEFAULT ''")) {
             return false;
         }
     }
