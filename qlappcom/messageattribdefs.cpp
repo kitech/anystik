@@ -129,6 +129,16 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
                         qFromUtf8("与该会话绑定的本地同步目录路径"));
         defs << checkDef("overwrite", qFromUtf8("覆盖"),
                          qFromUtf8("目标文件已存在时是否直接覆盖"));
+        QStringList pip;
+        pip << "any" << "all" << "10.0.0.97" << "10.0.0.110"
+            << "10.0.0.166" << "10.0.0.232" << "10.0.0.74" << "10.0.0.123";
+        defs << comboDef("peerip", qFromUtf8("对端IP"), pip, "any",
+                         qFromUtf8("同步对端选择：any=任一可用对端完成即同步 / "
+                                   "all=需全部对端都完成 / 指定IP=仅该对端参与同步"));
+        QStringList dd;
+        dd << "dir1" << "dir2";
+        defs << comboDef("destdir", qFromUtf8("目标目录"), dd, "dir1",
+                         qFromUtf8("对端接收目录预设：dir1 / dir2"));
     } else if (type == kClipboardType) {
         defs << checkDef("keep_history", qFromUtf8("保留历史"),
                          qFromUtf8("剪贴板同步是否保留历史记录"));
