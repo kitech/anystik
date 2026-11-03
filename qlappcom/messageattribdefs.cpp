@@ -1,6 +1,6 @@
 #include "messageattribdefs.h"
 #include "compatcore34.h"            // qFromUtf8
-#include "../qltox/pureconsts.hpp"   // 类型常量 kImapMailType / kGomuksRoomType / ...
+#include "pureconsts.hpp"   // 类型常量 kImapMailType / kGomuksRoomType / ...
 #include "aigptbot.h"
 #include "websearchbot.h"
 #include "ttsbot.h"
