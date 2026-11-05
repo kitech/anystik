@@ -1,9 +1,32 @@
 #include "cache_db.h"
 #include "cache_fs.h"
+#include "md5.h"
 #include <ctime>
 #include <atomic>
+#include <cstring>
 
 namespace {
+
+// qlcomp/md5.c 包装：16B 摘要 → 32 hex（与 cache_fs::makeCacheFsPath
+// 同一个 md5 实现；内容寻址查重键，python 清理脚本同算法回填对齐）
+std::string md5Hex(const void* data, size_t size) {
+    if (!data || size == 0) {
+        return {};
+    }
+    MD5_CTX ctx;
+    MD5_Init(&ctx);
+    MD5_Update(&ctx, (const uint8_t*)data, size);
+    uint8_t digest[16];
+    MD5_Final(digest, &ctx);
+    static const char hex[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(32);
+    for (int i = 0; i < 16; i++) {
+        out.push_back(hex[digest[i] >> 4]);
+        out.push_back(hex[digest[i] & 0x0f]);
+    }
+    return out;
+}
 
 class CacheDbSync final : public CacheDbSyncInterface {
     std::shared_ptr<SqliteConnectionSafe> m_cacheConn;
@@ -19,10 +42,39 @@ private:
              const char* mime, int tag) {
         SlowGuard _w("cache::put", 60);
         auto _lock = m_cacheConn->get();
+
+        // ── 内容寻址查重（md5）：同内容不同 key 的重复条目不再重复存
+        // BLOB，改记 cache_alias(新key→已有key)；get/loadMedia 的 miss
+        // 分支经 alias 转发到已有行。旧行 content_hash 为 NULL（历史不
+        // 回填运行时），只与已带 hash 行查重；历史 400MB 由
+        // tools/cache_db_cleanup.py 一次性回收 ──
+        const std::string chash = md5Hex(data, size);
+        if (!chash.empty()) {
+            auto dup = _lock->prepare(
+                "SELECT key FROM cache"
+                " WHERE content_hash=?1"
+                " ORDER BY created_at DESC LIMIT 1");
+            if (dup.isPrepared() && dup.bind(1, chash.c_str()) && dup.stepRow()) {
+                auto alias = _lock->prepare(
+                    "INSERT INTO cache_alias (key,real_key,access_time) "
+                    "VALUES (?1,?2,?3) "
+                    "ON CONFLICT(key) DO UPDATE "
+                    "SET access_time=excluded.access_time");
+                if (alias.isPrepared()) {
+                    alias.bind(1, key);
+                    alias.bind(2, dup.columnText(0));
+                    alias.bind(3, (int64_t)std::time(nullptr));
+                    if (alias.step()) {
+                        return true;   // 复用已有条目，key 不丢、字节不加
+                    }
+                }
+            }
+        }
+
         auto stmt = _lock->prepare(
             "INSERT INTO cache "
-            "(key,data,mime_type,tag,access_time,size) "
-            "VALUES (?1,?2,?3,?4,?5,?6) "
+            "(key,data,mime_type,tag,access_time,size,content_hash) "
+            "VALUES (?1,?2,?3,?4,?5,?6,?7) "
             "ON CONFLICT(key) DO UPDATE SET access_time=excluded.access_time");
         if (!stmt.isPrepared()) { return false; }
         if (!stmt.bind(1, key)) { return false; }
@@ -31,6 +83,7 @@ private:
         if (!stmt.bind(4, tag)) { return false; }
         if (!stmt.bind(5, (int64_t)std::time(nullptr))) { return false; }
         if (!stmt.bind(6, (int64_t)size)) { return false; }
+        if (!stmt.bind(7, chash.c_str())) { return false; }
         if (!stmt.step()) {
             qWarning("CacheDb::put failed for %s: %s",
                      key, sqliteError(*_lock));
@@ -51,6 +104,34 @@ public:
         if (!stmt.bind(1, key)) { return result; }
         if (!stmt.stepRow()) {
             if (_t.timedOut()) { qWarning("cache::get timed out for '%s'", key); }
+            // alias fallback：dedup 命中时新 key 只在 cache_alias 里，
+            // real_key 才是真正落库行；alias 命中也顺带刷 alias 热度；
+            // clear_by_tag 删掉 real 行后此处 miss，正常回源自愈
+            auto al = _lock->prepare(
+                "SELECT real_key FROM cache_alias WHERE key=?1");
+            if (al.isPrepared() && al.bind(1, key) && al.stepRow()) {
+                const std::string realKey = al.columnText(0);
+                auto alupd = _lock->prepare(
+                    "UPDATE cache_alias SET access_time=?1 WHERE key=?2");
+                if (alupd.isPrepared()) {
+                    alupd.bind(1, (int64_t)std::time(nullptr));
+                    alupd.bind(2, key);
+                    alupd.step();
+                }
+                stmt = _lock->prepare(
+                    "SELECT data,mime_type FROM cache WHERE key=?1");
+                if (stmt.isPrepared() && stmt.bind(1, realKey.c_str())
+                        && stmt.stepRow()) {
+                    int bytes = stmt.columnBytes(0);
+                    const void* blob = stmt.columnBlob(0);
+                    if (blob && bytes > 0) {
+                        const uint8_t* p = (const uint8_t*)blob;
+                        result.assign(p, p + bytes);
+                    }
+                    if (out_mime) { *out_mime = stmt.columnText(1); }
+                    return result;
+                }
+            }
             return result;
         }
 
@@ -77,7 +158,13 @@ public:
         auto stmt = _lock->prepare("SELECT 1 FROM cache WHERE key=?1");
         if (!stmt.isPrepared()) { return false; }
         if (!stmt.bind(1, key)) { return false; }
-        return stmt.stepRow();
+        if (stmt.stepRow()) { return true; }
+        // alias fallback：dedup 别名 key 也算存在
+        auto al = _lock->prepare(
+            "SELECT 1 FROM cache_alias WHERE key=?1");
+        if (!al.isPrepared()) { return false; }
+        if (!al.bind(1, key)) { return false; }
+        return al.stepRow();
     }
 
     bool remove(const char* key) override {
@@ -116,6 +203,12 @@ public:
     bool put_ref(const char* key, const char* file_path,
                  const char* mime, int tag, int64_t size) override {
         SlowGuard _w("cache::put_ref", 60);
+        // avatar 写闸：口径同 storeMedia（>1MB avatar 本走此路，先拦）
+        if (key && std::strncmp(key, "avatar_", 7) == 0 && size > 262144) {
+            qWarning("cache::put_ref avatar %lldB >256K rejected: %s",
+                     (long long)size, key);
+            return true;
+        }
         auto _lock = m_cacheConn->get();
         auto stmt = _lock->prepare(
             "INSERT INTO file_refs "
@@ -164,6 +257,14 @@ public:
 
     bool storeMedia(const char* key, const void* data, size_t size,
                     const char* mime, int tag) override {
+        // avatar 写闸：>256K 的 avatar_* 拒绝入库（视为成功不走
+        // 重试风暴）；>1MB 本来就落 cache_fs，先在闸口拦截
+        if (key && std::strncmp(key, "avatar_", 7) == 0
+                && size > (size_t)262144) {
+            qWarning("cache::storeMedia avatar %zuB >256K rejected: %s",
+                     size, key);
+            return true;
+        }
         const int64_t kMaxInline = 1 * 1024 * 1024;
         if (size <= (size_t)kMaxInline) {
             return putInternal(key, data, size, mime, tag);
@@ -217,6 +318,32 @@ public:
         if (!stmt2.bind(1, key)) { return result; }
         if (!stmt2.stepRow()) {
             if (_t.timedOut()) { qWarning("cache::get timed out for '%s'", key); }
+            // alias fallback（同 get()）：dedup 别名 key → real_key
+            auto al = _lock->prepare(
+                "SELECT real_key FROM cache_alias WHERE key=?1");
+            if (al.isPrepared() && al.bind(1, key) && al.stepRow()) {
+                const std::string realKey = al.columnText(0);
+                auto alupd = _lock->prepare(
+                    "UPDATE cache_alias SET access_time=?1 WHERE key=?2");
+                if (alupd.isPrepared()) {
+                    alupd.bind(1, (int64_t)std::time(nullptr));
+                    alupd.bind(2, key);
+                    alupd.step();
+                }
+                stmt2 = _lock->prepare(
+                    "SELECT data,mime_type FROM cache WHERE key=?1");
+                if (stmt2.isPrepared() && stmt2.bind(1, realKey.c_str())
+                        && stmt2.stepRow()) {
+                    int bytes = stmt2.columnBytes(0);
+                    const void* blob = stmt2.columnBlob(0);
+                    if (blob && bytes > 0) {
+                        const uint8_t* p = (const uint8_t*)blob;
+                        result.assign(p, p + bytes);
+                    }
+                    if (out_mime) { *out_mime = stmt2.columnText(1); }
+                    return result;
+                }
+            }
             return result;
         }
 
@@ -452,6 +579,25 @@ bool init_cache_db(SqliteDb& db) {
     db.exec("CREATE INDEX IF NOT EXISTS idx_cache_access ON cache(access_time)");
     db.exec("CREATE INDEX IF NOT EXISTS idx_filerefs_tag ON file_refs(tag)");
     db.exec("CREATE INDEX IF NOT EXISTS idx_filerefs_access ON file_refs(access_time)");
+
+    // content_hash 列（幂等：pragma_table_info 先探测，历史库补列）
+    {
+        auto probe = db.prepare(
+            "SELECT 1 FROM pragma_table_info('cache') WHERE name='content_hash'");
+        if (!(probe.isPrepared() && probe.stepRow())) {
+            db.exec("ALTER TABLE cache ADD COLUMN content_hash TEXT");
+        }
+    }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_cache_chash ON cache(content_hash)");
+    db.exec(
+        "CREATE TABLE IF NOT EXISTS cache_alias ("
+        "  key         TEXT PRIMARY KEY,"
+        "  real_key    TEXT NOT NULL,"
+        "  access_time INTEGER NOT NULL"
+        ")");
+    db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_alias_access "
+        "ON cache_alias(access_time)");
     return true;
 }
 
