@@ -1,4 +1,5 @@
 #include "media_shmem_cache.h"
+#include <cstdio>
 #include <cstring>
 
 #ifdef QT3_BUILD
@@ -31,6 +32,13 @@ void MediaShmemCache::putThumb(const QString& mxcUrl, const char* data, int len)
         ::memcpy(ba->data(), data, len);
     }
     QMutexLocker lock(&m_mutex);
+    /* QCache 超限时会静默淘汰最久未用条目，没有回调；
+     * 插入前记录一次“即将溢出”的汇总日志（Qt3/Qt4 API 一致） */
+    if (m_rawCache.totalCost() + len > QLAPP_MAX_MEMDIA_SHMEM_CACHE_SIZE) {
+        fprintf(stderr, "[cache] media_shmem evict(auto) total=%d add=%d max=%d\n",
+                (int)m_rawCache.totalCost(), len,
+                (int)QLAPP_MAX_MEMDIA_SHMEM_CACHE_SIZE);
+    }
     m_rawCache.insert(mxcUrl, ba, len);
 }
 

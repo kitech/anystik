@@ -70,7 +70,7 @@ QPixmap AvatarManager::get(const QString& mxcUrl,
         auto it = m_cache.find(mxcUrl);
         if (it != m_cache.end()) {
             long long _el = elapsedMs(_t0); if (_el >= 50) qWarning("SLOW [hangui] AvatarManager::get(cache) took %lldms", _el);
-            return it->second;
+            return it->second.pm;
         }
 
         auto dbData = Storage::instance().cacheDb()->get(
@@ -78,7 +78,7 @@ QPixmap AvatarManager::get(const QString& mxcUrl,
         QPixmap raw;
         if (!dbData.empty() && raw.loadFromData(dbData.data(), dbData.size())) {
             QPixmap scaled = makeThumbnail(raw, size);
-            m_cache[mxcUrl] = scaled;
+            cachePut(mxcUrl, scaled);
             long long _el = elapsedMs(_t0); if (_el >= 50) qWarning("SLOW [hangui] AvatarManager::get(db) took %lldms", _el);
             return scaled;
         }
@@ -102,7 +102,7 @@ void AvatarManager::store(const QString& mxcUrl, const QPixmap& source, int size
     }
 
     QPixmap scaled = makeThumbnail(source, size);
-    m_cache[mxcUrl] = scaled;
+    cachePut(mxcUrl, scaled);
 
     QByteArray pngBytes;
 #ifdef QT3_BUILD
@@ -132,5 +132,42 @@ void AvatarManager::removePending(const QString& mxcUrl) {
 
 void AvatarManager::clear() {
     m_cache.clear();
+    m_order.clear();
+    m_cacheBytes = 0;
     m_pending.clear();
+}
+
+long long AvatarManager::pixmapBytes(const QPixmap& pm) {
+    if (pm.isNull()) { return 0; }
+    int depth = pm.depth() > 0 ? pm.depth() : 32;
+    return (long long)pm.width() * pm.height() * (depth / 8);
+}
+
+/* 写入缓存：FIFO 上限 kCacheMax，淘汰时输出日志（条目数/字节数） */
+void AvatarManager::cachePut(const QString& mxcUrl, const QPixmap& pm) {
+    if (mxcUrl.isEmpty() || pm.isNull()) { return; }
+    std::map<QString, CacheEntry>::iterator it = m_cache.find(mxcUrl);
+    if (it != m_cache.end()) {
+        m_cacheBytes -= pixmapBytes(it->second.pm);
+        it->second.pm = pm;
+        m_cacheBytes += pixmapBytes(pm);
+        return;
+    }
+    while ((int)m_cache.size() >= kCacheMax && !m_order.empty()) {
+        QString old = m_order.front();
+        m_order.pop_front();
+        std::map<QString, CacheEntry>::iterator oi = m_cache.find(old);
+        if (oi == m_cache.end()) { continue; }
+        m_cacheBytes -= pixmapBytes(oi->second.pm);
+        m_cache.erase(oi);
+        qWarning("[cache] avatar evict url=%s count=%d bytes=%lld",
+                 qToUtf8(old).data(), (int)m_cache.size(), m_cacheBytes);
+    }
+    CacheEntry e;
+    e.pm = pm;
+    m_order.push_back(mxcUrl);
+    e.order = m_order.end();
+    --e.order;
+    m_cache[mxcUrl] = e;
+    m_cacheBytes += pixmapBytes(pm);
 }
