@@ -19,7 +19,56 @@
 #include <vector>
 #include <map>
 #include <curl/curl.h>
-#include <curl/websockets.h>
+#include <httplib.h>   /* cpp-httplib（vendor/httplib.h）：curl 无 WS 时的回退实现 */
+
+/* Edge TTS 走 WebSocket，依赖 libcurl 的 WS API（curl_ws_send/curl_ws_recv/
+ * CURLWS_*，自 7.86.0 引入；CURLOPT_CONNECT_ONLY=2 同样 7.86 起支持）。
+ *
+ * 兼容策略：改为运行时 dlsym 解析，不在目标文件里直接引用这些符号。
+ * 原因：编译头文件与链接库版本可能不一致（例如 vendor 里的 8.x 头 + 系统 7.81 库），
+ * 直接引用会在链接期报 undefined reference；dlsym 版本可在运行时判断并降级。
+ *   - 库版本 < 7.86：curlWsInit() 返回 false，Edge TTS 提示升级，其他 TTS 引擎不受影响
+ *   - Linux 需 -ldl；macOS/Android 的 dlsym 在系统库中
+ * 安全提示：7.86 的 WS 实现存在 CVE-2025-5399，实际部署建议 >= 8.5。 */
+#include <dlfcn.h>
+
+#if !defined(CURL_AT_LEAST_VERSION) || !CURL_AT_LEAST_VERSION(7,86,0)
+/* 老头文件（<7.86）没有这些定义，补齐一份（布局与 7.86+ 一致） */
+struct curl_ws_frame {
+    int age;
+    int flags;
+    curl_off_t offset;
+    curl_off_t bytesleft;
+    size_t len;
+};
+#endif
+#ifndef CURLWS_TEXT
+#  define CURLWS_TEXT   (1u << 0)
+#  define CURLWS_BINARY (1u << 1)
+#  define CURLWS_CLOSE  (1u << 2)
+#endif
+
+typedef CURLcode (*curl_ws_send_t)(CURL*, const void*, size_t, size_t*, curl_off_t, unsigned);
+typedef CURLcode (*curl_ws_recv_t)(CURL*, void*, size_t, size_t*, const struct curl_ws_frame**);
+
+static curl_ws_send_t p_curl_ws_send = nullptr;
+static curl_ws_recv_t p_curl_ws_recv = nullptr;
+
+/* 运行时能力检测：库版本 >= 7.86 且两个符号都能解析到 */
+static bool curlWsInit() {
+    static bool inited = false;
+    static bool ok = false;
+    if (inited) { return ok; }
+    inited = true;
+    const curl_version_info_data* vi = curl_version_info(CURLVERSION_NOW);
+    if (!vi || vi->version_num < 0x075600) { return false; }
+    p_curl_ws_send = reinterpret_cast<curl_ws_send_t>(
+        dlsym(RTLD_DEFAULT, "curl_ws_send"));
+    p_curl_ws_recv = reinterpret_cast<curl_ws_recv_t>(
+        dlsym(RTLD_DEFAULT, "curl_ws_recv"));
+    ok = (p_curl_ws_send != nullptr && p_curl_ws_recv != nullptr);
+    return ok;
+}
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -397,7 +446,7 @@ bool wsSendAll(CURL* h, const std::string& data, unsigned flags) {
     size_t off = 0;
     while (off < data.size()) {
         size_t sent = 0;
-        CURLcode rc = curl_ws_send(h, data.data() + off, data.size() - off, &sent, 0, flags);
+        CURLcode rc = p_curl_ws_send(h, data.data() + off, data.size() - off, &sent, 0, flags);
         if (rc == CURLE_AGAIN) {
             if (!wsWait(h, false, 3000)) { return false; }
             continue;
@@ -440,8 +489,12 @@ void handleEdgeBinary(const std::string& frame, std::vector<uint8_t>& audio) {
     audio.insert(audio.end(), (const uint8_t*)p, (const uint8_t*)p + n);
 }
 
-bool synthEdgeOnce(const TtsbotRequest& req, const std::string& proxy,
-                   const char* host, bool legacy, int tokVer, WsOut& out) {
+bool synthEdgeOnceCurl(const TtsbotRequest& req, const std::string& proxy,
+                       const char* host, bool legacy, int tokVer, WsOut& out) {
+    if (!curlWsInit()) {
+        out.error = "当前 libcurl 不支持 WebSocket（Edge TTS 需要 >= 7.86）";
+        return false;
+    }
     std::string connId = randomHex(16);
     std::string token = (tokVer == 2) ? edgedrm::secMsGecV2(edgedrm::nowUnix())
                                       : edgedrm::secMsGecV1(edgedrm::nowUnix());
@@ -528,7 +581,7 @@ bool synthEdgeOnce(const TtsbotRequest& req, const std::string& proxy,
         char buf[65536];
         size_t nread = 0;
         const struct curl_ws_frame* meta = NULL;
-        CURLcode r = curl_ws_recv(h, buf, sizeof(buf), &nread, &meta);
+        CURLcode r = p_curl_ws_recv(h, buf, sizeof(buf), &nread, &meta);
         if (r == CURLE_AGAIN) {
             if (!wsWait(h, true, 20000)) { out.error = "edge 接收等待超时"; break; }
             continue;
@@ -559,6 +612,118 @@ bool synthEdgeOnce(const TtsbotRequest& req, const std::string& proxy,
     if (out.audio.empty()) { out.error = "edge 无音频数据"; return false; }
     out.ok = true;
     return true;
+}
+
+/* cpp-httplib 回退实现：libcurl 无 WS（<7.86）或符号不可用时使用。
+ * 阻塞式 API + 单连接线程，用于一次性 TTS 合成足够；不支持 permessage-deflate，
+ * Edge 也不使用扩展，无影响。 */
+bool synthEdgeOnceHttplib(const TtsbotRequest& req, const std::string& proxy,
+                          const char* host, bool legacy, int tokVer, WsOut& out) {
+    std::string connId = randomHex(16);
+    std::string token = (tokVer == 2) ? edgedrm::secMsGecV2(edgedrm::nowUnix())
+                                      : edgedrm::secMsGecV1(edgedrm::nowUnix());
+    std::string ver = (tokVer == 2) ? edgedrm::versionV2() : edgedrm::versionV1();
+    if (token.empty()) { out.error = "edge token 生成失败"; return false; }
+
+    std::string url;
+    if (legacy) {
+        url = std::string("wss://") + host
+            + "/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken="
+            + edgedrm::kTrustedClientToken + "&ConnectionId=" + connId
+            + "&Sec-MS-GEC=" + token + "&Sec-MS-GEC-Version=" + ver;
+    } else {
+        url = std::string("wss://") + host
+            + "/tts/cognitiveservices/websocket/v1?Ocp-Apim-Subscription-Key="
+            + edgedrm::kTrustedClientToken + "&ConnectionId=" + connId
+            + "&Sec-MS-GEC=" + token + "&Sec-MS-GEC-Version=" + ver;
+    }
+
+    httplib::Headers hdrs;
+    hdrs.emplace("Pragma", "no-cache");
+    hdrs.emplace("Cache-Control", "no-cache");
+    hdrs.emplace("Origin", "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold");
+    hdrs.emplace("Accept-Language", "en-US,en;q=0.9");
+    hdrs.emplace("User-Agent", std::string(kBrowserUA) + " Edg/143.0.0.0");
+    hdrs.emplace("Cookie", "muid=" + edgedrm::generateMuid() + ";");
+
+    httplib::ws::WebSocketClient ws(url, hdrs);
+    if (!ws.is_valid()) {
+        out.error = "edge 握手参数无效（wss 需要 OpenSSL 支持）";
+        return false;
+    }
+    ws.set_connection_timeout(15, 0);
+    ws.set_read_timeout(1, 0);        /* 1s 粒度，便于检查总超时 */
+    if (!proxy.empty()) {
+        std::string p = proxy;
+        const std::string scheme = "http://";
+        if (p.compare(0, scheme.size(), scheme) == 0) { p = p.substr(scheme.size()); }
+        size_t slash = p.find('/');
+        if (slash != std::string::npos) { p = p.substr(0, slash); }
+        size_t c = p.rfind(':');
+        if (c != std::string::npos && c + 1 < p.size()) {
+            ws.set_proxy(p.substr(0, c), atoi(p.c_str() + c + 1));
+        }
+    }
+
+    auto res = ws.connect();
+    if (!res) {
+        out.error = std::string("edge 握手失败: ") + httplib::to_string(res.error());
+        return false;
+    }
+
+    std::string cfg = std::string("X-Timestamp:") + edgedrm::dateToString()
+        + "\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n"
+        + "{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{"
+          "\"sentenceBoundaryEnabled\":\"false\",\"wordBoundaryEnabled\":\"true\"},"
+          "\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}\r\n";
+    std::string voice = edgeVoice(req);
+    std::string rate = req.rate.empty() ? std::string("+0%") : req.rate;
+    std::string ssml = std::string("<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>")
+        + "<voice name='" + xmlEscape(voice) + "'>"
+        + "<prosody pitch='+0Hz' rate='" + xmlEscape(rate) + "' volume='+0%'>"
+        + xmlEscape(req.text) + "</prosody></voice></speak>";
+    std::string ssmlFrame = std::string("X-RequestId:") + randomHex(16)
+        + "\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:"
+        + edgedrm::dateToString() + "Z\r\nPath:ssml\r\n\r\n" + ssml;
+
+    if (!ws.send(cfg) || !ws.send(ssmlFrame)) {
+        out.error = "edge 发送失败";
+        ws.close();
+        return false;
+    }
+
+    time_t deadline = time(NULL) + 40;
+    std::string msg;
+    while (time(NULL) <= deadline) {
+        auto r = ws.read(msg);
+        if (r == httplib::ws::ReadResult::Binary) {
+            handleEdgeBinary(msg, out.audio);
+        } else if (r == httplib::ws::ReadResult::Text) {
+            if (msg.find("Path:turn.end") != std::string::npos) { break; }
+        } else if (r == httplib::ws::ReadResult::Timeout) {
+            continue;
+        } else {
+            if (out.error.empty()) { out.error = "edge 接收失败"; }
+            break;
+        }
+    }
+    ws.close();
+
+    if (out.audio.empty()) {
+        if (out.error.empty()) { out.error = "edge 未收到音频数据"; }
+        return false;
+    }
+    out.ok = true;
+    return true;
+}
+
+/* 统一入口：优先 curl（若库支持 WS），否则回退 cpp-httplib */
+bool synthEdgeOnce(const TtsbotRequest& req, const std::string& proxy,
+                   const char* host, bool legacy, int tokVer, WsOut& out) {
+    if (curlWsInit()) {
+        return synthEdgeOnceCurl(req, proxy, host, legacy, tokVer, out);
+    }
+    return synthEdgeOnceHttplib(req, proxy, host, legacy, tokVer, out);
 }
 
 bool synthEdge(const TtsbotRequest& req, const std::string& proxy, WsOut& out) {
