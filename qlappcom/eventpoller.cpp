@@ -224,6 +224,8 @@ CURL* EventPoller::buildHandle(const HttpRequest& req,
         curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT, (long)req.connectTimeoutSec);
     }
     curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
+    // 自动协商并解压(providers 会带 gzip Accept-Encoding;httplib 时代由库解压)
+    curl_easy_setopt(easy, CURLOPT_ACCEPT_ENCODING, "");
     curl_easy_setopt(easy, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(easy, CURLOPT_FORBID_REUSE, 1L);
     curl_easy_setopt(easy, CURLOPT_FRESH_CONNECT, 1L);
