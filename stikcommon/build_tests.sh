@@ -24,7 +24,7 @@ CXX="g++ -std=c++14 -g -O0 -w"
 # 测试与被测产品代码同在 stikcommon/，故 -I. ；doctest 在 anystik/vendor
 # eventpoller.h 现居 qlappcom/（原 qldox/ 已并入 qlcomp+qlappcom），cJSON.h 在 qlcomp/
 FLAGS="-DQT3_BUILD -DQT_NO_DEBUG -DQT_SHARED -DQT_THREAD_SUPPORT \
-  -I. -I../vendor -I../vendor/libnsgif \
+  -I. -I../vendor -I../vendor/libnsgif -I../vendor/stb \
   -I../vendor/uc_apng_loader -I$QTDIR/include -I../qlappcom -I../qlcomp"
 
 # libtiff：与 qlstik.pro 同款 pkg-config 探测。探测到 → 给测试二进制

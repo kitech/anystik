@@ -1,6 +1,11 @@
 #include "eventpoller.h"
 #include "limelog.h"
 #include <unistd.h>
+#ifdef Q_OS_DARWIN
+#include <sys/stat.h>
+#include <fstream>
+#include <iterator>
+#endif
 
 #ifdef Q_OS_ANDROID
 #include <dirent.h>
@@ -42,6 +47,185 @@ static std::string androidCaBundle()
 #endif
 
 EventPoller* EventPoller::s_instance = nullptr;
+
+// ── CA 自动检测/修复（macOS OpenSSL 编译期 CA 路径在真机不存在 → curl 60）──
+// 只匹配 https:// 请求;qltox 全走 localhost HTTP 不触发,故其"mac 正常"不反证 CA 可用。
+#ifdef Q_OS_DARWIN
+namespace {
+
+struct CaState {
+    enum Mode { None, DefaultPath, SystemPem, HomebrewPem, MozillaCache };
+    bool resolved = false;
+    Mode mode = None;
+    std::string path, pem;
+    std::vector<std::string> rejected;   // 已试且校验失败的 CA 路径(逐个淘汰,不跳级)
+};
+CaState& caState() { static CaState s; return s; }
+
+bool caRejected(const std::string& p)
+{
+    const std::vector<std::string>& r = caState().rejected;
+    for (size_t i = 0; i < r.size(); ++i)
+        if (r[i] == p) return true;
+    return false;
+}
+
+const char* caModeName(CaState::Mode m)
+{
+    switch (m) {
+    case CaState::DefaultPath: return "default-path";
+    case CaState::SystemPem:   return "system-pem";
+    case CaState::HomebrewPem: return "homebrew-pem";
+    case CaState::MozillaCache:return "mozilla-cache";
+    default:                   return "none";
+    }
+}
+
+bool caFileUsable(const char* p, std::string* out)
+{
+    if (!p || !*p) return false;
+    struct stat st;
+    if (::stat(p, &st) != 0 || st.st_size <= 64) return false;
+    std::ifstream f(p, std::ios::binary);
+    if (!f.is_open()) return false;
+    std::string d((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    if (d.find("-----BEGIN CERTIFICATE-----") == std::string::npos) return false;
+    if (out) *out = d;
+    return true;
+}
+
+std::string caDefaultPath()
+{
+#if LIBCURL_VERSION_NUM >= 0x075400   /* 7.84: CURLINFO_CAINFO */
+    CURL* h = curl_easy_init();
+    if (!h) return std::string();
+    char* p = nullptr; std::string out;
+    if (curl_easy_getinfo(h, CURLINFO_CAINFO, &p) == CURLE_OK && p && *p) out = p;
+    curl_easy_cleanup(h);
+    return out;
+#else
+    return std::string();
+#endif
+}
+
+size_t caWriteCb(char* ptr, size_t size, size_t nmemb, void* ud)
+{
+    size_t n = size * nmemb;
+    static_cast<std::string*>(ud)->append(ptr, n);
+    return n;
+}
+
+std::string caBootstrap()
+{
+    // 一次性、显式告警:临时关闭校验下载 Mozilla bundle,仅用于建立信任锚。
+    ALOG_WARN("[ca] bootstrap: GET https://curl.se/ca/cacert.pem (VERIFYPEER=0, one-shot)");
+    CURL* h = curl_easy_init();
+    if (!h) return std::string();
+    std::string buf;
+    curl_easy_setopt(h, CURLOPT_URL, "https://curl.se/ca/cacert.pem");
+    curl_easy_setopt(h, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(h, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(h, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(h, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(h, CURLOPT_PROXY, "");
+    curl_easy_setopt(h, CURLOPT_WRITEFUNCTION, caWriteCb);
+    curl_easy_setopt(h, CURLOPT_WRITEDATA, &buf);
+    CURLcode rc = curl_easy_perform(h);
+    curl_easy_cleanup(h);
+    if (rc != CURLE_OK || buf.find("-----BEGIN CERTIFICATE-----") == std::string::npos) {
+        ALOG_WARN("[ca] bootstrap failed:", curl_easy_strerror(rc));
+        return std::string();
+    }
+    const char* home = getenv("HOME");
+    if (!home || !*home) return std::string();
+    const std::string d1 = std::string(home) + "/.config";
+    const std::string d2 = d1 + "/qlvotube";
+    const std::string path = d2 + "/cacert.pem";
+    ::mkdir(d1.c_str(), 0700);
+    ::mkdir(d2.c_str(), 0700);
+    std::ofstream f(path.c_str(), std::ios::binary | std::ios::trunc);
+    if (!f.is_open()) { ALOG_WARN("[ca] bootstrap write failed", path); return std::string(); }
+    f.write(buf.data(), (std::streamsize)buf.size());
+    ALOG_INFO("[ca] bootstrap saved", (long long)buf.size(), "bytes ->", path);
+    return path;
+}
+
+CaState& resolveCa()
+{
+    CaState& s = caState();
+    if (s.resolved) return s;
+    s.resolved = true;                    // 只跑一轮(含失败),不每请求重复探测
+    ALOG_INFO("[ca] detect begin rejected=", (long long)s.rejected.size());
+
+    // step1: libcurl 编译期默认路径
+    if (s.mode == CaState::None) {
+        const std::string def = caDefaultPath();
+        ALOG_INFO("[ca] step1 default-path =", def.empty() ? "(none)" : def,
+                  def.empty() || caRejected(def) ? "(skip)" : "");
+        if (!def.empty() && !caRejected(def) && caFileUsable(def.c_str(), &s.pem)) {
+            s.mode = CaState::DefaultPath; s.path = def;
+        }
+    }
+    // step2: macOS 系统 bundle（Apple 必带）
+    if (s.mode == CaState::None) {
+        const char* p = "/etc/ssl/cert.pem";
+        ALOG_INFO("[ca] step2 probe", p, caRejected(p) ? "(skip)" : "");
+        if (!caRejected(p) && caFileUsable(p, &s.pem)) { s.mode = CaState::SystemPem; s.path = p; }
+    }
+    // step3: Homebrew / vcpkg openssl（逐个候选,已淘汰的跳过）
+    if (s.mode == CaState::None) {
+        const char* cands[] = {
+            "/opt/homebrew/etc/openssl@3/cert.pem",
+            "/usr/local/etc/openssl@3/cert.pem",
+            "/opt/vcpkg/installed/x64-osx-dynamic/etc/openssl/cert.pem",
+        };
+        for (const char* p : cands) {
+            if (caRejected(p)) { ALOG_INFO("[ca] step3 skip rejected", p); continue; }
+            ALOG_INFO("[ca] step3 probe", p);
+            if (caFileUsable(p, &s.pem)) { s.mode = CaState::HomebrewPem; s.path = p; break; }
+        }
+    }
+    // step4: 复用缓存 → 最后才 bootstrap（缓存若也被淘汰则不重复下载）
+    if (s.mode == CaState::None) {
+        const char* home = getenv("HOME");
+        const std::string cached = home ? (std::string(home) + "/.config/qlvotube/cacert.pem") : std::string();
+        if (!cached.empty() && !caRejected(cached) && caFileUsable(cached.c_str(), &s.pem)) {
+            s.mode = CaState::MozillaCache; s.path = cached;
+            ALOG_INFO("[ca] step4 reuse cache", cached);
+        } else if (cached.empty() || !caRejected(cached)) {
+            ALOG_INFO("[ca] step4 bootstrap (all file candidates rejected/unusable)");
+            const std::string p = caBootstrap();
+            if (!p.empty() && caFileUsable(p.c_str(), &s.pem)) {
+                s.mode = CaState::MozillaCache; s.path = p;
+            }
+        } else {
+            ALOG_WARN("[ca] step4 cache rejected, no re-bootstrap");
+        }
+    }
+    // ★ 最终选定模式单独一行输出（用户明确要求）
+    ALOG_INFO("[ca] selected mode=", caModeName(s.mode),
+              "path=", s.path.empty() ? "(none)" : s.path,
+              "pemBytes=", (long long)s.pem.size());
+    return s;
+}
+
+void caApplyTo(CURL* easy)
+{
+    CaState& s = resolveCa();
+    if (s.mode == CaState::None || s.pem.empty()) return;   // 交回 libcurl 默认
+#if LIBCURL_VERSION_NUM >= 0x074D00   /* 7.77: CURLOPT_CAINFO_BLOB */
+    struct curl_blob blob;
+    blob.data = const_cast<char*>(s.pem.data());   // 静态驻留,NOCOPY 安全
+    blob.len  = s.pem.size();
+    blob.flags = CURL_BLOB_NOCOPY;
+    if (curl_easy_setopt(easy, CURLOPT_CAINFO_BLOB, &blob) == CURLE_OK) return;
+    ALOG_WARN("[ca] CAINFO_BLOB unsupported, fallback CAINFO", s.path);
+#endif
+    curl_easy_setopt(easy, CURLOPT_CAINFO, s.path.c_str());
+}
+
+} // namespace
+#endif // Q_OS_DARWIN
 
 std::string webUrlEncode(const std::string& str) {
     CURL* curl = curl_easy_init();
@@ -241,6 +425,12 @@ CURL* EventPoller::buildHandle(const HttpRequest& req,
         blob.flags = CURL_BLOB_NOCOPY;   // 静态缓存，程序生命周期内有效
         curl_easy_setopt(easy, CURLOPT_CAINFO_BLOB, &blob);
     }
+#endif
+
+#ifdef Q_OS_DARWIN
+    // macOS CA 自动修复:仅 https:// 请求触发,一次性探测+逐句柄注入
+    if (ctx->urlStr.compare(0, 8, "https://") == 0)
+        caApplyTo(easy);
 #endif
 
     // 代理：严格只认调用方设定（req.proxy）。
@@ -500,6 +690,26 @@ void EventPoller::run() {
 
                 if (curlResult != 0) {
                     ALOG_WARN("!!", ctx->urlStr, resp.curlErrStr);
+#ifdef Q_OS_DARWIN
+                    if ((CURLcode)curlResult == CURLE_PEER_FAILED_VERIFICATION) {
+                        CaState& s = caState();
+                        ALOG_WARN("[ca] TLS verify failed(60)", ctx->urlStr,
+                                  "current mode=", caModeName(s.mode),
+                                  "path=", s.path.empty() ? "(none)" : s.path);
+                        // 不跳级:淘汰当前候选,下个 https 请求重走候选列表的下一项
+                        if (s.resolved && s.mode != CaState::None) {
+                            if (s.path.empty() || !caRejected(s.path))
+                                s.rejected.push_back(s.path);
+                            ALOG_WARN("[ca] reject candidate", s.path,
+                                      "rejected=", (long long)s.rejected.size(),
+                                      "-> next https request tries next candidate");
+                            s.resolved = false;
+                            s.mode = CaState::None;
+                            s.path.clear();
+                            s.pem.clear();
+                        }
+                    }
+#endif
                 }
                 if (httpCode >= 400 && !resp.body.empty()) {
                     std::string snippet = resp.body.substr(0, 99);

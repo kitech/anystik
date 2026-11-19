@@ -557,6 +557,8 @@ STIKCOMMON_HEADERS += $$STIKCOMMON_DIR/qimage_shim.h \
                       $$STIKCOMMON_DIR/qimagereader_shim.h
 isEmpty(QT_VERSION) {
     STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qimagereader_shim.cpp
+    # stb_image 实现体独立 TU（与 vendor/uc_apng_loader/stb_image.h 并列）
+    STIKCOMMON_SOURCES += $$STIK_VENDOR_DIR/stb/stb_image.c
     # Qt3 快速平滑缩放（Imlib2 面积采样移植，替代慢约 38x 的 QImage::smoothScale）。
     # qImageSmoothScale 声明在 qimage_shim.h；Qt6 侧为头内 inline，无此 .cpp。
     STIKCOMMON_SOURCES += $$STIKCOMMON_DIR/qimagesmoothscale.cpp
@@ -564,7 +566,8 @@ isEmpty(QT_VERSION) {
     STIKCOMMON_SOURCES += $$STIK_VENDOR_DIR/libnsgif/gif.c \
                           $$STIK_VENDOR_DIR/libnsgif/lzw.c
     STIKCOMMON_INCLUDES += $$STIK_VENDOR_DIR/libnsgif \
-                           $$STIK_VENDOR_DIR/uc_apng_loader
+                           $$STIK_VENDOR_DIR/uc_apng_loader \
+                           $$STIK_VENDOR_DIR/stb
     # WebP 动画解码需要 demux；mux 供 WebP 重编码（stickerclipboard.cpp
     # qClipEncodeWebp 的 WebPAnimEncoder）
     LIBS += -lwebp -lwebpdemux -lwebpmux -lm

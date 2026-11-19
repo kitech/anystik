@@ -33,10 +33,9 @@
 #include <tiffio.h>
 #endif
 
-// uc_apng_loader 自己 include stb_image.h，但要求实现体在同 TU 里只出现一次，
-// 因此这里先展开实现体（uc_apng_loader.h 见到 STBI_INCLUDE_STB_IMAGE_H 就跳过）。
+// stb_image 实现体已提取到 vendor/uc_apng_loader/stb_image.c（独立 TU，唯一一份）。
+// 这里只取声明；uc_apng_loader.h 见 STBI_INCLUDE_STB_IMAGE_H 已定义会跳过自带 include。
 // 注意：不能定义 UC_APNG_LOADER_NO_EXCEPTION，否则吞掉损坏文件错误。
-#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 #include "uc_apng_loader.h"
 
