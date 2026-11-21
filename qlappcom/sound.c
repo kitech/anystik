@@ -5,33 +5,164 @@
 #include <stdlib.h>
 #include <string.h>
 
-void playSoundNopcm(const char* filePath) {
-    size_t len = strlen(filePath);
-    int isPcm  = (len >= 4 && strcmp(filePath + len - 4, ".pcm") == 0);
-    int isOpus = (len >= 5 && strcmp(filePath + len - 5, ".opus") == 0);
-    char cmd[1024];
-
 #if defined(_WIN32)
-    (void)isPcm; (void)isOpus;
-    snprintf(cmd, sizeof(cmd),
-        "powershell -c (New-Object Media.SoundPlayer '%s').PlaySync()", filePath);
-#elif defined(__APPLE__)
-    (void)isPcm; (void)isOpus;
-    snprintf(cmd, sizeof(cmd), "afplay \"%s\" &", filePath);
+#  include <windows.h>
+#  include <mmsystem.h>
 #else
-    if (isPcm)
-        snprintf(cmd, sizeof(cmd),
-            "aplay -f S16_LE -r 44100 -c 1 \"%s\" &", filePath);
-    else if (isOpus)
-        snprintf(cmd, sizeof(cmd), "paplay \"%s\" &", filePath);
-    else
-        snprintf(cmd, sizeof(cmd),
-            "( which paplay >/dev/null 2>&1 && paplay \"%s\" ) || aplay \"%s\" &",
-            filePath, filePath);
+#  include <signal.h>
+#  include <spawn.h>
+#  include <sys/types.h>
+#  include <sys/wait.h>
+#  include <unistd.h>
+extern char **environ;
+#  define SND_RATE     44100
+#  define SND_CHANNELS 1
+#  define SND_BITS     16
+static pid_t g_snd_pid = -1;
+
+static void snd_posix_stop(void) {
+    if (g_snd_pid <= 0) {
+        return;
+    }
+    if (waitpid(g_snd_pid, NULL, WNOHANG) == 0) {
+        kill(g_snd_pid, SIGTERM);
+        if (waitpid(g_snd_pid, NULL, WNOHANG) == 0) {
+            kill(g_snd_pid, SIGKILL);
+            waitpid(g_snd_pid, NULL, 0);
+        }
+    }
+    g_snd_pid = -1;
+}
+
+static pid_t snd_spawn(const char* prog, char* const argv[]) {
+    pid_t pid = -1;
+    if (posix_spawnp(&pid, prog, NULL, NULL, argv, environ) != 0) {
+        return -1;
+    }
+    return pid;
+}
 #endif
 
-    if (system(cmd) == -1)
-        fprintf(stderr, "playSoundNopcm: system() failed\n");
+#if defined(_WIN32)
+static HWAVEOUT g_wo;
+static WAVEHDR  g_wh;
+static char*    g_pcm;
+
+static void snd_win_stop(void) {
+    if (g_wo) {
+        waveOutReset(g_wo);
+        if (g_wh.lpData) {
+            waveOutUnprepareHeader(g_wo, &g_wh, sizeof(g_wh));
+        }
+        waveOutClose(g_wo);
+        g_wo = NULL;
+    }
+    if (g_pcm) {
+        free(g_pcm);
+        g_pcm = NULL;
+    }
+    memset(&g_wh, 0, sizeof(g_wh));
+}
+
+static int snd_win_play_pcm(const char* filePath) {
+    FILE* f;
+    long sz;
+    char* data;
+    WAVEFORMATEX wf;
+
+    snd_win_stop();
+    f = fopen(filePath, "rb");
+    if (!f) {
+        return -1;
+    }
+    fseek(f, 0, SEEK_END);
+    sz = ftell(f);
+    rewind(f);
+    if (sz <= 0) {
+        fclose(f);
+        return -1;
+    }
+    data = (char*)malloc((size_t)sz);
+    if (!data) {
+        fclose(f);
+        return -1;
+    }
+    if (fread(data, 1, (size_t)sz, f) != (size_t)sz) {
+        free(data);
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    memset(&wf, 0, sizeof(wf));
+    wf.wFormatTag      = WAVE_FORMAT_PCM;
+    wf.nChannels       = SND_CHANNELS;
+    wf.nSamplesPerSec  = SND_RATE;
+    wf.wBitsPerSample  = SND_BITS;
+    wf.nBlockAlign     = (WORD)(SND_CHANNELS * SND_BITS / 8);
+    wf.nAvgBytesPerSec = SND_RATE * wf.nBlockAlign;
+
+    if (waveOutOpen(&g_wo, WAVE_MAPPER, &wf, 0, 0, CALLBACK_NULL) != MMSYSERR_NOERROR) {
+        g_wo = NULL;
+        free(data);
+        return -1;
+    }
+    g_wh.lpData         = data;
+    g_wh.dwBufferLength = (DWORD)sz;
+    if (waveOutPrepareHeader(g_wo, &g_wh, sizeof(g_wh)) != MMSYSERR_NOERROR ||
+        waveOutWrite(g_wo, &g_wh, sizeof(g_wh)) != MMSYSERR_NOERROR) {
+        snd_win_stop();
+        return -1;
+    }
+    g_pcm = data;
+    return 0;
+}
+#endif
+
+void playSoundNopcm(const char* filePath) {
+    size_t len;
+    int isPcm;
+    int isOpus;
+
+    if (!filePath || !filePath[0]) {
+        return;
+    }
+    len = strlen(filePath);
+    isPcm  = (len >= 4 && strcmp(filePath + len - 4, ".pcm") == 0);
+    isOpus = (len >= 5 && strcmp(filePath + len - 5, ".opus") == 0);
+
+#if defined(_WIN32)
+    (void)isOpus;
+    if (isPcm && snd_win_play_pcm(filePath) == 0) {
+        return;
+    }
+    snd_win_stop();
+    PlaySoundA(filePath, NULL, SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+#elif defined(__APPLE__)
+    (void)isPcm; (void)isOpus;
+    {
+        char* afplay[] = {"afplay", (char*)filePath, NULL};
+        snd_posix_stop();
+        g_snd_pid = snd_spawn("afplay", afplay);
+    }
+#else
+    snd_posix_stop();
+    if (isPcm) {
+        char* pcm[] = {"aplay", "-q", "-f", "S16_LE", "-r", "44100", "-c", "1",
+                       (char*)filePath, NULL};
+        g_snd_pid = snd_spawn("aplay", pcm);
+    } else if (isOpus) {
+        char* pa[] = {"paplay", (char*)filePath, NULL};
+        g_snd_pid = snd_spawn("paplay", pa);
+    } else {
+        char* pa[] = {"paplay", (char*)filePath, NULL};
+        char* ap[] = {"aplay", "-q", (char*)filePath, NULL};
+        g_snd_pid = snd_spawn("paplay", pa);
+        if (g_snd_pid < 0) {
+            g_snd_pid = snd_spawn("aplay", ap);
+        }
+    }
+#endif
 }
 
 void playSoundPcm(const char* filePath) {
